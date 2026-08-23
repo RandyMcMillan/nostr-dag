@@ -1530,7 +1530,7 @@
         setDepsStatus(`cached ${done}/${dependencyUrls.length}`);
       } catch (e) {
         setDepsStatus('unavailable');
-        console.warn('dependency cache bootstrap failed:', e);
+        window.__sharedFooter?.log('deps', `dependency cache bootstrap failed: ${e.message}`, 'warn', 'unavailable');
       }
     }
 

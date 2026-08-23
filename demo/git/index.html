@@ -881,7 +881,7 @@
         const exists = await pathExists(dir);
         if (!exists) {
           setRepoStatus(repo.name, 'cloning...');
-          footer.log('git', `${repo.name} cloning${route ? ` (${progressContextLabel(route)})` : ''}`, 'trace');
+          footer.log('git', `${repo.name} cloning${route ? ` (${progressContextLabel(route)})` : ''}`, 'debug');
           await ensureDir(dir);
           await git.clone({
             fs,
@@ -900,15 +900,16 @@
           });
         } else {
           setRepoStatus(repo.name, 'reusing cached clone...');
-          footer.log('git', `${repo.name} reusing cached clone`, 'trace');
+          footer.log('git', `${repo.name} reusing cached clone`, 'info');
         }
       } catch (e) {
         setRepoStatus(repo.name, `prepare failed: ${e.message}`);
+        footer.log('git', `prepare failed: ${e.message}`, 'error', 'unavailable');
         throw e;
       }
 
       setRepoStatus(repo.name, 'fetching tags...');
-      footer.log('git', `${repo.name} fetching tags${route ? ` (${progressContextLabel(route)})` : ''}`, 'trace');
+      footer.log('git', `${repo.name} fetching tags${route ? ` (${progressContextLabel(route)})` : ''}`, 'debug');
       await fetchRepoRefs(repo, route, (progress) => {
         const message = getGitProgressReporter(repo, 'fetch')(progress);
         if (message) {
@@ -916,6 +917,7 @@
         }
       }).catch(() => {});
       setRepoStatus(repo.name, 'ready');
+      footer.log('git', `${repo.name} ready`, 'info', 'available');
     }
 
     async function fetchRepoRefs(repo, route = null, onProgress = null) {
@@ -1461,7 +1463,7 @@
       } catch (e) {
         if (route) setRepoHealth(repo.name, 'unavailable');
         setRepoStatus(repo.name, `refresh failed: ${e.message}`);
-        footer.log('git', `refresh failed: ${e.message}`, 'trace', 'unavailable');
+        footer.log('git', `refresh failed: ${e.message}`, 'error', 'unavailable');
         footer.log('git', `viewer failed: ${e.message}`, 'warn', 'unavailable');
       }
     }
@@ -1469,11 +1471,11 @@
     async function refreshList() {
       try {
         setStatus('loading repos...', 'checking');
-        footer.log('git', `refreshing ${repos.length} repos`, 'trace');
+        footer.log('git', `refreshing ${repos.length} repos`, 'debug');
         repos.forEach((repo) => {
           setRepoStatus(repo.name, 'refreshing...');
           setRepoHealth(repo.name, 'checking');
-          footer.log('git', `checking ${repo.name}`, 'trace');
+          footer.log('git', `checking ${repo.name}`, 'debug');
         });
         renderApp();
         const route = getRouteContext();
@@ -1489,14 +1491,14 @@
           try {
             footer.log('git', `probing ${repo.name}`, 'trace');
             const probe = probeRemoteHost(repo).catch(() => false);
-            footer.log('git', `ensuring ${repo.name}`, 'trace');
+            footer.log('git', `ensuring ${repo.name}`, 'debug');
             await ensureRepo(repo, repoRoute);
             footer.log('git', `reading ${repo.name}`, 'trace');
             const data = await readRepo(repo, repoRoute);
             cacheRepoData(repo.name, data);
             setRepoHealth(repo.name, (await probe) ? 'available' : 'unavailable');
             setRepoStatus(repo.name, 'ready');
-            footer.log('git', `ready ${repo.name}`, 'trace');
+            footer.log('git', `ready ${repo.name}`, 'info', 'available');
             dataByRepo.set(repo.name, data);
             if (repoRoute) {
               const cache = loadRepoCache();
@@ -1505,7 +1507,7 @@
               )));
             }
           } catch (e) {
-            footer.log('git', `${repo.name} failed: ${e.message}`, 'trace', 'unavailable');
+            footer.log('git', `${repo.name} failed: ${e.message}`, 'error', 'unavailable');
             setRepoStatus(repo.name, `refresh failed: ${e.message}`);
             setRepoHealth(repo.name, 'unavailable');
           }
@@ -1517,7 +1519,7 @@
         setStatus(readyCount === repos.length ? 'ready' : `partial: ${readyCount}/${repos.length} repos ready`, readyCount === repos.length ? 'available' : 'checking');
       } catch (e) {
         setStatus(`unavailable: ${e.message}`, 'unavailable');
-        footer.log('git', `viewer failed: ${e.message}`, 'warn', 'unavailable');
+        footer.log('git', `viewer failed: ${e.message}`, 'error', 'unavailable');
       }
     }
 
@@ -1541,7 +1543,7 @@
       } catch (e) {
         setRepoHealth(route.repo.name, 'unavailable');
         setStatus(`unavailable: ${e.message}`, 'unavailable');
-        footer.log('git', `viewer failed: ${e.message}`, 'warn', 'unavailable');
+        footer.log('git', `viewer failed: ${e.message}`, 'error', 'unavailable');
       }
     }
 

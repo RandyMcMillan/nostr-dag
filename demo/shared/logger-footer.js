@@ -17,7 +17,7 @@ function normalizeState(text, fallback = 'idle') {
   return fallback;
 }
 
-const LOG_LEVELS = ['none', 'info', 'debug', 'trace', 'warn'];
+const LOG_LEVELS = ['none', 'info', 'debug', 'trace', 'warn', 'error'];
 const STORAGE_PREFIX = 'nostr-dag.logger-footer';
 const FOOTER_SPACER_VAR = '--sticky-footer-space';
 const SCROLLBAR_ACTIVE_CLASS = 'scrollbars-active';
@@ -42,7 +42,7 @@ function parseLogArgs(levelOrState = 'info', maybeState = null) {
 
 function deriveLevelFromState(state) {
   const value = String(state || '').toLowerCase();
-  if (value.includes('unavailable') || value.includes('failed') || value.includes('error')) return 'warn';
+  if (value.includes('unavailable') || value.includes('failed') || value.includes('error')) return 'error';
   if (value.includes('checking') || value.includes('refresh') || value.includes('loading') || value.includes('cloning') || value.includes('fetching') || value.includes('caching') || value.includes('starting') || value.includes('reading') || value.includes('writing') || value.includes('committing')) return 'debug';
   return 'info';
 }
