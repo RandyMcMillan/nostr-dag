@@ -15,6 +15,7 @@ crate-type = ["cdylib", "rlib"]
 nostr = { version = "0.44", default-features = false, features = ["std"] }
 nostr-relay-pool = { version = "0.44.3", optional = true }
 rand = "0.8"
+serde = { version = "1", features = ["derive"], optional = true }
 thiserror = "1.0"
 tokio = { version = "1", features = ["full"], optional = true }
 tracing = "0.1"
@@ -50,7 +51,7 @@ required-features = ["native"]
 
 [features]
 default = []
-native = ["dep:tokio", "dep:tracing-subscriber", "dep:nostr-relay-pool"]
+native = ["dep:tokio", "dep:tracing-subscriber", "dep:nostr-relay-pool", "dep:serde", "dep:serde_json"]
 relay = ["native", "dep:nostr-relay-builder"]
 wasm = ["dep:wasm-bindgen", "dep:getrandom", "dep:serde-wasm-bindgen", "dep:serde_json"]
 
