@@ -8,6 +8,7 @@ use std::env;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use tokio::fs;
@@ -22,6 +23,7 @@ const DEFAULT_PORT: u16 = 3000;
 const DEFAULT_SITE_DIR: &str = "site";
 const LOGGER_ROUTE_PREFIX: &str = "/logger";
 const LOGGER_MAX_ENTRIES: usize = 10_000;
+const PEERS_ROUTE_PREFIX: &str = "/peers";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct LoggerEntry {
@@ -36,6 +38,21 @@ struct LoggerEntry {
 #[derive(Default)]
 struct LoggerStore {
     entries: Mutex<Vec<LoggerEntry>>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct PeerEntry {
+    peer_id: String,
+    kind: String,
+    path: String,
+    detail: Option<String>,
+    source: Option<String>,
+    updated_at: u64,
+}
+
+#[derive(Default)]
+struct PeerStore {
+    entries: Mutex<std::collections::BTreeMap<String, PeerEntry>>,
 }
 
 impl LoggerStore {
@@ -65,6 +82,22 @@ impl LoggerStore {
     }
 }
 
+impl PeerStore {
+    fn upsert(&self, entry: PeerEntry) {
+        let mut entries = self.entries.lock().expect("peer store poisoned");
+        entries.insert(format!("{}:{}", entry.path, entry.peer_id), entry);
+    }
+
+    fn all(&self) -> Vec<PeerEntry> {
+        self.entries
+            .lock()
+            .expect("peer store poisoned")
+            .values()
+            .cloned()
+            .collect()
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
@@ -81,6 +114,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or(DEFAULT_PORT);
     let site_dir = env::var("SITE_DIR").unwrap_or_else(|_| DEFAULT_SITE_DIR.to_string());
     let logger_store = Arc::new(LoggerStore::default());
+    let peer_store = Arc::new(PeerStore::default());
 
     let addr = format!("{host}:{port}");
     let listener = TcpListener::bind(&addr).await?;
@@ -94,8 +128,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let (stream, peer) = result?;
                 let site_dir = site_dir.clone();
                 let logger_store = Arc::clone(&logger_store);
+                let peer_store = Arc::clone(&peer_store);
                 tokio::spawn(async move {
-                    if let Err(err) = handle_connection(stream, &site_dir, logger_store).await {
+                    if let Err(err) = handle_connection(stream, &site_dir, logger_store, peer_store).await {
                         error!(%peer, ?err, "request failed");
                     }
                 });
@@ -114,6 +149,7 @@ async fn handle_connection(
     mut stream: TcpStream,
     site_dir: &str,
     logger_store: Arc<LoggerStore>,
+    peer_store: Arc<PeerStore>,
 ) -> io::Result<()> {
     let request = read_http_request(&mut stream).await?;
     if request.is_empty() {
@@ -138,6 +174,14 @@ async fn handle_connection(
                 response_text(400, "Bad Request", "Bad Request", "text/plain; charset=utf-8")
             }
         }
+    } else if method == "POST" && (path == PEERS_ROUTE_PREFIX || path.starts_with("/peers/")) {
+        match handle_peer_post(body, &peer_store) {
+            Ok(()) => response_bytes(204, "No Content", Vec::new(), "text/plain; charset=utf-8", true),
+            Err(err) => {
+                error!(?err, "peer ingest failed");
+                response_text(400, "Bad Request", "Bad Request", "text/plain; charset=utf-8")
+            }
+        }
     } else if method != "GET" && method != "HEAD" {
         info!(%method, %path, "rejecting unsupported method");
         response_text(405, "Method Not Allowed", "Method Not Allowed", "text/plain; charset=utf-8")
@@ -152,6 +196,20 @@ async fn handle_connection(
             }
             Err(RouteError::Io(err)) => {
                 error!(?err, path = %path, "failed to serve logger payload");
+                response_text(500, "Internal Server Error", "Internal Server Error", "text/plain; charset=utf-8")
+            }
+        }
+    } else if path == PEERS_ROUTE_PREFIX || path.starts_with("/peers/") {
+        match handle_peer_get(path, &peer_store) {
+            Ok((body, content_type)) => response_bytes(200, "OK", body, content_type, head_only),
+            Err(RouteError::BadRequest) => {
+                response_text(400, "Bad Request", "Bad Request", "text/plain; charset=utf-8")
+            }
+            Err(RouteError::NotFound) => {
+                response_text(404, "Not Found", "Not Found", "text/plain; charset=utf-8")
+            }
+            Err(RouteError::Io(err)) => {
+                error!(?err, path = %path, "failed to serve peer payload");
                 response_text(500, "Internal Server Error", "Internal Server Error", "text/plain; charset=utf-8")
             }
         }
@@ -231,6 +289,24 @@ fn handle_logger_post(body: &str, logger_store: &Arc<LoggerStore>) -> Result<(),
     Ok(())
 }
 
+fn handle_peer_post(body: &str, peer_store: &Arc<PeerStore>) -> Result<(), RouteError> {
+    let mut entry: PeerEntry = serde_json::from_str(body).map_err(|_| RouteError::BadRequest)?;
+    if entry.peer_id.trim().is_empty() {
+        return Err(RouteError::BadRequest);
+    }
+    if entry.kind.trim().is_empty() {
+        entry.kind = "started".to_string();
+    }
+    if entry.path.trim().is_empty() {
+        entry.path = "/".to_string();
+    }
+    if entry.updated_at == 0 {
+        entry.updated_at = now_ms();
+    }
+    peer_store.upsert(entry);
+    Ok(())
+}
+
 fn handle_logger_get(path: &str, logger_store: &Arc<LoggerStore>) -> Result<(Vec<u8>, &'static str), RouteError> {
     let level = path.trim_start_matches("/logger/").trim();
     let payload = if level.is_empty() || level == "all" {
@@ -241,6 +317,30 @@ fn handle_logger_get(path: &str, logger_store: &Arc<LoggerStore>) -> Result<(Vec
     serde_json::to_vec(&payload)
         .map(|body| (body, "application/json; charset=utf-8"))
         .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))
+}
+
+fn handle_peer_get(path: &str, peer_store: &Arc<PeerStore>) -> Result<(Vec<u8>, &'static str), RouteError> {
+    let suffix = path.trim_start_matches("/peers").trim_start_matches('/');
+    let peers = peer_store.all();
+    let payload = if suffix.is_empty() || suffix == "all" {
+        peers
+    } else {
+        peers
+            .into_iter()
+            .filter(|entry| entry.peer_id == suffix || entry.path == suffix)
+            .collect()
+    };
+
+    serde_json::to_vec(&payload)
+        .map(|body| (body, "application/json; charset=utf-8"))
+        .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 async fn route_path(site_dir: &str, path: &str) -> Result<(Vec<u8>, &'static str), RouteError> {

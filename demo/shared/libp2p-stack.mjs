@@ -44,7 +44,48 @@ const emitPeerEvent = (onPeer, onLog, kind, event, level = "debug", state = "che
   onPeer?.({ kind, peer, detail });
   emitLog(onLog, level, `peer ${kind}: ${peer}`, state);
   emitLog(onLog, "trace", `peer ${kind} detail: ${describePeerDetail(detail)}`, state);
+  reportPeers({
+    peer_id: globalThis.__currentLibp2pPeerId || peer,
+    kind: `peer:${kind}`,
+    path: globalThis.location?.pathname || "/",
+    detail: describePeerDetail(detail),
+    source: globalThis.location?.pathname || "/",
+    updated_at: Date.now(),
+  });
 };
+
+const PEERS_ENDPOINT = "/peers";
+
+function shouldReportPeers() {
+  try {
+    const host = globalThis.location?.hostname || "";
+    return host === "localhost" || host === "127.0.0.1" || host === "::1";
+  } catch {
+    return false;
+  }
+}
+
+function reportPeers(payload) {
+  if (!shouldReportPeers()) return;
+  const body = JSON.stringify(payload);
+  try {
+    if (globalThis.navigator?.sendBeacon) {
+      const blob = new Blob([body], { type: "application/json" });
+      globalThis.navigator.sendBeacon(PEERS_ENDPOINT, blob);
+      return;
+    }
+  } catch {
+    // best effort only
+  }
+
+  void globalThis.fetch?.(PEERS_ENDPOINT, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body,
+    keepalive: true,
+    cache: "no-store",
+  }).catch(() => {});
+}
 
 export async function createSharedLibp2pStack({
   bootstrapPeers = DEFAULT_BOOTSTRAP_PEERS,
@@ -100,6 +141,14 @@ export async function createSharedLibp2pStack({
   });
   node.addEventListener("peer:disconnect", (event) => {
     emitPeerEvent(onPeer, onLog, "disconnected", event, "warn", "checking");
+    reportPeers({
+      peer_id: node.peerId.toString(),
+      kind: "peer:disconnect",
+      path: globalThis.location?.pathname || "/",
+      detail: describePeerDetail(event?.detail),
+      source: globalThis.location?.pathname || "/",
+      updated_at: Date.now(),
+    });
   });
   node.addEventListener("error", (event) => {
     const message = event?.detail?.message || event?.message || "libp2p error";
@@ -111,6 +160,15 @@ export async function createSharedLibp2pStack({
   emitLog(onLog, "trace", "shared libp2p node started", "available");
   emitLog(onLog, "trace", `listen addrs: ${node.getMultiaddrs?.().map?.((m) => m.toString()).join(" | ") || "n/a"}`, "available");
   onStatus?.("started", node.peerId.toString());
+  globalThis.__currentLibp2pPeerId = node.peerId.toString();
+  reportPeers({
+    peer_id: node.peerId.toString(),
+    kind: "started",
+    path: globalThis.location?.pathname || "/",
+    detail: node.getMultiaddrs?.().map?.((m) => m.toString()).join(" | ") || "n/a",
+    source: globalThis.location?.pathname || "/",
+    updated_at: Date.now(),
+  });
   emitLog(onLog, "info", `node started: ${node.peerId.toString()}`, "available");
   emitLog(onLog, "debug", `peer id stable: ${node.peerId.toString()}`, "available");
 
