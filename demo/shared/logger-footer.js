@@ -126,6 +126,7 @@ export function createLoggerFooter(root, options = {}) {
   const title = options.title || 'Logger';
   const initialState = options.initialState || 'idle';
   const initialTitle = options.initialTitle || 'starting...';
+  const maxEntries = Number.isFinite(options.maxEntries) && options.maxEntries > 0 ? options.maxEntries : 1000;
   const storageKey = resolveStorageKey(title, options.storageKey);
   const persisted = loadPersistedFooterState(storageKey);
 
@@ -291,7 +292,7 @@ export function createLoggerFooter(root, options = {}) {
       text: String(text),
       level: nextLevel,
     });
-    while (logs.length > 24) logs.shift();
+    while (logs.length > maxEntries) logs.shift();
     setState(state || normalizeState(text), label ? `${label}: ${text}` : String(text));
     render();
   }

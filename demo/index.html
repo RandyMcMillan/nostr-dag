@@ -1358,7 +1358,9 @@
       title: 'Logger',
       initialState: 'idle',
       initialTitle: 'starting...',
+      initialLevel: 'trace',
     });
+    window.__sharedFooter.setLevel('trace');
     while (sharedFooterLogBuffer.length) {
       const [label, text, levelOrState, maybeState] = sharedFooterLogBuffer.shift();
       window.__sharedFooter.log(label, text, levelOrState, maybeState);

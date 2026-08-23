@@ -152,6 +152,7 @@
   <script type="module">
     import { createSharedHeader } from '../shared/page-header.mjs';
     import { createLoggerFooter } from '../shared/logger-footer.js';
+    import { createSharedLibp2pStack } from '../shared/libp2p-stack.mjs';
     import { remoteTagNames } from '../shared/git-refs.mjs';
     import { createGitProgressReporter } from '../shared/git-progress.mjs';
     import { resolveHref } from '../shared/page-path.js';
@@ -160,7 +161,8 @@
     import LightningFS from 'https://cdn.jsdelivr.net/npm/@isomorphic-git/lightning-fs@4.6.0/+esm';
 
     const fs = new LightningFS('git-viewer');
-    const footer = createLoggerFooter(document.getElementById('pageFooter'), { title: 'Logger', initialState: 'idle', initialTitle: 'starting...' });
+    const footer = createLoggerFooter(document.getElementById('pageFooter'), { title: 'Logger', initialState: 'idle', initialTitle: 'starting...', initialLevel: 'trace' });
+    footer.setLevel('trace');
     const statusEl = document.getElementById('status');
     const viewEl = document.getElementById('view');
     const repos = [
@@ -185,6 +187,25 @@
         { label: 'Blame', href: resolveHref('./blame.html', window.location.href), current: true },
       ],
     });
+
+    async function initGitP2P() {
+      try {
+        const { node } = await createSharedLibp2pStack({
+          onLog(level, text, state) {
+            footer.log('libp2p', text, level, state);
+          },
+          onPeer({ kind, peer, detail }) {
+            footer.log('libp2p', `${kind}: ${peer}`, 'debug', kind === 'connected' ? 'available' : 'checking');
+            footer.log('libp2p', `${kind} detail: ${detail ? JSON.stringify(detail) : 'none'}`, 'trace', kind === 'connected' ? 'available' : 'checking');
+          },
+        });
+        window.__gitBlameP2pNode = node;
+        footer.log('libp2p', `node ready: ${node.peerId.toString()}`, 'info', 'available');
+      } catch (e) {
+        footer.log('libp2p', `bootstrap failed: ${e.message}`, 'error', 'unavailable');
+      }
+    }
+    void initGitP2P();
 
     function escapeHtml(value) { return String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;'); }
     function setStatus(text, state = 'idle') { statusEl.className = `status status-${state}`; statusEl.title = text; const level = state === 'unavailable' ? 'error' : state === 'checking' ? 'debug' : 'info'; footer.log('git', text, level, state); }
