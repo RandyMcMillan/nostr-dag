@@ -150,6 +150,7 @@ wss://nostr.wine</textarea>
       relayPublishCountEl.textContent = String(metrics.relayPublishes);
     }
 
+    // Keep one merged peer registry in the browser so the bridge works on Pages and localhost.
     function upsertPeer(source, peer) {
       if (!peer?.peer_id) return;
       const key = `${source}:${peer.path || '/'}:${peer.peer_id}:${peer.kind || 'unknown'}`;
@@ -190,6 +191,7 @@ wss://nostr.wine</textarea>
       `).join('');
     }
 
+    // Poll the local preview server when available. Pages deployments just render browser peers.
     async function pollPeers() {
       try {
         const response = await fetch('/peers', { cache: 'no-store' });
@@ -283,6 +285,7 @@ wss://nostr.wine</textarea>
       }
     }
 
+    // Start with the strongest transport set and fall back until libp2p accepts the browser runtime.
     async function startBridge() {
       if (started) return;
       started = true;
@@ -292,9 +295,11 @@ wss://nostr.wine</textarea>
       setStatus('starting libp2p node', 'checking');
       try {
         const configs = [
+          // Prefer hole punching-capable transports first.
           { includeWebRTC: true, includeWebRTCDirect: true, includeCircuitRelay: true },
           { includeWebRTC: true, includeWebRTCDirect: false, includeCircuitRelay: true },
           { includeWebRTC: true, includeWebRTCDirect: false, includeCircuitRelay: false },
+          // Final fallback: a plain browser node that still can report peers and join pubsub.
           { includeWebRTC: false, includeWebRTCDirect: false, includeCircuitRelay: false },
         ];
 
