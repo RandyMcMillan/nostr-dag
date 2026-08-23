@@ -1165,7 +1165,8 @@
       const list = [...events.values()]
         .filter((event) => event.kind !== 0)
         .sort((a, b) => a.created_at - b.created_at || a.id.localeCompare(b.id));
-      const threshold = Math.floor(participants.length / 2);
+      const requiredSeen = participants.length ? Math.ceil(participants.length * 4 / 5) : 0;
+      const threshold = requiredSeen > 0 ? requiredSeen - 1 : 0;
       const relayList = [...RELAYS].sort();
       const quorumMembers = [...participants].sort((a, b) => a.name.localeCompare(b.name));
       profileStripEl.innerHTML = quorumMembers.map((p) => {
@@ -1216,7 +1217,7 @@
       stateListEl.innerHTML = `
         <li>${list.length} events</li>
         <li>${canonical.size} canonical</li>
-        <li>threshold &gt; ${threshold} of ${participants.length}</li>
+        <li>canonical when seen by &gt; ${threshold} (${requiredSeen} of ${participants.length})</li>
         <li>quorum members (${quorumMembers.length}):
           <ul style="margin:6px 0 0 16px;">
             ${quorumMemberMarkup}
