@@ -310,8 +310,8 @@
 
     function logNostrEvent(action, event, level = 'trace', state = 'checking') {
       const kind = event?.kind ?? '?';
-      const id = short(event?.id);
-      const pubkey = short(event?.pubkey);
+      const id = event?.id || '-';
+      const pubkey = event?.pubkey || '-';
       window.__sharedFooter?.log('nostr', `${action} kind ${kind} ${id} by ${pubkey}`, level, state);
     }
 
