@@ -115,13 +115,12 @@ async fn handle_connection(
     site_dir: &str,
     logger_store: Arc<LoggerStore>,
 ) -> io::Result<()> {
-    let mut buffer = [0u8; 8192];
-    let bytes_read = stream.read(&mut buffer).await?;
-    if bytes_read == 0 {
+    let request = read_http_request(&mut stream).await?;
+    if request.is_empty() {
         return Ok(());
     }
 
-    let request = String::from_utf8_lossy(&buffer[..bytes_read]);
+    let request = String::from_utf8_lossy(&request);
     let mut lines = request.lines();
     let request_line = lines.next().unwrap_or_default();
     let mut parts = request_line.split_whitespace();
@@ -180,6 +179,46 @@ async fn handle_connection(
     stream.write_all(&response).await?;
     stream.shutdown().await?;
     Ok(())
+}
+
+async fn read_http_request(stream: &mut TcpStream) -> io::Result<Vec<u8>> {
+    let mut buffer = Vec::with_capacity(8192);
+    let mut chunk = [0u8; 4096];
+
+    loop {
+        let bytes_read = stream.read(&mut chunk).await?;
+        if bytes_read == 0 {
+            break;
+        }
+
+        buffer.extend_from_slice(&chunk[..bytes_read]);
+
+        if let Some((header_end, content_length)) = request_lengths(&buffer) {
+            let body_len = buffer.len().saturating_sub(header_end);
+            if body_len >= content_length {
+                break;
+            }
+        }
+    }
+
+    Ok(buffer)
+}
+
+fn request_lengths(buffer: &[u8]) -> Option<(usize, usize)> {
+    let header_end = buffer.windows(4).position(|window| window == b"\r\n\r\n")? + 4;
+    let headers = std::str::from_utf8(&buffer[..header_end]).ok()?;
+    let content_length = headers
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            if name.eq_ignore_ascii_case("content-length") {
+                value.trim().parse::<usize>().ok()
+            } else {
+                None
+            }
+        })
+        .unwrap_or(0);
+    Some((header_end, content_length))
 }
 
 fn request_body(request: &str) -> &str {
