@@ -38,6 +38,7 @@ const emitLog = (onLog, level, text, state = "checking") => {
   }
 };
 
+// Report every peer lifecycle transition to the UI and optional local /peers registry.
 const emitPeerEvent = (onPeer, onLog, kind, event, level = "debug", state = "checking") => {
   const peer = peerLabel(event);
   const detail = event?.detail || null;
@@ -87,6 +88,11 @@ function reportPeers(payload) {
   }).catch(() => {});
 }
 
+// Create the shared browser libp2p stack used by the demo, git viewer, blame view, and bridge.
+//
+// Transport flags let callers trim the stack for environments that reject certain browser
+// transport combinations. The default keeps hole punching paths enabled; callers may disable
+// them one by one and still get a working webSockets-only node as a final fallback.
 export async function createSharedLibp2pStack({
   bootstrapPeers = DEFAULT_BOOTSTRAP_PEERS,
   includeWebRTC = true,
