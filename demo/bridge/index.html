@@ -55,7 +55,7 @@ wss://nostr.wine</textarea>
       <div class="row" style="justify-content:space-between;">
         <div>
           <h2 style="margin:0 0 6px;">Peers</h2>
-          <div class="small muted">Live registry from <code>/peers</code>.</div>
+          <div class="small muted">Live local browser peers plus the optional localhost <code>/peers</code> registry.</div>
         </div>
         <div class="pill">Count: <b id="peerCount">0</b></div>
       </div>
@@ -119,6 +119,8 @@ wss://nostr.wine</textarea>
     let relays = DEFAULT_RELAYS.slice();
     let started = false;
     let peerPollTimer = null;
+    const localPeers = new Map();
+    const remotePeers = new Map();
 
     const sharedFooterLogBuffer = window.__sharedFooterLogBuffer || [];
     window.__sharedFooterLogBuffer = sharedFooterLogBuffer;
@@ -148,7 +150,27 @@ wss://nostr.wine</textarea>
       relayPublishCountEl.textContent = String(metrics.relayPublishes);
     }
 
-    function renderPeers(peers) {
+    function upsertPeer(source, peer) {
+      if (!peer?.peer_id) return;
+      const key = `${source}:${peer.path || '/'}:${peer.peer_id}:${peer.kind || 'unknown'}`;
+      const record = {
+        ...peer,
+        source: peer.source || source,
+        updated_at: peer.updated_at || Date.now(),
+      };
+      if (source === 'browser') {
+        localPeers.set(key, record);
+      } else {
+        remotePeers.set(key, record);
+      }
+    }
+
+    function allPeers() {
+      return [...localPeers.values(), ...remotePeers.values()].sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0));
+    }
+
+    function renderPeers() {
+      const peers = allPeers();
       peerCountEl.textContent = String(peers.length);
       if (!peers.length) {
         peerListEl.innerHTML = '<div class="small muted">No peers reported yet.</div>';
@@ -173,9 +195,13 @@ wss://nostr.wine</textarea>
         const response = await fetch('/peers', { cache: 'no-store' });
         if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
         const peers = await response.json();
-        renderPeers(Array.isArray(peers) ? peers : []);
+        remotePeers.clear();
+        for (const peer of Array.isArray(peers) ? peers : []) {
+          upsertPeer('localhost', peer);
+        }
+        renderPeers();
       } catch (e) {
-        peerListEl.innerHTML = `<div class="small muted">Peers unavailable: ${e.message}</div>`;
+        renderPeers();
       }
     }
 
@@ -265,21 +291,50 @@ wss://nostr.wine</textarea>
 
       setStatus('starting libp2p node', 'checking');
       try {
-        const stack = await createSharedLibp2pStack({
-          includeWebRTC: false,
-          includeWebRTCDirect: false,
-          includeCircuitRelay: false,
-          onLog(level, text, state) {
-            window.__sharedFooter?.log('libp2p', text, level, state);
-          },
-          onPeer(peer) {
-            window.__sharedFooter?.log('libp2p', `${peer.kind} ${peer.peer}`, 'trace', 'checking');
-          },
-          onStatus(state, peerId) {
-            setStatus(`${state} ${peerId}`, state === 'started' ? 'available' : 'checking');
-          },
-        });
-        node = stack.node;
+        const configs = [
+          { includeWebRTC: true, includeWebRTCDirect: true, includeCircuitRelay: true },
+          { includeWebRTC: true, includeWebRTCDirect: false, includeCircuitRelay: true },
+          { includeWebRTC: true, includeWebRTCDirect: false, includeCircuitRelay: false },
+          { includeWebRTC: false, includeWebRTCDirect: false, includeCircuitRelay: false },
+        ];
+
+        let lastError = null;
+        for (const config of configs) {
+          try {
+            const stack = await createSharedLibp2pStack({
+              ...config,
+              onLog(level, text, state) {
+                window.__sharedFooter?.log('libp2p', text, level, state);
+              },
+              onPeer(peer) {
+                window.__sharedFooter?.log('libp2p', `${peer.kind} ${peer.peer}`, 'trace', 'checking');
+                upsertPeer('browser', {
+                  peer_id: peer.peer,
+                  kind: peer.kind,
+                  path: window.location.pathname || '/',
+                  detail: peer.detail ? JSON.stringify(peer.detail) : 'none',
+                  source: 'browser',
+                  updated_at: Date.now(),
+                });
+                renderPeers();
+              },
+              onStatus(state, peerId) {
+                setStatus(`${state} ${peerId}`, state === 'started' ? 'available' : 'checking');
+              },
+            });
+            node = stack.node;
+            window.__sharedFooter?.log('bridge', `bridge p2p config ok: ${JSON.stringify(config)}`, 'debug', 'available');
+            lastError = null;
+            break;
+          } catch (e) {
+            lastError = e;
+            window.__sharedFooter?.log('bridge', `p2p config failed: ${JSON.stringify(config)} (${e.message})`, 'warn', 'unavailable');
+          }
+        }
+
+        if (!node) {
+          throw lastError || new Error('unable to start libp2p');
+        }
 
         await node.services.pubsub.subscribe(topic);
         node.services.pubsub.addEventListener('message', (evt) => {
