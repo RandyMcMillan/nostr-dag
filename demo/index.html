@@ -238,12 +238,7 @@
     import { finalizeEvent, getPublicKey } from 'https://esm.sh/nostr-tools@2.10.4/pure';
     import { neventEncode, npubEncode } from 'https://esm.sh/nostr-tools@2.10.4/nip19';
     import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
-    import { createLibp2p } from 'https://esm.sh/libp2p';
-    import { identify } from 'https://esm.sh/@libp2p/identify';
-    import { webSockets } from 'https://esm.sh/@libp2p/websockets';
-    import { webRTC } from 'https://esm.sh/@libp2p/webrtc';
-    import { noise } from 'https://esm.sh/@chainsafe/libp2p-noise';
-    import { yamux } from 'https://esm.sh/@chainsafe/libp2p-yamux';
+    import { createSharedLibp2pStack, DEFAULT_BOOTSTRAP_PEERS } from './shared/libp2p-stack.mjs';
 
     // Step 5: define the relay set and durable browser cache keys.
     const RELAYS = [
@@ -488,18 +483,24 @@
     async function initLibp2pNode() {
       window.__sharedFooter?.log('libp2p', 'bootstrapping libp2p node', 'debug', 'checking');
       try {
-        const node = await createLibp2p({
-          transports: [webSockets(), webRTC()],
-          connectionEncrypters: [noise()],
-          streamMuxers: [yamux()],
-          services: { identify: identify() },
+        const { node, bootstrapPeers } = await createSharedLibp2pStack({
+          bootstrapPeers: DEFAULT_BOOTSTRAP_PEERS,
+          onLog(level, text, state) {
+            window.__sharedFooter?.log('libp2p', text, level, state);
+          },
+          onPeer(peerEvent) {
+            window.__sharedFooter?.log('libp2p', `${peerEvent.kind} ${peerEvent.peer}`, 'trace', 'checking');
+          },
+          onStatus(state, peerId) {
+            window.__sharedFooter?.log('libp2p', `${state} ${peerId}`, 'info', 'available');
+          },
         });
-        await node.start();
+        window.__sharedFooter?.log('libp2p', `bootstrap peers ready: ${bootstrapPeers.length}`, 'debug', 'available');
         setLibp2pStatus(node.peerId.toString());
         window.__sharedFooter?.log('libp2p', `started ${node.peerId.toString()}`, 'info', 'available');
       } catch (e) {
         setLibp2pStatus('');
-        window.__sharedFooter?.log('libp2p', `bootstrap failed: ${e.message}`, 'warn', 'unavailable');
+        window.__sharedFooter?.log('libp2p', `bootstrap failed: ${e.message}`, 'error', 'unavailable');
       }
     }
 
