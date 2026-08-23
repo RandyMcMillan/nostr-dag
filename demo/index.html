@@ -524,6 +524,11 @@
       return new Promise((resolve) => window.setTimeout(resolve, ms));
     }
 
+    // Yield a turn so Safari can paint between bursts of synchronous DAG work.
+    async function yieldToMainThread() {
+      await sleep(0);
+    }
+
     function scheduleCachePersist() {
       if (cachePersistTimer) return;
       cachePersistTimer = window.setTimeout(() => {
@@ -533,7 +538,7 @@
     }
 
     // Step 14: persist the current demo state to localStorage.
-    function persistCache() {
+    async function persistCache() {
       try {
         window.__sharedFooter?.log('demo', 'persisting demo cache', 'trace', 'checking');
         const payload = {
@@ -559,8 +564,8 @@
       }
     }
 
-    // Step 15: restore the last saved demo state when the page reloads.
-    function restoreCache() {
+    // Step 15: restore the last saved demo state in small async chunks.
+    async function restoreCache() {
       try {
         const raw = window.localStorage.getItem(CACHE_KEY);
         if (!raw) {
@@ -575,25 +580,32 @@
             const normalized = normalizeRelayUrl(relay);
             if (normalized) broadcastRelays.add(normalized);
           }
+          await yieldToMainThread();
         }
 
         if (Array.isArray(payload.discoveredParticipants)) {
           discoveredParticipants.clear();
-          for (const participant of payload.discoveredParticipants) {
+          for (let i = 0; i < payload.discoveredParticipants.length; i += 1) {
+            const participant = payload.discoveredParticipants[i];
             if (participant?.pk) discoveredParticipants.set(participant.pk, participant);
+            if (i % 10 === 9) await yieldToMainThread();
           }
         }
 
         if (Array.isArray(payload.njumpAvailability)) {
           njumpAvailability.clear();
-          for (const [id, value] of payload.njumpAvailability) {
+          for (let i = 0; i < payload.njumpAvailability.length; i += 1) {
+            const [id, value] = payload.njumpAvailability[i];
             if (id) njumpAvailability.set(id, value);
+            if (i % 10 === 9) await yieldToMainThread();
           }
         }
 
         if (Array.isArray(payload.events)) {
           events.clear();
-          for (const event of payload.events.sort((a, b) => a.created_at - b.created_at || a.id.localeCompare(b.id))) {
+          const restoredEvents = payload.events.sort((a, b) => a.created_at - b.created_at || a.id.localeCompare(b.id));
+          for (let i = 0; i < restoredEvents.length; i += 1) {
+            const event = restoredEvents[i];
             if (!event?.id || !dag) continue;
             const restoredEvent = {
               id: event.id,
@@ -605,6 +617,7 @@
             };
             dag.insert(JSON.stringify(restoredEvent));
             events.set(event.id, event);
+            if (i % 10 === 9) await yieldToMainThread();
           }
         }
 
@@ -727,13 +740,14 @@
     }
 
     // Step 16: learn about quorum members and relays from incoming events.
-    function discoverFromEvent(event) {
+    async function discoverFromEvent(event) {
       logNostrEvent('incoming', event);
       if (event.kind === 10002) {
         window.__sharedFooter?.log('demo', `discovered relay metadata ${event.id}`, 'trace', 'checking');
         for (const tag of event.tags) {
           if (tag[0] === 'r' && tag[1]) addBroadcastRelay(tag[1]);
         }
+        await yieldToMainThread();
         return;
       }
 
@@ -770,6 +784,7 @@
         } catch {
           // Ignore malformed metadata.
         }
+        await yieldToMainThread();
         return;
       }
 
@@ -780,6 +795,7 @@
         } catch {
           // Ignore malformed legacy relay lists.
         }
+        await yieldToMainThread();
       }
     }
 
@@ -814,7 +830,7 @@
             : [];
 
         for (const event of foundEvents) {
-          discoverFromEvent(event);
+          void discoverFromEvent(event);
           probeNjump(event.id);
         }
       } catch (e) {
@@ -834,7 +850,7 @@
         { kinds: [0, 10002, 3], limit: 200 },
         {
           onevent(event) {
-            discoverFromEvent(event);
+          void discoverFromEvent(event);
           },
           oneose() {},
         }
@@ -1056,25 +1072,31 @@
       return queueBroadcast(eventsToPublish, successLabel);
     }
 
-    function createAckRoundEvents() {
+    // Step 19b: generate acknowledgement events without monopolizing the main thread.
+    async function createAckRoundEvents() {
       window.__sharedFooter?.log('demo', 'create ack round events', 'debug', 'checking');
       const tips = currentTips();
       const acks = [];
-      for (const author of participants) {
+      for (let i = 0; i < participants.length; i += 1) {
+        const author = participants[i];
         const event = buildEvent(author, 21000, '', tips);
         insertEvent(event);
         acks.push(event);
+        if (i % 2 === 1) await yieldToMainThread();
       }
       return acks;
     }
 
-    function createGenesisEvents() {
+    // Step 19c: generate genesis events in async chunks so startup can paint.
+    async function createGenesisEvents() {
       window.__sharedFooter?.log('demo', 'create genesis events', 'debug', 'checking');
       const seeded = [];
-      for (const author of participants) {
+      for (let i = 0; i < participants.length; i += 1) {
+        const author = participants[i];
         const event = buildEvent(author, 21000, 'genesis', []);
         insertEvent(event);
         seeded.push(event);
+        if (i % 2 === 1) await yieldToMainThread();
       }
       return seeded;
     }
@@ -1101,7 +1123,7 @@
     async function seedGenesis() {
       try {
         window.__sharedFooter?.log('demo', 'seed genesis requested', 'debug', 'checking');
-        const seeded = createGenesisEvents();
+        const seeded = await createGenesisEvents();
         render();
         await publishEvents(seeded, 'Genesis quorum');
       } catch (e) {
@@ -1112,7 +1134,7 @@
     async function runAckRound() {
       try {
         window.__sharedFooter?.log('demo', 'ack round requested', 'debug', 'checking');
-        const acks = createAckRoundEvents();
+        const acks = await createAckRoundEvents();
         render();
         await publishEvents(acks, 'Ack round');
       } catch (e) {
@@ -1125,7 +1147,7 @@
       for (let round = 1; round <= maxRounds; round++) {
         if (isCanonical(targetId)) return;
 
-        const acks = createAckRoundEvents();
+        const acks = await createAckRoundEvents();
         render();
         await publishEvents(acks, `Auto ack round ${round}`);
 
@@ -1139,7 +1161,7 @@
       for (let round = 1; round <= maxRounds; round++) {
         if (targetIds.every((id) => isCanonical(id))) return;
 
-        const acks = createAckRoundEvents();
+        const acks = await createAckRoundEvents();
         render();
         await publishEvents(acks, `Bootstrap ack round ${round}`);
 
@@ -1149,23 +1171,31 @@
     }
 
     // Step 23: publish the bootstrap quorum metadata and make it canonical.
+    // Step 23: publish the bootstrap quorum metadata in yielding batches.
     async function publishProfiles() {
       window.__sharedFooter?.log('demo', 'publish quorum profiles', 'debug', 'checking');
-      const seeded = createGenesisEvents();
+      const seeded = await createGenesisEvents();
       const participantPubkeys = participants.map((participant) => participant.pk);
       const quorumEvent = buildQuorumGroupEvent(participants[participants.length - 1], participantPubkeys);
       insertEvent(quorumEvent);
       render();
-      void publishEvents(seeded, 'Genesis quorum');
+      await yieldToMainThread();
+      await publishEvents(seeded, 'Genesis quorum');
       render();
-      void publishEvents([quorumEvent], 'Quorum note');
+      await yieldToMainThread();
+      await publishEvents([quorumEvent], 'Quorum note');
 
-      const profileEvents = participants.map((author) => buildMetadataEvent(author, quorumEvent.id));
-      for (const event of profileEvents) {
+      const profileEvents = [];
+      for (let i = 0; i < participants.length; i += 1) {
+        const author = participants[i];
+        const event = buildMetadataEvent(author, quorumEvent.id);
+        profileEvents.push(event);
         insertEvent(event);
+        if (i % 2 === 1) await yieldToMainThread();
       }
       render();
-      void publishEvents(profileEvents, 'Quorum metadata');
+      await yieldToMainThread();
+      await publishEvents(profileEvents, 'Quorum metadata');
       await bootstrapCanonicality([
         ...seeded.map((event) => event.id),
         quorumEvent.id,
@@ -1307,7 +1337,7 @@
       dag = new WasmDag(JSON.stringify(participants.map((p) => p.pk)));
       startRelayDiscovery();
       void initLibp2pNode();
-      if (restoreCache()) {
+      if (await restoreCache()) {
         render();
         setStatus('Restored cached demo state.', true);
         await publishProfiles();

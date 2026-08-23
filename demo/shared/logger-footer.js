@@ -148,7 +148,10 @@ export function createLoggerFooter(root, options = {}) {
               <span data-footer-chevron class="footer-chevron">▸</span>
               <span>${title}</span>
             </button>
-            <div class="footer-level-pills" data-footer-level></div>
+            <div class="footer-actions">
+              <button data-footer-copy class="footer-copy" type="button">Copy</button>
+              <div class="footer-level-pills" data-footer-level></div>
+            </div>
           </div>
         </div>
       </div>
@@ -159,6 +162,7 @@ export function createLoggerFooter(root, options = {}) {
   const statusEl = root.querySelector('[data-footer-status]');
   const toggleEl = root.querySelector('[data-footer-toggle]');
   const chevronEl = root.querySelector('[data-footer-chevron]');
+  const copyEl = root.querySelector('[data-footer-copy]');
   const levelEl = root.querySelector('[data-footer-level]');
   const logEl = root.querySelector('[data-footer-log]');
   const logs = [];
@@ -277,6 +281,41 @@ export function createLoggerFooter(root, options = {}) {
     if (open) showScrollbars();
   }
 
+  function copyVisibleLogs() {
+    const visibleLogs = level === 'none' ? [] : logs.filter((entry) => entry.level === level);
+    const text = visibleLogs.map((entry) => `[${entry.time}] ${entry.label ? `${entry.label}: ` : ''}${entry.text}`).join('\n');
+    if (!text) return;
+
+    const copyWithClipboard = async () => {
+      if (globalThis.navigator?.clipboard?.writeText) {
+        await globalThis.navigator.clipboard.writeText(text);
+        return true;
+      }
+      return false;
+    };
+
+    void (async () => {
+      try {
+        const copied = await copyWithClipboard();
+        if (!copied) {
+          const textarea = globalThis.document?.createElement('textarea');
+          if (!textarea) return;
+          textarea.value = text;
+          textarea.setAttribute('readonly', 'true');
+          textarea.style.position = 'fixed';
+          textarea.style.opacity = '0';
+          globalThis.document.body.appendChild(textarea);
+          textarea.select();
+          globalThis.document.execCommand?.('copy');
+          textarea.remove();
+        }
+        log('logger', `copied ${visibleLogs.length} log lines`, 'debug', 'available');
+      } catch {
+        log('logger', 'copy logs failed', 'warn', 'unavailable');
+      }
+    })();
+  }
+
   function setState(state, text) {
     const nextState = state || normalizeState(text);
     statusEl.className = `status status-${nextState}`;
@@ -303,6 +342,8 @@ export function createLoggerFooter(root, options = {}) {
     render();
     dispatchWindowResize();
   });
+
+  copyEl?.addEventListener('click', copyVisibleLogs);
 
   setState(initialState, initialTitle);
   bindScrollLock();
