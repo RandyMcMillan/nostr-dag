@@ -19,6 +19,7 @@ function normalizeState(text, fallback = 'idle') {
 
 const LOG_LEVELS = ['none', 'info', 'debug', 'trace', 'warn', 'error'];
 const STORAGE_PREFIX = 'nostr-dag.logger-footer';
+const LOGGER_INGEST_PATH = '/logger';
 const FOOTER_SPACER_VAR = '--sticky-footer-space';
 const SCROLLBAR_ACTIVE_CLASS = 'scrollbars-active';
 
@@ -59,6 +60,38 @@ function resolveStorageKey(title, storageKey) {
   if (storageKey) return storageKey;
   const path = globalThis.location?.pathname || 'unknown';
   return `${STORAGE_PREFIX}:${title}:${path}`;
+}
+
+function shouldMirrorLogs() {
+  try {
+    const host = globalThis.location?.hostname || '';
+    return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+  } catch {
+    return false;
+  }
+}
+
+function mirrorLogEntry(entry) {
+  if (!shouldMirrorLogs()) return;
+
+  const body = JSON.stringify(entry);
+  try {
+    if (globalThis.navigator?.sendBeacon) {
+      const blob = new Blob([body], { type: 'application/json' });
+      globalThis.navigator.sendBeacon(LOGGER_INGEST_PATH, blob);
+      return;
+    }
+  } catch {
+    // best effort only
+  }
+
+  void globalThis.fetch?.(LOGGER_INGEST_PATH, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+    keepalive: true,
+    cache: 'no-store',
+  }).catch(() => {});
 }
 
 function loadPersistedFooterState(storageKey) {
@@ -325,14 +358,18 @@ export function createLoggerFooter(root, options = {}) {
   function log(label, text, levelOrState = 'info', maybeState = null) {
     const { level: providedLevel, state } = parseLogArgs(levelOrState, maybeState);
     const nextLevel = providedLevel || deriveLevelFromState(state);
-    logs.push({
+    const entry = {
       time: new Date().toLocaleTimeString(),
       label: label || '',
       text: String(text),
       level: nextLevel,
-    });
+      state: normalizeState(state || text),
+      source: 'browser',
+    };
+    logs.push(entry);
     while (logs.length > maxEntries) logs.shift();
-    setState(state || normalizeState(text), label ? `${label}: ${text}` : String(text));
+    setState(entry.state, label ? `${label}: ${text}` : String(text));
+    mirrorLogEntry(entry);
     render();
   }
 
