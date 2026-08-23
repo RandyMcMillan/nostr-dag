@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="light dark" />
+  <link rel="icon" href="../shared/favicon.ico" />
+  <link rel="stylesheet" href="../shared/page.css" />
+  <title>nostr-dag Bridge</title>
+</head>
+<body>
+  <header class="sticky-header">
+    <div class="header-container">
+      <div class="header-brand">
+        <a href="../index.html">nostr-dag</a>
+        <p class="header-subtitle">Browser bridge between WSS Nostr relays and the shared libp2p pubsub swarm.</p>
+      </div>
+    </div>
+  </header>
+
+  <main class="page-content">
+    <div class="panel">
+      <div class="row" style="justify-content:space-between;">
+        <div>
+          <h1 style="margin:0 0 6px;">Bridge</h1>
+          <div class="small muted">Nostr relay events in, libp2p pubsub out, and the reverse path back to relays.</div>
+        </div>
+        <div id="bridgeStatus" class="status status-checking"><span class="status-dot"></span><span>starting…</span></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="row">
+        <label class="small" style="min-width:100%;">
+          Bridge topic
+          <input id="topicInput" type="text" value="nostr/bridge" style="width:100%; margin-top:6px;" />
+        </label>
+        <label class="small" style="min-width:100%;">
+          Default relays
+          <textarea id="relayInput" rows="5" style="width:100%; margin-top:6px;">wss://relay.damus.io
+wss://nos.lol
+wss://relay.nostr.com
+wss://relay.nostr.band
+wss://relay.primal.net
+wss://nostr.wine</textarea>
+        </label>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="row">
+        <span class="pill">Nostr → libp2p: <b id="nostrToLibp2pCount">0</b></span>
+        <span class="pill">libp2p → Nostr: <b id="libp2pToNostrCount">0</b></span>
+        <span class="pill">Seen: <b id="seenCount">0</b></span>
+        <span class="pill">Relay publishes: <b id="relayPublishCount">0</b></span>
+      </div>
+      <p class="small muted" style="margin-bottom:0;">Events are forwarded as JSON envelopes over libp2p pubsub and published back to the configured WSS relays when received from the swarm.</p>
+    </div>
+  </main>
+
+  <footer id="sharedFooter"></footer>
+
+  <script type="module">
+    import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
+    import { verifyEvent } from 'https://esm.sh/nostr-tools@2.10.4/pure';
+    import { createLoggerFooter } from '../shared/logger-footer.js';
+    import { createSharedLibp2pStack } from '../shared/libp2p-stack.mjs';
+
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder();
+    const DEFAULT_RELAYS = [
+      'wss://relay.damus.io',
+      'wss://nos.lol',
+      'wss://relay.nostr.com',
+      'wss://relay.nostr.band',
+      'wss://relay.primal.net',
+      'wss://nostr.wine',
+    ];
+
+    const pool = new SimplePool();
+    const seen = new Set();
+    const metrics = {
+      nostrToLibp2p: 0,
+      libp2pToNostr: 0,
+      relayPublishes: 0,
+    };
+
+    const bridgeStatusEl = document.getElementById('bridgeStatus');
+    const topicInputEl = document.getElementById('topicInput');
+    const relayInputEl = document.getElementById('relayInput');
+    const nostrToLibp2pCountEl = document.getElementById('nostrToLibp2pCount');
+    const libp2pToNostrCountEl = document.getElementById('libp2pToNostrCount');
+    const seenCountEl = document.getElementById('seenCount');
+    const relayPublishCountEl = document.getElementById('relayPublishCount');
+
+    let node = null;
+    let topic = topicInputEl.value.trim();
+    let relays = DEFAULT_RELAYS.slice();
+    let started = false;
+
+    const sharedFooterLogBuffer = window.__sharedFooterLogBuffer || [];
+    window.__sharedFooterLogBuffer = sharedFooterLogBuffer;
+    window.__sharedFooter = createLoggerFooter(document.getElementById('sharedFooter'), {
+      title: 'Logger',
+      initialState: 'idle',
+      initialTitle: 'bridge starting...',
+      initialLevel: 'trace',
+      maxEntries: 5000,
+    });
+    window.__sharedFooter.setLevel('trace');
+    while (sharedFooterLogBuffer.length) {
+      const [label, text, levelOrState, maybeState] = sharedFooterLogBuffer.shift();
+      window.__sharedFooter.log(label, text, levelOrState, maybeState);
+    }
+
+    function setStatus(text, state = 'checking') {
+      bridgeStatusEl.className = `status status-${state}`;
+      bridgeStatusEl.innerHTML = `<span class="status-dot"></span><span>${text}</span>`;
+      window.__sharedFooter?.log('bridge', text, state === 'available' ? 'info' : state, state);
+    }
+
+    function refreshMetrics() {
+      nostrToLibp2pCountEl.textContent = String(metrics.nostrToLibp2p);
+      libp2pToNostrCountEl.textContent = String(metrics.libp2pToNostr);
+      seenCountEl.textContent = String(seen.size);
+      relayPublishCountEl.textContent = String(metrics.relayPublishes);
+    }
+
+    function parseRelays(value) {
+      return value
+        .split(/\s+/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+    }
+
+    function kindTopic(event) {
+      return `${topic}/${event.kind}`;
+    }
+
+    function markSeen(event) {
+      if (!event?.id || seen.has(event.id)) return false;
+      seen.add(event.id);
+      refreshMetrics();
+      return true;
+    }
+
+    async function publishToLibp2p(event, direction) {
+      if (!node) return;
+      const payload = {
+        source: 'nostr-dag-bridge',
+        direction,
+        topic: kindTopic(event),
+        event,
+        ts: Date.now(),
+      };
+      await node.services.pubsub.publish(topic, encoder.encode(JSON.stringify(payload)));
+      metrics.nostrToLibp2p += direction === 'nostr->libp2p' ? 1 : 0;
+      refreshMetrics();
+      window.__sharedFooter?.log('bridge', `${direction} ${event.kind} ${event.id}`, 'trace', 'available');
+    }
+
+    async function publishToRelays(event, direction) {
+      if (!relays.length) {
+        throw new Error('no relays configured');
+      }
+      const publishTargets = relays.map((relay) => pool.publish([relay], event));
+      const result = await Promise.any(publishTargets);
+      metrics.relayPublishes += 1;
+      metrics.libp2pToNostr += direction === 'libp2p->nostr' ? 1 : 0;
+      refreshMetrics();
+      window.__sharedFooter?.log('bridge', `${direction} ${event.kind} ${event.id}`, 'info', 'available');
+      return result;
+    }
+
+    async function handleNostrEvent(event, source = 'relay') {
+      if (!event || typeof event !== 'object' || !event.id) return;
+      if (!verifyEvent(event)) {
+        window.__sharedFooter?.log('bridge', `rejected invalid event ${event.id}`, 'warn', 'unavailable');
+        return;
+      }
+      if (!markSeen(event)) {
+        window.__sharedFooter?.log('bridge', `deduped ${event.id}`, 'trace', 'available');
+        return;
+      }
+      window.__sharedFooter?.log('nostr', `${source} kind ${event.kind} ${event.id} by ${event.pubkey}`, 'trace', 'checking');
+      try {
+        await publishToLibp2p(event, 'nostr->libp2p');
+      } catch (e) {
+        window.__sharedFooter?.log('bridge', `libp2p publish failed: ${e.message}`, 'error', 'unavailable');
+      }
+    }
+
+    async function handleLibp2pMessage(event) {
+      if (!event || typeof event !== 'object' || !event.id) return;
+      if (!verifyEvent(event)) {
+        window.__sharedFooter?.log('bridge', `rejected libp2p payload ${event.id}`, 'warn', 'unavailable');
+        return;
+      }
+      if (!markSeen(event)) return;
+      try {
+        await publishToRelays(event, 'libp2p->nostr');
+      } catch (e) {
+        window.__sharedFooter?.log('bridge', `relay publish failed: ${e.message}`, 'error', 'unavailable');
+      }
+    }
+
+    async function startBridge() {
+      if (started) return;
+      started = true;
+      relays = parseRelays(relayInputEl.value);
+      topic = topicInputEl.value.trim() || 'nostr/bridge';
+
+      setStatus('starting libp2p node', 'checking');
+      try {
+        const stack = await createSharedLibp2pStack({
+          onLog(level, text, state) {
+            window.__sharedFooter?.log('libp2p', text, level, state);
+          },
+          onPeer(peer) {
+            window.__sharedFooter?.log('libp2p', `${peer.kind} ${peer.peer}`, 'trace', 'checking');
+          },
+          onStatus(state, peerId) {
+            setStatus(`${state} ${peerId}`, state === 'started' ? 'available' : 'checking');
+          },
+        });
+        node = stack.node;
+
+        await node.services.pubsub.subscribe(topic);
+        node.services.pubsub.addEventListener('message', (evt) => {
+          const payload = evt.detail?.data;
+          try {
+            const message = JSON.parse(decoder.decode(payload));
+            if (message?.event?.id) {
+              void handleLibp2pMessage(message.event);
+            }
+          } catch {
+            window.__sharedFooter?.log('bridge', 'ignored malformed pubsub payload', 'warn', 'unavailable');
+          }
+        });
+
+        const relaysSnapshot = relays.slice();
+        pool.subscribeMany(relaysSnapshot, { kinds: [0, 1, 3, 10002, 21000], limit: 500 }, {
+          onevent(event) {
+            void handleNostrEvent(event, 'relay');
+          },
+          oneose() {},
+        });
+
+        setStatus(`bridging ${relaysSnapshot.length} relays on ${topic}`, 'available');
+        window.__sharedFooter?.log('bridge', `bridge ready on topic ${topic}`, 'info', 'available');
+      } catch (e) {
+        setStatus(`bridge failed: ${e.message}`, 'unavailable');
+        window.__sharedFooter?.log('bridge', `bridge failed: ${e.message}`, 'error', 'unavailable');
+      }
+    }
+
+    topicInputEl.addEventListener('change', () => {
+      topic = topicInputEl.value.trim() || 'nostr/bridge';
+      window.__sharedFooter?.log('bridge', `topic updated to ${topic}`, 'debug', 'checking');
+    });
+
+    relayInputEl.addEventListener('change', () => {
+      relays = parseRelays(relayInputEl.value);
+      window.__sharedFooter?.log('bridge', `relay list updated (${relays.length})`, 'debug', 'checking');
+    });
+
+    void startBridge();
+  </script>
+</body>
+</html>
