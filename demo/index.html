@@ -308,6 +308,13 @@
 
     const short = (id) => id ? `${id.slice(0, 10)}…` : '-';
 
+    function logNostrEvent(action, event, level = 'trace', state = 'checking') {
+      const kind = event?.kind ?? '?';
+      const id = short(event?.id);
+      const pubkey = short(event?.pubkey);
+      window.__sharedFooter?.log('nostr', `${action} kind ${kind} ${id} by ${pubkey}`, level, state);
+    }
+
     // Step 7: derive deterministic participant keys from stable names.
     async function sha256Bytes(value) {
       const encoded = new TextEncoder().encode(value);
@@ -721,6 +728,7 @@
 
     // Step 16: learn about quorum members and relays from incoming events.
     function discoverFromEvent(event) {
+      logNostrEvent('incoming', event);
       if (event.kind === 10002) {
         window.__sharedFooter?.log('demo', `discovered relay metadata ${event.id}`, 'trace', 'checking');
         for (const tag of event.tags) {
@@ -961,12 +969,16 @@
 
     // Step 21: insert events into the WASM DAG and mirror them into UI state.
     function insertEvent(event) {
+      logNostrEvent('insert', event, 'trace', 'checking');
       const result = JSON.parse(dag.insert(JSON.stringify(event)));
       if (result.type === 'Duplicate') {
         window.__sharedFooter?.log('demo', `duplicate event ${event.id}`, 'warn', 'available');
         throw new Error('Duplicate event');
       }
       window.__sharedFooter?.log('demo', `inserted event ${event.id}`, 'trace', result.type === 'Buffered' ? 'checking' : 'available');
+      if (event.kind === 0) {
+        discoverFromEvent(event);
+      }
       probeNjump(event.id);
       events.set(event.id, {
         id: event.id,
@@ -1032,11 +1044,14 @@
     }
 
     async function publishEvent(event) {
-      window.__sharedFooter?.log('demo', `publish event ${event.id}`, 'trace', 'checking');
+      logNostrEvent('publish', event, 'trace', 'checking');
       return queueBroadcast([event], `Event ${event.kind}`);
     }
 
     async function publishEvents(eventsToPublish, successLabel) {
+      for (const event of eventsToPublish) {
+        logNostrEvent(`publish batch ${successLabel}`, event, 'trace', 'checking');
+      }
       window.__sharedFooter?.log('demo', `publish ${eventsToPublish.length} events for ${successLabel}`, 'trace', 'checking');
       return queueBroadcast(eventsToPublish, successLabel);
     }
@@ -1295,6 +1310,7 @@
       if (restoreCache()) {
         render();
         setStatus('Restored cached demo state.', true);
+        await publishProfiles();
       } else {
         await resetDag();
       }
