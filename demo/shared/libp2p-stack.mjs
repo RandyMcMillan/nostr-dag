@@ -89,6 +89,9 @@ function reportPeers(payload) {
 
 export async function createSharedLibp2pStack({
   bootstrapPeers = DEFAULT_BOOTSTRAP_PEERS,
+  includeWebRTC = true,
+  includeWebRTCDirect = true,
+  includeCircuitRelay = true,
   onLog,
   onPeer,
   onStatus,
@@ -98,22 +101,24 @@ export async function createSharedLibp2pStack({
   emitLog(onLog, "info", `bootstrapping with ${peers.length} peer${peers.length === 1 ? "" : "s"}`, "checking");
   emitLog(onLog, "debug", `bootstrap peers configured: ${peers.length}`, "checking");
   emitLog(onLog, "trace", "shared libp2p stack configuring transports and services", "checking");
-  emitLog(onLog, "trace", "transports: webSockets, webRTC, webRTCDirect, circuitRelayTransport", "checking");
+  emitLog(onLog, "trace", `transports: webSockets${includeWebRTC ? ", webRTC" : ""}${includeWebRTCDirect ? ", webRTCDirect" : ""}${includeCircuitRelay ? ", circuitRelayTransport" : ""}`, "checking");
   emitLog(onLog, "trace", "services: identify, autoNAT, dcutr, pubsub", "checking");
 
   emitLog(onLog, "trace", "constructing libp2p node", "checking");
+  const transports = [webSockets()];
+  if (includeWebRTC) transports.push(webRTC());
+  if (includeWebRTCDirect) transports.push(webRTCDirect());
+  if (includeCircuitRelay) transports.push(circuitRelayTransport({ discoverRelays: 2 }));
   const node = await createLibp2p({
-    transports: [
-      webSockets(),
-      webRTC(),
-      webRTCDirect(),
-      circuitRelayTransport({ discoverRelays: 2 }),
-    ],
+    transports,
     connectionEncrypters: [noise()],
     streamMuxers: [yamux()],
-    addresses: {
-      listen: ["/webrtc", "/p2p-circuit"],
-    },
+    addresses: includeWebRTC || includeWebRTCDirect || includeCircuitRelay ? {
+      listen: [
+        ...(includeWebRTC || includeWebRTCDirect ? ["/webrtc"] : []),
+        ...(includeCircuitRelay ? ["/p2p-circuit"] : []),
+      ],
+    } : {},
     services: {
       identify: identify(),
       autoNAT: autoNAT(),
