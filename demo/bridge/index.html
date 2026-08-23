@@ -50,6 +50,17 @@ wss://nostr.wine</textarea>
       <div class="small muted" style="margin-top:10px;">Bridge peer will also report to <code>/peers</code> when running on localhost.</div>
       <p class="small muted" style="margin-bottom:0;">Events are forwarded as JSON envelopes over libp2p pubsub and published back to the configured WSS relays when received from the swarm.</p>
     </div>
+
+    <div class="panel">
+      <div class="row" style="justify-content:space-between;">
+        <div>
+          <h2 style="margin:0 0 6px;">Peers</h2>
+          <div class="small muted">Live registry from <code>/peers</code>.</div>
+        </div>
+        <div class="pill">Count: <b id="peerCount">0</b></div>
+      </div>
+      <div id="peerList" style="margin-top:12px;"></div>
+    </div>
   </main>
 
   <footer id="sharedFooter"></footer>
@@ -100,11 +111,14 @@ wss://nostr.wine</textarea>
     const libp2pToNostrCountEl = document.getElementById('libp2pToNostrCount');
     const seenCountEl = document.getElementById('seenCount');
     const relayPublishCountEl = document.getElementById('relayPublishCount');
+    const peerCountEl = document.getElementById('peerCount');
+    const peerListEl = document.getElementById('peerList');
 
     let node = null;
     let topic = topicInputEl.value.trim();
     let relays = DEFAULT_RELAYS.slice();
     let started = false;
+    let peerPollTimer = null;
 
     const sharedFooterLogBuffer = window.__sharedFooterLogBuffer || [];
     window.__sharedFooterLogBuffer = sharedFooterLogBuffer;
@@ -132,6 +146,37 @@ wss://nostr.wine</textarea>
       libp2pToNostrCountEl.textContent = String(metrics.libp2pToNostr);
       seenCountEl.textContent = String(seen.size);
       relayPublishCountEl.textContent = String(metrics.relayPublishes);
+    }
+
+    function renderPeers(peers) {
+      peerCountEl.textContent = String(peers.length);
+      if (!peers.length) {
+        peerListEl.innerHTML = '<div class="small muted">No peers reported yet.</div>';
+        return;
+      }
+      peerListEl.innerHTML = peers.map((peer) => `
+        <div class="event" style="margin-bottom:10px;">
+          <div class="row" style="justify-content:space-between; align-items:flex-start;">
+            <div>
+              <div><b class="mono">${peer.peer_id}</b></div>
+              <div class="small muted">${peer.kind} · ${peer.path} · ${new Date(peer.updated_at || Date.now()).toLocaleString()}</div>
+            </div>
+            <span class="chip">${peer.source || 'browser'}</span>
+          </div>
+          <div class="small" style="margin-top:8px; word-break:break-word;">${peer.detail ? String(peer.detail) : 'no detail'}</div>
+        </div>
+      `).join('');
+    }
+
+    async function pollPeers() {
+      try {
+        const response = await fetch('/peers', { cache: 'no-store' });
+        if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+        const peers = await response.json();
+        renderPeers(Array.isArray(peers) ? peers : []);
+      } catch (e) {
+        peerListEl.innerHTML = `<div class="small muted">Peers unavailable: ${e.message}</div>`;
+      }
     }
 
     function parseRelays(value) {
@@ -259,6 +304,10 @@ wss://nostr.wine</textarea>
 
         setStatus(`bridging ${relaysSnapshot.length} relays on ${topic}`, 'available');
         window.__sharedFooter?.log('bridge', `bridge ready on topic ${topic}`, 'info', 'available');
+        await pollPeers();
+        peerPollTimer = window.setInterval(() => {
+          void pollPeers();
+        }, 2000);
       } catch (e) {
         setStatus(`bridge failed: ${e.message}`, 'unavailable');
         window.__sharedFooter?.log('bridge', `bridge failed: ${e.message}`, 'error', 'unavailable');
