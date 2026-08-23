@@ -280,6 +280,16 @@
     let relayDiscoveryStarted = false;
     let libp2pPeerId = 'starting...';
     let libp2pModuleCounts = { loaded: 0, failed: 0, total: 0 };
+    const sharedFooterLogBuffer = window.__sharedFooterLogBuffer || [];
+    window.__sharedFooterLogBuffer = sharedFooterLogBuffer;
+    if (!window.__sharedFooter) {
+      window.__sharedFooter = {
+        log(...args) {
+          sharedFooterLogBuffer.push(args);
+        },
+        setState() {},
+      };
+    }
 
     // Step 6: bind the DOM nodes used by render() and the action handlers.
     const statusEl = document.getElementById('status');
@@ -444,9 +454,11 @@
     function setStatus(message, ok = true) {
       statusEl.textContent = message;
       statusEl.className = `status ${ok ? 'ok' : 'err'}`;
+      window.__sharedFooter?.log('demo', message, ok ? 'info' : 'warn', ok ? 'available' : 'unavailable');
     }
 
     function setControlsEnabled(enabled) {
+      window.__sharedFooter?.log('demo', enabled ? 'controls enabled' : 'controls disabled', 'debug', enabled ? 'available' : 'checking');
       resetBtnEl.disabled = !enabled;
       seedBtnEl.disabled = !enabled;
       ackRoundBtnEl.disabled = !enabled;
@@ -474,6 +486,7 @@
 
     // Step 13: start the optional libp2p node after the page is usable.
     async function initLibp2pNode() {
+      window.__sharedFooter?.log('libp2p', 'bootstrapping libp2p node', 'debug', 'checking');
       try {
         const node = await createLibp2p({
           transports: [webSockets(), webRTC()],
@@ -483,10 +496,10 @@
         });
         await node.start();
         setLibp2pStatus(node.peerId.toString());
-        console.log('Peer ID:', node.peerId.toString());
+        window.__sharedFooter?.log('libp2p', `started ${node.peerId.toString()}`, 'info', 'available');
       } catch (e) {
         setLibp2pStatus('');
-        console.warn('libp2p bootstrap failed:', e);
+        window.__sharedFooter?.log('libp2p', `bootstrap failed: ${e.message}`, 'warn', 'unavailable');
       }
     }
 
@@ -514,6 +527,7 @@
     // Step 14: persist the current demo state to localStorage.
     function persistCache() {
       try {
+        window.__sharedFooter?.log('demo', 'persisting demo cache', 'trace', 'checking');
         const payload = {
           participants: participants.map((participant) => ({
             pk: participant.pk,
@@ -531,8 +545,9 @@
           broadcastRelays: [...broadcastRelays],
         };
         window.localStorage.setItem(CACHE_KEY, JSON.stringify(payload));
+        window.__sharedFooter?.log('demo', 'demo cache persisted', 'trace', 'available');
       } catch {
-        // Cache is best-effort only.
+        window.__sharedFooter?.log('demo', 'demo cache persist failed', 'warn', 'unavailable');
       }
     }
 
@@ -540,7 +555,10 @@
     function restoreCache() {
       try {
         const raw = window.localStorage.getItem(CACHE_KEY);
-        if (!raw) return false;
+        if (!raw) {
+          window.__sharedFooter?.log('demo', 'no cached demo state found', 'debug', 'idle');
+          return false;
+        }
 
         const payload = JSON.parse(raw);
         if (Array.isArray(payload.broadcastRelays)) {
@@ -582,14 +600,17 @@
           }
         }
 
+        window.__sharedFooter?.log('demo', 'restored cached demo state', 'info', 'available');
         return true;
       } catch {
+        window.__sharedFooter?.log('demo', 'failed to restore cached demo state', 'warn', 'unavailable');
         return false;
       }
     }
 
     function registerParticipant(participant) {
       if (!participant?.pk) return;
+      window.__sharedFooter?.log('demo', `register participant ${participant.pk.slice(0, 12)}`, 'trace', 'checking');
       const existing = discoveredParticipants.get(participant.pk) || {};
       discoveredParticipants.set(participant.pk, {
         ...existing,
@@ -624,6 +645,7 @@
     }
 
     function openProfileModal(pubkey) {
+      window.__sharedFooter?.log('demo', `open profile ${pubkey.slice(0, 12)}`, 'debug', 'available');
       const participant = participants.find((p) => p.pk === pubkey) || {};
       const profile = participantProfile(pubkey) || participant.profile || {};
       const name = profile.name || participant.name || pubkey.slice(0, 8);
@@ -651,6 +673,7 @@
     }
 
     function closeProfileModal() {
+      window.__sharedFooter?.log('demo', 'close profile modal', 'debug', 'available');
       profileModalBackdropEl.classList.remove('open');
       profileModalBackdropEl.setAttribute('aria-hidden', 'true');
     }
@@ -668,6 +691,7 @@
     function addBroadcastRelay(url) {
       const normalized = normalizeRelayUrl(url);
       if (!normalized || broadcastRelays.has(normalized)) return false;
+      window.__sharedFooter?.log('demo', `add relay ${normalized}`, 'trace', 'checking');
       broadcastRelays.add(normalized);
       watchRelayMetadata(normalized);
       render();
@@ -697,6 +721,7 @@
     // Step 16: learn about quorum members and relays from incoming events.
     function discoverFromEvent(event) {
       if (event.kind === 10002) {
+        window.__sharedFooter?.log('demo', `discovered relay metadata ${event.id}`, 'trace', 'checking');
         for (const tag of event.tags) {
           if (tag[0] === 'r' && tag[1]) addBroadcastRelay(tag[1]);
         }
@@ -704,6 +729,7 @@
       }
 
       if (event.kind === 0) {
+        window.__sharedFooter?.log('demo', `discovered profile metadata ${event.pubkey.slice(0, 12)}`, 'trace', 'checking');
         try {
           const metadata = JSON.parse(event.content || '{}');
           const profile = createParticipantProfile({
@@ -752,6 +778,7 @@
     function startRelayDiscovery() {
       if (relayDiscoveryStarted) return;
       relayDiscoveryStarted = true;
+      window.__sharedFooter?.log('demo', 'start relay discovery', 'debug', 'checking');
 
       for (const relay of RELAYS) {
         watchRelayMetadata(relay);
@@ -807,6 +834,7 @@
 
     // Step 18: seed the fixed five-participant quorum used by the demo.
     async function initParticipants() {
+      window.__sharedFooter?.log('demo', 'initializing participants', 'debug', 'checking');
       participants = await Promise.all(Array.from({ length: FED_COUNT }, async (_, i) => {
         const name = PARTICIPANT_NAMES[i] || `participant${i + 1}`;
         const sk = await sha256Bytes(name);
@@ -833,6 +861,7 @@
         };
       }));
       discoveredParticipants.clear();
+      window.__sharedFooter?.log('demo', `initialized ${participants.length} participants`, 'info', 'available');
 
       authorEl.innerHTML = participants
         .map((p, i) => `<option value="${i}">${p.name} (${p.pk.slice(0, 12)}…)</option>`)
@@ -841,6 +870,7 @@
 
     // Step 19: reset the DAG model and repopulate the local UI state.
     async function resetDag() {
+      window.__sharedFooter?.log('demo', 'resetting DAG', 'debug', 'checking');
       await initParticipants();
       dag = new WasmDag(JSON.stringify(participants.map((p) => p.pk)));
       events.clear();
@@ -916,6 +946,7 @@
 
     // Step 20: create a signed event with the requested parent set.
     function buildEvent(author, kind, content, parentIds) {
+      window.__sharedFooter?.log('demo', `build event kind ${kind} for ${author.name}`, 'trace', 'checking');
       const tags = parentIds.map((id) => ['e', id]);
       const event = {
         kind,
@@ -931,8 +962,10 @@
     function insertEvent(event) {
       const result = JSON.parse(dag.insert(JSON.stringify(event)));
       if (result.type === 'Duplicate') {
+        window.__sharedFooter?.log('demo', `duplicate event ${event.id}`, 'warn', 'available');
         throw new Error('Duplicate event');
       }
+      window.__sharedFooter?.log('demo', `inserted event ${event.id}`, 'trace', result.type === 'Buffered' ? 'checking' : 'available');
       probeNjump(event.id);
       events.set(event.id, {
         id: event.id,
@@ -948,6 +981,7 @@
 
     // Step 22: serialize relay publishing so the demo stays predictable.
     function queueBroadcast(eventsToPublish, successLabel) {
+      window.__sharedFooter?.log('demo', `queue broadcast ${successLabel} (${eventsToPublish.length})`, 'trace', 'checking');
       return new Promise((resolve) => {
         broadcastQueue.push({ eventsToPublish, successLabel, resolve });
         if (!broadcastQueueRunning) {
@@ -959,6 +993,7 @@
     async function drainBroadcastQueue() {
       if (broadcastQueueRunning) return;
       broadcastQueueRunning = true;
+      window.__sharedFooter?.log('demo', 'draining broadcast queue', 'debug', 'checking');
 
       try {
         while (broadcastQueue.length) {
@@ -996,14 +1031,17 @@
     }
 
     async function publishEvent(event) {
+      window.__sharedFooter?.log('demo', `publish event ${event.id}`, 'trace', 'checking');
       return queueBroadcast([event], `Event ${event.kind}`);
     }
 
     async function publishEvents(eventsToPublish, successLabel) {
+      window.__sharedFooter?.log('demo', `publish ${eventsToPublish.length} events for ${successLabel}`, 'trace', 'checking');
       return queueBroadcast(eventsToPublish, successLabel);
     }
 
     function createAckRoundEvents() {
+      window.__sharedFooter?.log('demo', 'create ack round events', 'debug', 'checking');
       const tips = currentTips();
       const acks = [];
       for (const author of participants) {
@@ -1015,6 +1053,7 @@
     }
 
     function createGenesisEvents() {
+      window.__sharedFooter?.log('demo', 'create genesis events', 'debug', 'checking');
       const seeded = [];
       for (const author of participants) {
         const event = buildEvent(author, 21000, 'genesis', []);
@@ -1026,6 +1065,7 @@
 
     async function createEvent() {
       try {
+        window.__sharedFooter?.log('demo', 'create custom event requested', 'debug', 'checking');
         const author = participants[Number(authorEl.value)];
         const kind = Number(kindEl.value);
         const content = contentEl.value.trim();
@@ -1044,6 +1084,7 @@
 
     async function seedGenesis() {
       try {
+        window.__sharedFooter?.log('demo', 'seed genesis requested', 'debug', 'checking');
         const seeded = createGenesisEvents();
         render();
         await publishEvents(seeded, 'Genesis quorum');
@@ -1054,6 +1095,7 @@
 
     async function runAckRound() {
       try {
+        window.__sharedFooter?.log('demo', 'ack round requested', 'debug', 'checking');
         const acks = createAckRoundEvents();
         render();
         await publishEvents(acks, 'Ack round');
@@ -1063,6 +1105,7 @@
     }
 
     async function autoAckUntilCanonical(targetId, maxRounds = 5) {
+      window.__sharedFooter?.log('demo', `auto ack until canonical ${targetId}`, 'trace', 'checking');
       for (let round = 1; round <= maxRounds; round++) {
         if (isCanonical(targetId)) return;
 
@@ -1076,6 +1119,7 @@
     }
 
     async function bootstrapCanonicality(targetIds, maxRounds = 5) {
+      window.__sharedFooter?.log('demo', `bootstrap canonicality for ${targetIds.length} events`, 'trace', 'checking');
       for (let round = 1; round <= maxRounds; round++) {
         if (targetIds.every((id) => isCanonical(id))) return;
 
@@ -1090,6 +1134,7 @@
 
     // Step 23: publish the bootstrap quorum metadata and make it canonical.
     async function publishProfiles() {
+      window.__sharedFooter?.log('demo', 'publish quorum profiles', 'debug', 'checking');
       const seeded = createGenesisEvents();
       const participantPubkeys = participants.map((participant) => participant.pk);
       const quorumEvent = buildQuorumGroupEvent(participants[participants.length - 1], participantPubkeys);
@@ -1238,6 +1283,7 @@
     updateLibp2pFooter();
 
     try {
+      window.__sharedFooter?.log('demo', 'boot sequence starting', 'debug', 'checking');
       setControlsEnabled(true);
       await init();
       await initParticipants();
@@ -1303,7 +1349,7 @@
         loaded += 1;
       } else {
         failed += 1;
-        console.warn(`Failed to load ${name}:`, result.reason);
+        window.__sharedFooter?.log('deps', `failed to load ${name}: ${result.reason}`, 'warn', 'unavailable');
       }
     }
 
@@ -1312,6 +1358,10 @@
       initialState: 'idle',
       initialTitle: 'starting...',
     });
+    while (sharedFooterLogBuffer.length) {
+      const [label, text, levelOrState, maybeState] = sharedFooterLogBuffer.shift();
+      window.__sharedFooter.log(label, text, levelOrState, maybeState);
+    }
     window.__libp2pModuleRegistry = registry;
     window.__setLibp2pModuleCounts?.({ loaded, failed, total: modules.length });
   </script>
@@ -1349,7 +1399,13 @@
     }
 
     function setGitStatus(text) {
-      window.__sharedFooter?.log('git', text, 'trace');
+      const value = String(text || '').toLowerCase();
+      const level = value.includes('failed') || value.includes('unavailable') || value.includes('error')
+        ? 'warn'
+        : value.includes('cloning') || value.includes('reading') || value.includes('writing') || value.includes('committing') || value.includes('caching')
+          ? 'debug'
+          : 'info';
+      window.__sharedFooter?.log('git', text, level, value.includes('failed') || value.includes('unavailable') || value.includes('error') ? 'unavailable' : 'checking');
     }
 
     async function runGitWorkflow() {
@@ -1363,7 +1419,7 @@
 
         setGitStatus('reading history...');
         const commits = await git.log({ fs, dir });
-        console.log('Latest Commit:', commits[0].commit.message);
+        window.__sharedFooter?.log('git', `latest commit: ${commits[0]?.commit?.message || 'n/a'}`, 'info', 'available');
 
         setGitStatus('writing file...');
         await fs.promises.writeFile(`${dir}/example.txt`, 'Hello World!');
@@ -1380,11 +1436,11 @@
           message: 'Add example.txt via browser',
         });
 
-        console.log('New Commit SHA:', sha);
+        window.__sharedFooter?.log('git', `new commit sha: ${sha}`, 'info', 'available');
         setGitStatus(`done: ${sha}`);
       } catch (e) {
         setGitStatus('unavailable');
-        console.warn('git bootstrap failed:', e);
+        window.__sharedFooter?.log('git', `bootstrap failed: ${e.message}`, 'warn', 'unavailable');
       }
     }
 
@@ -1433,7 +1489,13 @@
     ];
 
     function setDepsStatus(text) {
-      window.__sharedFooter?.log('deps', text);
+      const value = String(text || '').toLowerCase();
+      const level = value.includes('failed') || value.includes('error')
+        ? 'warn'
+        : value.includes('caching')
+          ? 'debug'
+          : 'info';
+      window.__sharedFooter?.log('deps', text, level, value.includes('failed') || value.includes('error') ? 'unavailable' : 'checking');
     }
 
     function safeFilename(url) {
@@ -1457,7 +1519,7 @@
           try {
             await cacheDependency(url);
           } catch (e) {
-            console.warn('dependency cache failed:', url, e);
+            window.__sharedFooter?.log('deps', `dependency cache failed: ${url} ${e.message}`, 'warn', 'unavailable');
           } finally {
             done += 1;
             setDepsStatus(`caching ${done}/${dependencyUrls.length}`);

@@ -187,7 +187,7 @@
     });
 
     function escapeHtml(value) { return String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;'); }
-    function setStatus(text, state = 'idle') { statusEl.className = `status status-${state}`; statusEl.title = text; footer.log('git', text, 'trace', state); }
+    function setStatus(text, state = 'idle') { statusEl.className = `status status-${state}`; statusEl.title = text; const level = state === 'unavailable' ? 'warn' : state === 'checking' ? 'debug' : 'info'; footer.log('git', text, level, state); }
     function getRouteContext() {
       const params = new URLSearchParams(window.location.search);
       const repoName = params.get('repo') || '';

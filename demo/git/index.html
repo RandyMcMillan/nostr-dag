@@ -306,7 +306,8 @@
     function setStatus(text, state = 'idle') {
       statusEl.className = `status status-${state}`;
       statusEl.title = text;
-      footer.log('git', text, 'trace', state);
+      const level = state === 'unavailable' ? 'warn' : state === 'checking' ? 'debug' : 'info';
+      footer.log('git', text, level, state);
     }
 
     function setRepoStatus(repoName, text) {
@@ -1461,7 +1462,7 @@
         if (route) setRepoHealth(repo.name, 'unavailable');
         setRepoStatus(repo.name, `refresh failed: ${e.message}`);
         footer.log('git', `refresh failed: ${e.message}`, 'trace', 'unavailable');
-        console.warn('git viewer failed:', e);
+        footer.log('git', `viewer failed: ${e.message}`, 'warn', 'unavailable');
       }
     }
 
@@ -1516,7 +1517,7 @@
         setStatus(readyCount === repos.length ? 'ready' : `partial: ${readyCount}/${repos.length} repos ready`, readyCount === repos.length ? 'available' : 'checking');
       } catch (e) {
         setStatus(`unavailable: ${e.message}`, 'unavailable');
-        console.warn('git viewer failed:', e);
+        footer.log('git', `viewer failed: ${e.message}`, 'warn', 'unavailable');
       }
     }
 
@@ -1540,7 +1541,7 @@
       } catch (e) {
         setRepoHealth(route.repo.name, 'unavailable');
         setStatus(`unavailable: ${e.message}`, 'unavailable');
-        console.warn('git viewer failed:', e);
+        footer.log('git', `viewer failed: ${e.message}`, 'warn', 'unavailable');
       }
     }
 
