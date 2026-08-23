@@ -7,7 +7,9 @@
 use std::env;
 use std::io;
 use std::path::{Component, Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
+use serde::{Deserialize, Serialize};
 use tokio::fs;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -18,6 +20,50 @@ use nostr_dag::FAVICON_ICO;
 const DEFAULT_HOST: &str = "127.0.0.1";
 const DEFAULT_PORT: u16 = 3000;
 const DEFAULT_SITE_DIR: &str = "site";
+const LOGGER_ROUTE_PREFIX: &str = "/logger";
+const LOGGER_MAX_ENTRIES: usize = 10_000;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct LoggerEntry {
+    time: String,
+    label: String,
+    text: String,
+    level: String,
+    state: String,
+    source: String,
+}
+
+#[derive(Default)]
+struct LoggerStore {
+    entries: Mutex<Vec<LoggerEntry>>,
+}
+
+impl LoggerStore {
+    fn push(&self, entry: LoggerEntry) {
+        let mut entries = self.entries.lock().expect("logger store poisoned");
+        entries.push(entry);
+        if entries.len() > LOGGER_MAX_ENTRIES {
+            let overflow = entries.len() - LOGGER_MAX_ENTRIES;
+            entries.drain(0..overflow);
+        }
+    }
+
+    fn filter_level(&self, level: &str) -> Vec<LoggerEntry> {
+        let entries = self.entries.lock().expect("logger store poisoned");
+        entries
+            .iter()
+            .filter(|entry| entry.level == level)
+            .cloned()
+            .collect()
+    }
+
+    fn all(&self) -> Vec<LoggerEntry> {
+        self.entries
+            .lock()
+            .expect("logger store poisoned")
+            .clone()
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -34,6 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .and_then(|value| value.parse().ok())
         .unwrap_or(DEFAULT_PORT);
     let site_dir = env::var("SITE_DIR").unwrap_or_else(|_| DEFAULT_SITE_DIR.to_string());
+    let logger_store = Arc::new(LoggerStore::default());
 
     let addr = format!("{host}:{port}");
     let listener = TcpListener::bind(&addr).await?;
@@ -46,8 +93,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             result = listener.accept() => {
                 let (stream, peer) = result?;
                 let site_dir = site_dir.clone();
+                let logger_store = Arc::clone(&logger_store);
                 tokio::spawn(async move {
-                    if let Err(err) = handle_connection(stream, &site_dir).await {
+                    if let Err(err) = handle_connection(stream, &site_dir, logger_store).await {
                         error!(%peer, ?err, "request failed");
                     }
                 });
@@ -62,7 +110,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn handle_connection(mut stream: TcpStream, site_dir: &str) -> io::Result<()> {
+async fn handle_connection(
+    mut stream: TcpStream,
+    site_dir: &str,
+    logger_store: Arc<LoggerStore>,
+) -> io::Result<()> {
     let mut buffer = [0u8; 8192];
     let bytes_read = stream.read(&mut buffer).await?;
     if bytes_read == 0 {
@@ -74,13 +126,36 @@ async fn handle_connection(mut stream: TcpStream, site_dir: &str) -> io::Result<
     let request_line = lines.next().unwrap_or_default();
     let mut parts = request_line.split_whitespace();
     let method = parts.next().unwrap_or_default();
-    let path = parts.next().unwrap_or("/");
+    let path = strip_query(parts.next().unwrap_or("/"));
     debug!(%method, %path, "request received");
+    let body = request_body(&request);
 
     let head_only = method == "HEAD";
-    let response = if method != "GET" && method != "HEAD" {
+    let response = if method == "POST" && (path == LOGGER_ROUTE_PREFIX || path.starts_with("/logger/")) {
+        match handle_logger_post(body, &logger_store) {
+            Ok(()) => response_bytes(204, "No Content", Vec::new(), "text/plain; charset=utf-8", true),
+            Err(err) => {
+                error!(?err, "logger ingest failed");
+                response_text(400, "Bad Request", "Bad Request", "text/plain; charset=utf-8")
+            }
+        }
+    } else if method != "GET" && method != "HEAD" {
         info!(%method, %path, "rejecting unsupported method");
         response_text(405, "Method Not Allowed", "Method Not Allowed", "text/plain; charset=utf-8")
+    } else if path == LOGGER_ROUTE_PREFIX || path.starts_with("/logger/") {
+        match handle_logger_get(path, &logger_store) {
+            Ok((body, content_type)) => response_bytes(200, "OK", body, content_type, head_only),
+            Err(RouteError::BadRequest) => {
+                response_text(400, "Bad Request", "Bad Request", "text/plain; charset=utf-8")
+            }
+            Err(RouteError::NotFound) => {
+                response_text(404, "Not Found", "Not Found", "text/plain; charset=utf-8")
+            }
+            Err(RouteError::Io(err)) => {
+                error!(?err, path = %path, "failed to serve logger payload");
+                response_text(500, "Internal Server Error", "Internal Server Error", "text/plain; charset=utf-8")
+            }
+        }
     } else {
         match route_path(site_dir, path).await {
             Ok((body, content_type)) => {
@@ -105,6 +180,28 @@ async fn handle_connection(mut stream: TcpStream, site_dir: &str) -> io::Result<
     stream.write_all(&response).await?;
     stream.shutdown().await?;
     Ok(())
+}
+
+fn request_body(request: &str) -> &str {
+    request.split_once("\r\n\r\n").map(|(_, body)| body).unwrap_or("")
+}
+
+fn handle_logger_post(body: &str, logger_store: &Arc<LoggerStore>) -> Result<(), RouteError> {
+    let entry: LoggerEntry = serde_json::from_str(body).map_err(|_| RouteError::BadRequest)?;
+    logger_store.push(entry);
+    Ok(())
+}
+
+fn handle_logger_get(path: &str, logger_store: &Arc<LoggerStore>) -> Result<(Vec<u8>, &'static str), RouteError> {
+    let level = path.trim_start_matches("/logger/").trim();
+    let payload = if level.is_empty() || level == "all" {
+        logger_store.all()
+    } else {
+        logger_store.filter_level(level)
+    };
+    serde_json::to_vec(&payload)
+        .map(|body| (body, "application/json; charset=utf-8"))
+        .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))
 }
 
 async fn route_path(site_dir: &str, path: &str) -> Result<(Vec<u8>, &'static str), RouteError> {
