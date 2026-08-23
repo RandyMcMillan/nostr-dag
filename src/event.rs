@@ -1,4 +1,5 @@
 use nostr::{Event, EventBuilder, EventId, Keys, Kind, Tag};
+use tracing::trace;
 
 pub const DAG_EVENT_KIND: Kind = Kind::Custom(21000);
 
@@ -6,6 +7,7 @@ pub fn create_ack_event(
     keys: &Keys,
     parents: &[EventId],
 ) -> Result<Event, nostr::event::builder::Error> {
+    trace!(parent_count = parents.len(), "creating ack event");
     let tags: Vec<Tag> = parents.iter().map(|id| Tag::event(*id)).collect();
 
     EventBuilder::new(DAG_EVENT_KIND, "")
@@ -14,6 +16,7 @@ pub fn create_ack_event(
 }
 
 pub fn parents_of(event: &Event) -> impl Iterator<Item = EventId> + '_ {
+    trace!(event_id = %event.id, "reading event parents");
     event.tags.event_ids().copied()
 }
 

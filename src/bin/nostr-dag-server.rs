@@ -11,7 +11,7 @@ use std::path::{Component, Path, PathBuf};
 use tokio::fs;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tracing::{error, info};
+use tracing::{debug, error, info, trace};
 
 use nostr_dag::FAVICON_ICO;
 
@@ -75,17 +75,24 @@ async fn handle_connection(mut stream: TcpStream, site_dir: &str) -> io::Result<
     let mut parts = request_line.split_whitespace();
     let method = parts.next().unwrap_or_default();
     let path = parts.next().unwrap_or("/");
+    debug!(%method, %path, "request received");
 
     let head_only = method == "HEAD";
     let response = if method != "GET" && method != "HEAD" {
+        info!(%method, %path, "rejecting unsupported method");
         response_text(405, "Method Not Allowed", "Method Not Allowed", "text/plain; charset=utf-8")
     } else {
         match route_path(site_dir, path).await {
-            Ok((body, content_type)) => response_bytes(200, "OK", body, content_type, head_only),
+            Ok((body, content_type)) => {
+                trace!(%path, content_type, head_only, body_len = body.len(), "serving response");
+                response_bytes(200, "OK", body, content_type, head_only)
+            }
             Err(RouteError::NotFound) => {
+                info!(%path, "request not found");
                 response_text(404, "Not Found", "Not Found", "text/plain; charset=utf-8")
             }
             Err(RouteError::BadRequest) => {
+                info!(%path, "bad request path");
                 response_text(400, "Bad Request", "Bad Request", "text/plain; charset=utf-8")
             }
             Err(RouteError::Io(err)) => {
@@ -103,10 +110,12 @@ async fn handle_connection(mut stream: TcpStream, site_dir: &str) -> io::Result<
 async fn route_path(site_dir: &str, path: &str) -> Result<(Vec<u8>, &'static str), RouteError> {
     let path = strip_query(path);
     if path == "/favicon.ico" {
+        trace!(%path, "serving embedded favicon");
         return Ok((FAVICON_ICO.to_vec(), "image/x-icon"));
     }
     let normalized = normalize_path(path)?;
     let file_path = if normalized.is_empty() {
+        trace!(%path, site_dir = %site_dir, "routing to index.html");
         PathBuf::from(site_dir).join("index.html")
     } else {
         let candidate = PathBuf::from(site_dir).join(&normalized);
@@ -115,8 +124,10 @@ async fn route_path(site_dir: &str, path: &str) -> Result<(Vec<u8>, &'static str
             .map(|meta| meta.is_dir())
             .unwrap_or(false)
         {
+            trace!(%path, file = %candidate.display(), "routing directory to index.html");
             candidate.join("index.html")
         } else {
+            trace!(%path, file = %candidate.display(), "routing to file");
             candidate
         }
     };

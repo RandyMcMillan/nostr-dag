@@ -1,6 +1,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use nostr::{Event, EventId, PublicKey};
+use tracing::{debug, info, trace};
 
 use crate::event::parents_of;
 
@@ -32,6 +33,11 @@ impl Dag {
     pub fn new(participants: impl IntoIterator<Item = PublicKey>) -> Self {
         let participants: BTreeSet<PublicKey> = participants.into_iter().collect();
         let threshold = Self::quorum_threshold(participants.len());
+        info!(
+            participant_count = participants.len(),
+            threshold,
+            "creating DAG"
+        );
 
         Self {
             events: HashMap::new(),
@@ -52,24 +58,44 @@ impl Dag {
 
     pub fn insert(&mut self, event: Event) -> InsertResult {
         let id = event.id;
+        let author = event.pubkey;
+        let parents: Vec<EventId> = parents_of(&event).collect();
 
         if self.events.contains_key(&id) || self.pending.contains_key(&id) {
+            debug!(id = %id, author = %author, "duplicate event");
             return InsertResult::Duplicate;
         }
 
-        let missing: Vec<EventId> = parents_of(&event)
+        let missing: Vec<EventId> = parents
+            .iter()
             .filter(|parent_id| !self.events.contains_key(parent_id))
+            .copied()
             .collect();
 
         if missing.is_empty() {
+            debug!(
+                id = %id,
+                author = %author,
+                parent_count = parents.len(),
+                "event ready"
+            );
             self.insert_ready(event);
             self.process_unblocked(id);
+            trace!(id = %id, pending = self.pending.len(), "event inserted");
             InsertResult::Inserted(id)
         } else {
             for parent_id in &missing {
                 self.waiting_for.entry(*parent_id).or_default().insert(id);
             }
             self.pending.insert(id, event);
+            debug!(
+                id = %id,
+                author = %author,
+                parent_count = parents.len(),
+                missing = ?missing,
+                pending = self.pending.len(),
+                "buffering event"
+            );
             InsertResult::Buffered {
                 event_id: id,
                 missing,
@@ -80,28 +106,45 @@ impl Dag {
     fn insert_ready(&mut self, event: Event) {
         let id = event.id;
         let author = event.pubkey;
+        let parents: Vec<EventId> = parents_of(&event).collect();
 
-        for parent_id in parents_of(&event) {
+        trace!(
+            id = %id,
+            author = %author,
+            parent_count = parents.len(),
+            "storing ready event"
+        );
+
+        for parent_id in parents.iter().copied() {
             self.children.entry(parent_id).or_default().insert(id);
         }
 
         let depth = self.compute_depth(&event);
         self.depth_cache.insert(id, depth);
+        debug!(id = %id, depth, author = %author, "cached event depth");
 
         self.events.insert(id, event);
         self.seen_by.entry(id).or_default();
 
         if self.participants.contains(&author) {
             self.mark_seen_by_ancestors(id, author);
+        } else {
+            trace!(id = %id, author = %author, "author is not a participant");
         }
     }
 
     fn process_unblocked(&mut self, inserted_id: EventId) {
         let Some(waiting) = self.waiting_for.remove(&inserted_id) else {
+            trace!(inserted_id = %inserted_id, "no buffered descendants waiting");
             return;
         };
 
         let mut to_process: Vec<EventId> = waiting.into_iter().collect();
+        trace!(
+            inserted_id = %inserted_id,
+            waiting = to_process.len(),
+            "checking buffered descendants"
+        );
 
         while let Some(candidate_id) = to_process.pop() {
             let Some(event) = self.pending.get(&candidate_id) else {
@@ -115,6 +158,7 @@ impl Dag {
             if still_missing.is_empty() {
                 let event = self.pending.remove(&candidate_id).unwrap();
                 self.insert_ready(event);
+                debug!(candidate_id = %candidate_id, "unblocked buffered event");
 
                 if let Some(newly_unblocked) = self.waiting_for.remove(&candidate_id) {
                     to_process.extend(newly_unblocked);
@@ -124,9 +168,11 @@ impl Dag {
     }
 
     fn mark_seen_by_ancestors(&mut self, id: EventId, participant: PublicKey) {
+        trace!(id = %id, participant = %participant, "marking seen-by ancestors");
         let mut stack = vec![id];
         while let Some(current) = stack.pop() {
             if self.seen_by.entry(current).or_default().insert(participant) {
+                trace!(current = %current, participant = %participant, "marked event as seen");
                 if let Some(event) = self.events.get(&current) {
                     stack.extend(parents_of(event));
                 }
@@ -135,6 +181,7 @@ impl Dag {
     }
 
     fn compute_depth(&self, event: &Event) -> u64 {
+        trace!(id = %event.id, "computing event depth");
         parents_of(event)
             .filter_map(|p| self.depth_cache.get(&p))
             .max()
@@ -143,17 +190,23 @@ impl Dag {
     }
 
     pub fn depth(&self, id: EventId) -> Option<u64> {
-        self.depth_cache.get(&id).copied()
+        let depth = self.depth_cache.get(&id).copied();
+        trace!(%id, ?depth, "reading event depth");
+        depth
     }
 
     pub fn is_canonical(&self, id: EventId) -> bool {
-        self.seen_by
+        let canonical = self
+            .seen_by
             .get(&id)
             .map(|s| s.len() > self.threshold)
-            .unwrap_or(false)
+            .unwrap_or(false);
+        trace!(%id, canonical, "checking canonical status");
+        canonical
     }
 
     pub fn canonical_events(&self) -> impl Iterator<Item = EventId> + '_ {
+        trace!("iterating canonical events");
         self.events
             .keys()
             .copied()
@@ -161,6 +214,7 @@ impl Dag {
     }
 
     pub fn tips(&self) -> impl Iterator<Item = EventId> + '_ {
+        trace!("iterating DAG tips");
         self.events.keys().copied().filter(|id| {
             self.children
                 .get(id)
@@ -170,6 +224,7 @@ impl Dag {
     }
 
     pub fn canonical_order(&self) -> Vec<EventId> {
+        trace!("computing canonical order");
         let mut canonical: Vec<EventId> = self
             .events
             .keys()
@@ -186,30 +241,40 @@ impl Dag {
     }
 
     pub fn get(&self, id: &EventId) -> Option<&Event> {
+        trace!(%id, "reading event");
         self.events.get(id)
     }
 
     pub fn participants(&self) -> &BTreeSet<PublicKey> {
+        trace!(participant_count = self.participants.len(), "reading participants");
         &self.participants
     }
 
     pub fn seen_by(&self, id: EventId) -> Option<&BTreeSet<PublicKey>> {
+        trace!(%id, "reading seen-by set");
         self.seen_by.get(&id)
     }
 
     pub fn len(&self) -> usize {
-        self.events.len()
+        let len = self.events.len();
+        trace!(len, "reading DAG length");
+        len
     }
 
     pub fn is_empty(&self) -> bool {
-        self.events.is_empty()
+        let empty = self.events.is_empty();
+        trace!(empty, "reading DAG emptiness");
+        empty
     }
 
     pub fn pending_count(&self) -> usize {
-        self.pending.len()
+        let pending = self.pending.len();
+        trace!(pending, "reading pending count");
+        pending
     }
 
     pub fn missing_parents(&self) -> impl Iterator<Item = EventId> + '_ {
+        trace!("iterating missing parents");
         self.waiting_for.keys().copied()
     }
 }

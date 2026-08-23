@@ -11,7 +11,7 @@ use nostr::{EventId, Filter, Keys, Kind, PublicKey, SecretKey};
 use nostr_relay_pool::prelude::*;
 use rand::Rng;
 use tokio::sync::Mutex;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use nostr_dag::{create_ack_event, Dag, InsertResult, DAG_EVENT_KIND};
 
@@ -131,10 +131,12 @@ async fn handle_event(dag: &Arc<Mutex<Dag>>, keys: &Keys, pool: &RelayPool, even
 fn maybe_ack(dag: &mut Dag, keys: &Keys, pool: &RelayPool) {
     let dominated = dag.participants().contains(&keys.public_key());
     if !dominated {
+        trace!(pubkey = %keys.public_key(), "skipping ack: not a federation participant");
         return;
     }
 
     let tips: Vec<EventId> = dag.tips().collect();
+    trace!(tip_count = tips.len(), "evaluating ack round");
 
     let unacked_tips: Vec<EventId> = tips
         .iter()
@@ -147,6 +149,7 @@ fn maybe_ack(dag: &mut Dag, keys: &Keys, pool: &RelayPool) {
         .collect();
 
     if unacked_tips.is_empty() {
+        trace!("skipping ack: all tips already seen");
         return;
     }
 

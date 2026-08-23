@@ -6,7 +6,7 @@
 use std::env;
 
 use nostr_relay_builder::prelude::*;
-use tracing::info;
+use tracing::{debug, info, trace};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -21,8 +21,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(8080);
+    debug!(port, "resolved relay port");
 
     let relay = LocalRelay::new(RelayBuilder::default().port(port));
+    info!("starting relay");
     relay.run().await?;
 
     let url = relay.url().await;
@@ -30,6 +32,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("RELAY_URL={}", url);
 
+    trace!("waiting for ctrl_c");
     tokio::signal::ctrl_c().await?;
+    info!("relay shutdown requested");
     Ok(())
 }
