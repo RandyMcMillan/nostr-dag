@@ -14,7 +14,8 @@ use serde::{Deserialize, Serialize};
 use tokio::fs;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::Semaphore;
+use tokio::sync::{Semaphore, watch};
+use tokio::task::JoinSet;
 use tracing::{debug, error, info, trace};
 
 use nostr_dag::FAVICON_ICO;
@@ -125,9 +126,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let logger_store = Arc::new(LoggerStore::default());
     let peer_store = Arc::new(PeerStore::default());
     let http_client = Arc::new(reqwest::Client::builder().user_agent("nostr-dag/0.9.1").build()?);
+    let (shutdown_tx, shutdown_rx) = watch::channel(());
 
     let addr = format!("{host}:{port}");
     let listener = TcpListener::bind(&addr).await?;
+    let mut connections = JoinSet::new();
 
     info!(%addr, site_dir = %site_dir, "nostr-dag server listening");
     println!("SERVER_URL=http://{addr}");
@@ -140,9 +143,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let logger_store = Arc::clone(&logger_store);
                 let peer_store = Arc::clone(&peer_store);
                 let http_client = Arc::clone(&http_client);
-                tokio::spawn(async move {
-                    if let Err(err) = handle_connection(stream, &site_dir, logger_store, peer_store, http_client).await {
-                        if is_disconnect_error(&err) {
+                let connection_shutdown = shutdown_rx.clone();
+                connections.spawn(async move {
+                    if let Err(err) = handle_connection(stream, &site_dir, logger_store, peer_store, http_client, connection_shutdown).await {
+                        if is_disconnect_error(&err) || err.kind() == io::ErrorKind::Interrupted {
                             trace!(%peer, ?err, "client disconnected");
                         } else {
                             error!(%peer, ?err, "request failed");
@@ -152,10 +156,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             _ = tokio::signal::ctrl_c() => {
                 info!("shutdown requested");
+                let _ = shutdown_tx.send(());
                 break;
             }
         }
     }
+
+    info!("draining active requests");
+    while let Some(result) = connections.join_next().await {
+        if let Err(err) = result {
+            error!(?err, "request task failed during shutdown");
+        }
+    }
+    info!("shutdown complete");
 
     Ok(())
 }
@@ -166,8 +179,9 @@ async fn handle_connection(
     logger_store: Arc<LoggerStore>,
     peer_store: Arc<PeerStore>,
     http_client: Arc<reqwest::Client>,
+    mut shutdown_rx: watch::Receiver<()>,
 ) -> io::Result<()> {
-    let request = read_http_request(&mut stream).await?;
+    let request = read_http_request(&mut stream, &mut shutdown_rx).await?;
     if request.is_empty() {
         return Ok(());
     }
@@ -199,17 +213,22 @@ async fn handle_connection(
             }
         }
     } else if method == "GET" && path == NIP11_ROUTE_PREFIX {
-        match handle_nip11_get(&request, &http_client).await {
-            Ok((body, content_type)) => response_bytes(200, "OK", body, content_type, head_only),
-            Err(RouteError::BadRequest) => {
-                response_text(400, "Bad Request", "Bad Request", "text/plain; charset=utf-8")
-            }
-            Err(RouteError::NotFound) => {
-                response_text(404, "Not Found", "Not Found", "text/plain; charset=utf-8")
-            }
-            Err(RouteError::Io(err)) => {
-                trace!(?err, path = %path, "failed to proxy nip11 payload");
-                response_text(502, "Bad Gateway", "Bad Gateway", "text/plain; charset=utf-8")
+        tokio::select! {
+            result = handle_nip11_get(&request, &http_client) => match result {
+                Ok((body, content_type)) => response_bytes(200, "OK", body, content_type, head_only),
+                Err(RouteError::BadRequest) => {
+                    response_text(400, "Bad Request", "Bad Request", "text/plain; charset=utf-8")
+                }
+                Err(RouteError::NotFound) => {
+                    response_text(404, "Not Found", "Not Found", "text/plain; charset=utf-8")
+                }
+                Err(RouteError::Io(err)) => {
+                    trace!(?err, path = %path, "failed to proxy nip11 payload");
+                    response_text(502, "Bad Gateway", "Bad Gateway", "text/plain; charset=utf-8")
+                }
+            },
+            _ = shutdown_rx.changed() => {
+                return Err(io::Error::new(io::ErrorKind::Interrupted, "shutdown requested"));
             }
         }
     } else if method != "GET" && method != "HEAD" {
@@ -269,12 +288,17 @@ async fn handle_connection(
     Ok(())
 }
 
-async fn read_http_request(stream: &mut TcpStream) -> io::Result<Vec<u8>> {
+async fn read_http_request(stream: &mut TcpStream, shutdown_rx: &mut watch::Receiver<()>) -> io::Result<Vec<u8>> {
     let mut buffer = Vec::with_capacity(8192);
     let mut chunk = [0u8; 4096];
 
     loop {
-        let bytes_read = stream.read(&mut chunk).await?;
+        let bytes_read = tokio::select! {
+            bytes_read = stream.read(&mut chunk) => bytes_read?,
+            _ = shutdown_rx.changed() => {
+                return Err(io::Error::new(io::ErrorKind::Interrupted, "shutdown requested"));
+            }
+        };
         if bytes_read == 0 {
             break;
         }
