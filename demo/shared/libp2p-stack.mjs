@@ -6,8 +6,7 @@ import { dcutr } from "https://esm.sh/@libp2p/dcutr";
 import { gossipsub } from "https://esm.sh/@libp2p/gossipsub";
 import { identify } from "https://esm.sh/@libp2p/identify";
 import { webSockets } from "https://esm.sh/@libp2p/websockets";
-import { webRTC } from "https://esm.sh/@libp2p/webrtc";
-import { webRTCDirect } from "https://esm.sh/@libp2p/webrtc-direct";
+import { webRTC, webRTCDirect } from "https://esm.sh/@libp2p/webrtc";
 import { noise } from "https://esm.sh/@chainsafe/libp2p-noise";
 import { yamux } from "https://esm.sh/@chainsafe/libp2p-yamux";
 
@@ -84,6 +83,20 @@ const emitLog = (onLog, level, text, state = "checking") => {
   }
 };
 
+const passthroughFilter = (multiaddrs) => (Array.isArray(multiaddrs) ? multiaddrs.filter(Boolean) : []).filter(Boolean);
+
+const ensureTransportFilters = (transport, label, onLog) => {
+  if (typeof transport.listenFilter !== "function") {
+    transport.listenFilter = passthroughFilter;
+    emitLog(onLog, "warn", `${label} transport missing listenFilter; using passthrough`, "checking");
+  }
+  if (typeof transport.dialFilter !== "function") {
+    transport.dialFilter = passthroughFilter;
+    emitLog(onLog, "warn", `${label} transport missing dialFilter; using passthrough`, "checking");
+  }
+  return transport;
+};
+
 // Report every peer lifecycle transition to the UI and optional local /peers registry.
 const emitPeerEvent = (onPeer, onLog, kind, event, level = "debug", state = "checking") => {
   const peer = peerLabel(event);
@@ -141,9 +154,6 @@ function reportPeers(payload) {
 // them one by one and still get a working webSockets-only node as a final fallback.
 export async function createSharedLibp2pStack({
   bootstrapPeers = DEFAULT_BOOTSTRAP_PEERS,
-  includeWebRTC = true,
-  includeWebRTCDirect = true,
-  includeCircuitRelay = true,
   onLog,
   onPeer,
   onStatus,
@@ -153,42 +163,74 @@ export async function createSharedLibp2pStack({
   emitLog(onLog, "info", `bootstrapping with ${peers.length} peer${peers.length === 1 ? "" : "s"}`, "checking");
   emitLog(onLog, "debug", `bootstrap peers configured: ${peers.length}`, "checking");
   emitLog(onLog, "trace", "shared libp2p stack configuring transports and services", "checking");
-  emitLog(onLog, "trace", `transports: webSockets${includeWebRTC ? ", webRTC" : ""}${includeWebRTCDirect ? ", webRTCDirect" : ""}${includeCircuitRelay ? ", circuitRelayTransport" : ""}`, "checking");
+  emitLog(onLog, "trace", "transports: webSockets, webRTC, webRTCDirect, circuitRelayTransport", "checking");
   emitLog(onLog, "trace", "services: identify, autoNAT, dcutr, pubsub", "checking");
 
-  emitLog(onLog, "trace", "constructing libp2p node", "checking");
-  const transports = [webSockets()];
-  if (includeWebRTC) transports.push(webRTC());
-  if (includeWebRTCDirect) transports.push(webRTCDirect());
-  if (includeCircuitRelay) transports.push(circuitRelayTransport({ discoverRelays: 2 }));
-  const node = await createLibp2p({
-    transports,
-    connectionEncrypters: [noise()],
-    streamMuxers: [yamux()],
-    addresses: includeWebRTC || includeWebRTCDirect || includeCircuitRelay ? {
-      listen: [
-        ...(includeWebRTC || includeWebRTCDirect ? ["/webrtc"] : []),
-        ...(includeCircuitRelay ? ["/p2p-circuit"] : []),
+  const configs = [
+    {
+      name: "full browser stack",
+      transports: [
+        ensureTransportFilters(webSockets(), "webSockets", onLog),
+        ensureTransportFilters(webRTC(), "webRTC", onLog),
+        ensureTransportFilters(webRTCDirect(), "webRTCDirect", onLog),
+        ensureTransportFilters(circuitRelayTransport(), "circuitRelayTransport", onLog),
       ],
-    } : {},
-    services: {
-      identify: identify(),
-      autoNAT: autoNAT(),
-      dcutr: dcutr(),
-      pubsub: gossipsub({
-        allowPublishToZeroTopicPeers: true,
-        emitSelf: true,
-      }),
+      addresses: { listen: ["/p2p-circuit", "/webrtc"] },
     },
-    peerDiscovery: peers.length ? [
-      bootstrap({
-        list: peers,
-        interval: 60_000,
-        timeout: 3_000,
-      }),
-    ] : [],
-  });
-  emitLog(onLog, "trace", "libp2p node constructed", "checking");
+    {
+      name: "no webRTCDirect",
+      transports: [
+        ensureTransportFilters(webSockets(), "webSockets", onLog),
+        ensureTransportFilters(webRTC(), "webRTC", onLog),
+        ensureTransportFilters(circuitRelayTransport(), "circuitRelayTransport", onLog),
+      ],
+      addresses: { listen: ["/p2p-circuit", "/webrtc"] },
+    },
+    {
+      name: "webSockets only",
+      transports: [ensureTransportFilters(webSockets(), "webSockets", onLog)],
+      addresses: {},
+    },
+  ];
+
+  let node = null;
+  let lastError = null;
+  for (const config of configs) {
+    try {
+      emitLog(onLog, "trace", `constructing libp2p node (${config.name})`, "checking");
+      node = await createLibp2p({
+        transports: config.transports,
+        addresses: config.addresses,
+        connectionEncrypters: [noise()],
+        streamMuxers: [yamux()],
+        services: {
+          identify: identify(),
+          autoNAT: autoNAT(),
+          dcutr: dcutr(),
+          pubsub: gossipsub({
+            allowPublishToZeroTopicPeers: true,
+            emitSelf: true,
+          }),
+        },
+        peerDiscovery: peers.length ? [
+          bootstrap({
+            list: peers,
+            interval: 60_000,
+            timeout: 3_000,
+          }),
+        ] : [],
+      });
+      emitLog(onLog, "trace", `libp2p node constructed (${config.name})`, "checking");
+      break;
+    } catch (error) {
+      lastError = error;
+      emitLog(onLog, "warn", `libp2p config failed (${config.name}): ${error.message}`, "unavailable");
+    }
+  }
+
+  if (!node) {
+    throw lastError || new Error("unable to create libp2p node");
+  }
 
   node.addEventListener("peer:discovery", (event) => {
     emitPeerEvent(onPeer, onLog, "discovered", event, "debug", "checking");
