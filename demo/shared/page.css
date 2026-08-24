@@ -415,7 +415,7 @@ button:hover, a.button:hover { background:var(--button-hover); }
     gap:6px;
   }
   .footer-copy { flex:0 0 auto; width:100%; justify-content:center; }
-  .footer-status-wrap { display:none; }
+  .footer-status-wrap { display:flex; }
   .footer-level-pills {
     margin-left:0;
     width:100%;
