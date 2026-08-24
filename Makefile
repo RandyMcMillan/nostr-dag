@@ -2,11 +2,12 @@
 
 CARGO ?= cargo
 WASM_PACK ?= wasm-pack
+WASM_TARGET ?= wasm32-unknown-unknown
 GH ?= gh
 BRANCH ?= $(shell git branch --show-current)
 CARGO_TARGET_DIR ?= target
 
-.PHONY: help build test test-all test-native test-js build-relay build-server wasm site demo server clean deploy
+.PHONY: help build test test-all test-native test-js build-relay build-server ensure-wasm-target wasm site demo server clean deploy
 
 help:
 	@printf '%s\n' \
@@ -44,7 +45,10 @@ build-relay:
 build-server:
 	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) $(CARGO) build --bin nostr-dag-server --features native
 
-wasm:
+ensure-wasm-target:
+	@rustup target list --installed | grep -qx "$(WASM_TARGET)" || rustup target add "$(WASM_TARGET)"
+
+wasm: ensure-wasm-target
 	@if ! command -v $(WASM_PACK) >/dev/null 2>&1; then \
 		curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh; \
 	fi
