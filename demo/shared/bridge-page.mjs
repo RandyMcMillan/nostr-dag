@@ -139,6 +139,8 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       return found;
     }
 
+    // libp2p publishes a bridge envelope, not a bare Nostr event.
+    // The `event` field is the standard Nostr event; the rest is bridge metadata.
     function buildBridgeEnvelope(event, direction, relayHints = []) {
       return {
         protocol: BRIDGE_PROTOCOL,
@@ -151,6 +153,8 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       };
     }
 
+    // Accept either a bridge envelope or a raw Nostr event for compatibility.
+    // When relay hints are present, they are forwarded to the Nostr publish path.
     function unwrapBridgeEnvelope(message) {
       if (!message || typeof message !== 'object') return null;
       if (isNostrEvent(message)) {
