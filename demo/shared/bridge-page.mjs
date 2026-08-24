@@ -1,7 +1,6 @@
 // Bridge page logic extracted from demo/bridge/index.html.
 import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     import { verifyEvent } from 'https://esm.sh/nostr-tools@2.10.4/pure';
-    import { createLoggerFooter } from './logger.js';
     import { createSharedHeader } from './page-header.mjs';
     import { resolveHref } from './page-path.js';
     import { createSharedLibp2pStack } from './libp2p-stack.mjs';
@@ -75,19 +74,14 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
 
     const sharedFooterLogBuffer = window.__sharedFooterLogBuffer || [];
     window.__sharedFooterLogBuffer = sharedFooterLogBuffer;
-    if (!window.__sharedFooter) {
-      window.__sharedFooter = createLoggerFooter(document.getElementById('sharedFooter'), {
-        title: 'Logger',
-        initialState: 'idle',
-        initialTitle: 'bridge starting...',
-        initialLevel: 'trace',
-        maxEntries: 5000,
-      });
-    }
-    while (sharedFooterLogBuffer.length) {
-      const [label, text, levelOrState, maybeState] = sharedFooterLogBuffer.shift();
-      window.__sharedFooter.log(label, text, levelOrState, maybeState);
-    }
+    window.__flushSharedFooterLogBuffer = () => {
+      if (!window.__sharedFooter) return;
+      while (sharedFooterLogBuffer.length) {
+        const [label, text, levelOrState, maybeState] = sharedFooterLogBuffer.shift();
+        window.__sharedFooter.log(label, text, levelOrState, maybeState);
+      }
+    };
+    window.__flushSharedFooterLogBuffer();
 
     function setStatus(text, state = 'checking') {
       bridgeStatusEl.className = `status status-${state}`;
@@ -906,15 +900,23 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       }
     }
 
-    restoreRelayCache();
-    scheduleRelayDiscovery(DEFAULT_RELAYS);
-    scheduleRelayDiscovery(relays);
-    scheduleDefaultRelayRender();
-    scheduleRelayRender();
-    schedulePeerRender();
-    void refreshRelayInfo(DEFAULT_RELAYS);
-    void refreshRelayInfo(currentRelayUrls());
-    scheduleRelayDiscovery(currentRelayUrls());
-    window.setTimeout(() => {
-      void startBridge();
-    }, 0);
+    const bootBridge = () => {
+      restoreRelayCache();
+      scheduleRelayDiscovery(DEFAULT_RELAYS);
+      scheduleRelayDiscovery(relays);
+      scheduleDefaultRelayRender();
+      scheduleRelayRender();
+      schedulePeerRender();
+      void refreshRelayInfo(DEFAULT_RELAYS);
+      void refreshRelayInfo(currentRelayUrls());
+      scheduleRelayDiscovery(currentRelayUrls());
+      window.setTimeout(() => {
+        void startBridge();
+      }, 0);
+    };
+
+    if (typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(() => window.setTimeout(bootBridge, 0));
+    } else {
+      window.setTimeout(bootBridge, 0);
+    }
