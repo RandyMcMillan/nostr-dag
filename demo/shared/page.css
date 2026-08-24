@@ -236,6 +236,9 @@ button:hover, a.button:hover { background:var(--button-hover); }
   color:var(--muted);
   word-break:break-word;
   white-space:pre-wrap;
+  border-top:1px solid rgba(148,163,184,.18);
+  padding-top:10px;
+  margin-top:10px;
 }
 
 @media (max-width: 1100px) {
