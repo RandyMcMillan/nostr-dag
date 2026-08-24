@@ -7,7 +7,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
 
     const encoder = new TextEncoder();
     const decoder = new TextDecoder();
-    const CACHE_KEY = 'nostr-dag-bridge-cache-v1';
+    const CACHE_KEY = 'nostr-dag-bridge-cache-v2';
     const DEFAULT_RELAYS = [
       'wss://relay.damus.io',
       'wss://nos.lol',
@@ -148,11 +148,11 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       }
     }
 
-    function scheduleRelayCachePersist() {
+    function scheduleBridgeCachePersist() {
       if (relayCachePersistTimer) return;
       relayCachePersistTimer = window.setTimeout(() => {
         relayCachePersistTimer = null;
-        void persistRelayCache();
+        void persistBridgeCache();
       }, 750);
     }
 
@@ -237,24 +237,26 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         .filter(Boolean);
     }
 
-    async function persistRelayCache() {
+    async function persistBridgeCache() {
       try {
         const payload = {
           relayCatalog: [...relayCatalog.values()],
           relayInfoCatalog: [...relayInfoCatalog.entries()],
+          localPeers: [...localPeers.values()],
+          remotePeers: [...remotePeers.values()],
         };
         window.localStorage.setItem(CACHE_KEY, JSON.stringify(payload));
-        window.__sharedFooter?.log('bridge', 'bridge relay cache persisted', 'trace', 'available');
+        window.__sharedFooter?.log('bridge', 'bridge cache persisted', 'trace', 'available');
       } catch {
-        window.__sharedFooter?.log('bridge', 'bridge relay cache persist failed', 'warn', 'unavailable');
+        window.__sharedFooter?.log('bridge', 'bridge cache persist failed', 'warn', 'unavailable');
       }
     }
 
-    function restoreRelayCache() {
+    function restoreBridgeCache() {
       try {
         const raw = window.localStorage.getItem(CACHE_KEY);
         if (!raw) {
-          window.__sharedFooter?.log('bridge', 'no cached bridge relays found', 'debug', 'idle');
+          window.__sharedFooter?.log('bridge', 'no cached bridge state found', 'debug', 'idle');
           return false;
         }
         const payload = JSON.parse(raw);
@@ -280,10 +282,24 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
             relayInfoCatalog.set(normalized, createNostrRelay(normalized, info));
           }
         }
-        window.__sharedFooter?.log('bridge', 'restored cached bridge relays', 'info', 'available');
+        if (Array.isArray(payload.localPeers)) {
+          localPeers.clear();
+          for (const peer of payload.localPeers) {
+            if (!peer?.peer_id) continue;
+            localPeers.set(peerKey(peer), peer);
+          }
+        }
+        if (Array.isArray(payload.remotePeers)) {
+          remotePeers.clear();
+          for (const peer of payload.remotePeers) {
+            if (!peer?.peer_id) continue;
+            remotePeers.set(peerKey(peer), peer);
+          }
+        }
+        window.__sharedFooter?.log('bridge', `restored cached bridge state (${relayCatalog.size} relay groups, ${localPeers.size + remotePeers.size} peers)`, 'info', 'available');
         return true;
       } catch {
-        window.__sharedFooter?.log('bridge', 'failed to restore cached bridge relays', 'warn', 'unavailable');
+        window.__sharedFooter?.log('bridge', 'failed to restore cached bridge state', 'warn', 'unavailable');
         return false;
       }
     }
@@ -473,6 +489,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       } else {
         remotePeers.set(key, record);
       }
+      scheduleBridgeCachePersist();
     }
 
     function allPeers() {
@@ -650,7 +667,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       });
       window.__sharedFooter?.log('bridge', `relay catalog size ${relayCatalog.size}`, 'trace', 'available');
       scheduleRelayRender();
-      scheduleRelayCachePersist();
+      scheduleBridgeCachePersist();
       scheduleRelayDiscovery([...urls]);
       void refreshRelayInfo([...urls]);
     }
@@ -901,7 +918,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     }
 
     const bootBridge = () => {
-      restoreRelayCache();
+      restoreBridgeCache();
       scheduleRelayDiscovery(DEFAULT_RELAYS);
       scheduleRelayDiscovery(relays);
       scheduleDefaultRelayRender();
