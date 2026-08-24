@@ -350,7 +350,7 @@ async fn route_path(site_dir: &str, path: &str) -> Result<(Vec<u8>, &'static str
         return Ok((FAVICON_ICO.to_vec(), "image/x-icon"));
     }
     let normalized = normalize_path(path)?;
-    let file_path = if normalized.is_empty() {
+    let file_path = if normalized.as_os_str().is_empty() {
         trace!(%path, site_dir = %site_dir, "routing to index.html");
         PathBuf::from(site_dir).join("index.html")
     } else {
