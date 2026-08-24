@@ -428,9 +428,11 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
           }
 
           window.__sharedFooter?.log('bridge', `discover relays from ${relaysToQuery.length} known relays`, 'trace', 'checking');
+          window.__sharedFooter?.log('bridge', `subscribe relay discovery batch: ${relaysToQuery.join(', ')}`, 'trace', 'checking');
           pool.subscribeMany(relaysToQuery, { kinds: [3, 10002], limit: 200 }, {
             onevent(event) {
               if (event.kind === 10002 || event.kind === 3) {
+                window.__sharedFooter?.log('bridge', `discovery event kind ${event.kind} from ${event.pubkey}`, 'trace', 'checking');
                 recordRelayInfo(event);
               }
             },
@@ -497,6 +499,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         relays: [...urls],
         updated_at: Date.now(),
       });
+      window.__sharedFooter?.log('bridge', `relay catalog size ${relayCatalog.size}`, 'trace', 'available');
       scheduleRelayDiscovery([...urls]);
       void refreshRelayInfo([...urls]);
     }
@@ -689,6 +692,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         }
 
         await node.services.pubsub.subscribe(topic);
+        window.__sharedFooter?.log('bridge', `subscribed libp2p pubsub ${topic}`, 'trace', 'available');
         node.services.pubsub.addEventListener('message', (evt) => {
           const payload = evt.detail?.data;
           try {
@@ -702,8 +706,10 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         });
 
         const relaysSnapshot = [...new Set([...DEFAULT_RELAYS, ...currentRelayUrls()])];
+        window.__sharedFooter?.log('bridge', `subscribing Nostr relays: ${relaysSnapshot.join(', ')}`, 'trace', 'checking');
         pool.subscribeMany(relaysSnapshot, { kinds: [0, 1, 3, 10002, 21000], limit: 500 }, {
           onevent(event) {
+            window.__sharedFooter?.log('bridge', `relay event kind ${event.kind} ${event.pubkey}`, 'trace', 'checking');
             void handleNostrEvent(event, 'relay');
           },
           oneose() {},
