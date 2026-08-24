@@ -31,7 +31,7 @@ ensure-wasm-target:
 
 wasm: ensure-wasm-target
     if ! command -v wasm-pack >/dev/null 2>&1; then curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh; fi
-    if command -v brew >/dev/null 2>&1 && brew --prefix llvm >/dev/null 2>&1; then LLVM_PATH=$(brew --prefix llvm); CC="$LLVM_PATH/bin/clang"; AR="$LLVM_PATH/bin/llvm-ar"; else CC=$(command -v clang || xcrun --sdk macosx --find clang); AR=$(command -v llvm-ar || xcrun --sdk macosx --find llvm-ar || command -v ar); fi; CARGO_TARGET_DIR=target CC="$CC" AR="$AR" wasm-pack build --target web --release --out-dir site/pkg -- --no-default-features --features wasm
+    if [ "$(uname -s)" = Darwin ] && command -v brew >/dev/null 2>&1; then if ! brew --prefix llvm >/dev/null 2>&1 || [ ! -x "$(brew --prefix llvm)/bin/clang" ] || [ ! -x "$(brew --prefix llvm)/bin/llvm-ar" ]; then brew install llvm; fi; LLVM_PATH=$(brew --prefix llvm); CC="$LLVM_PATH/bin/clang"; AR="$LLVM_PATH/bin/llvm-ar"; fi; if [ -z "${CC:-}" ]; then CC=$(command -v clang || xcrun --sdk macosx --find clang); AR=$(command -v llvm-ar || xcrun --sdk macosx --find llvm-ar || command -v ar); fi; CARGO_TARGET_DIR=target CC="$CC" AR="$AR" wasm-pack build --target web --release --out-dir site/pkg -- --no-default-features --features wasm
 
 site: wasm
     mkdir -p site
