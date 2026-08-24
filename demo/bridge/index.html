@@ -12,7 +12,7 @@
   <header id="sharedHeader"></header>
 
   <main class="page-content">
-    <div class="panel">
+    <div class="panel bridge-hero">
       <div class="row" style="justify-content:space-between;">
         <div>
           <h1 style="margin:0 0 6px;">Bridge</h1>
@@ -22,7 +22,7 @@
       </div>
     </div>
 
-    <div class="panel">
+    <div class="panel bridge-controls">
       <div class="row">
         <label class="small" style="min-width:100%;">
           Bridge topic
@@ -40,7 +40,7 @@ wss://nostr.wine</textarea>
       </div>
     </div>
 
-    <div class="panel">
+    <div class="panel bridge-metrics">
       <div class="row">
         <span class="pill">Nostr → libp2p: <b id="nostrToLibp2pCount">0</b></span>
         <span class="pill">libp2p → Nostr: <b id="libp2pToNostrCount">0</b></span>
@@ -51,7 +51,7 @@ wss://nostr.wine</textarea>
       <p class="small muted" style="margin-bottom:0;">Events are forwarded as JSON envelopes over libp2p pubsub and published back to the configured WSS relays when received from the swarm.</p>
     </div>
 
-    <div class="panel">
+    <div class="panel bridge-peers">
       <div class="row" style="justify-content:space-between;">
         <div>
           <h2 style="margin:0 0 6px;">Peers</h2>
@@ -178,15 +178,17 @@ wss://nostr.wine</textarea>
         return;
       }
       peerListEl.innerHTML = peers.map((peer) => `
-        <div class="event" style="margin-bottom:10px;">
-          <div class="row" style="justify-content:space-between; align-items:flex-start;">
-            <div>
-              <div><b class="mono">${peer.peer_id}</b></div>
-              <div class="small muted">${peer.kind} · ${peer.path} · ${new Date(peer.updated_at || Date.now()).toLocaleString()}</div>
+        <div class="bridge-peer">
+          <div class="bridge-peer-head">
+            <div class="bridge-peer-title mono">${peer.peer_id}</div>
+            <div class="bridge-peer-meta">
+              <span class="bridge-pill">${peer.kind || 'unknown'}</span>
+              <span class="bridge-pill">${peer.path || '/'}</span>
+              <span class="bridge-pill">${new Date(peer.updated_at || Date.now()).toLocaleTimeString()}</span>
+              <span class="bridge-pill bridge-pill-source">${peer.source || 'browser'}</span>
             </div>
-            <span class="chip">${peer.source || 'browser'}</span>
           </div>
-          <div class="small mono" style="margin-top:8px; word-break:break-word; white-space:pre-wrap;">${peer.detail ? String(peer.detail) : 'no detail'}</div>
+          <div class="bridge-peer-detail mono">${peer.detail ? formatPeerDetail(peer.detail) : 'no detail'}</div>
         </div>
       `).join('');
     }
@@ -231,7 +233,10 @@ wss://nostr.wine</textarea>
         if (detail.id?.toString?.()) fields.push(`id=${detail.id.toString()}`);
         if (detail.multiaddrs?.length) fields.push(`multiaddrs=${detail.multiaddrs.map((addr) => addr?.toString?.() || String(addr)).join(' | ')}`);
         if (detail.type) fields.push(`type=${detail.type}`);
+        if (detail.multihash?.toString?.()) fields.push(`multihash=${detail.multihash.toString()}`);
         if (detail.publicKey) fields.push(`publicKey=${detail.publicKey?.toString?.() || String(detail.publicKey)}`);
+        if (detail.keys && Array.isArray(detail.keys)) fields.push(`keys=${detail.keys.join(',')}`);
+        if (detail.keys && !Array.isArray(detail.keys) && typeof detail.keys === 'string') fields.push(`keys=${detail.keys}`);
         return fields.length ? fields.join(' ') : JSON.stringify(detail);
       }
       return String(detail);
@@ -336,7 +341,7 @@ wss://nostr.wine</textarea>
                   peer_id: peer.peer,
                   kind: peer.kind,
                   path: window.location.pathname || '/',
-                  detail: formatPeerDetail(peer.detail),
+                  detail: peer.detail,
                   source: 'browser',
                   updated_at: Date.now(),
                 });
