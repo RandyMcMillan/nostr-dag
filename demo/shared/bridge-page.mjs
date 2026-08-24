@@ -153,7 +153,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
               </div>
               <div class="bridge-relay-meta">
                 ${source ? `<span class="bridge-pill">${escapeHtml(source)}</span>` : ''}
-                ${info?.error ? `<span class="bridge-pill">NIP-11 unavailable</span>` : hasInfo ? `<span class="bridge-pill">NIP-11 loaded</span>` : loading ? '<span class="bridge-pill">NIP-11 loading</span>' : ''}
+                ${info?.error ? `<span class="bridge-pill">NIP-11 unavailable</span>` : hasInfo ? '<span class="bridge-pill bridge-pill-ok" aria-label="NIP-11 loaded"><span class="bridge-pill-dot" aria-hidden="true"></span></span>' : loading ? '<span class="bridge-pill">NIP-11 loading</span>' : ''}
               </div>
             </div>
           </summary>
@@ -404,20 +404,23 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
 
     function renderRelays() {
       const learnedRelays = [...new Set([...relayCatalog.values()].flatMap((entry) => entry.relays || []))].sort();
-      relayCountEl.textContent = String(learnedRelays.length);
-      window.__sharedFooter?.log('bridge', `render accumulated relays (${learnedRelays.length})`, 'trace', 'checking');
-      if (!learnedRelays.length) {
-        relayListEl.innerHTML = '<div class="small muted">No relays accumulated yet.</div>';
+      const visibleRelays = learnedRelays.filter((relay) => {
+        const info = relayInfoForUrl(relay);
+        return Boolean(info && !info.error);
+      });
+      relayCountEl.textContent = String(visibleRelays.length);
+      window.__sharedFooter?.log('bridge', `render accumulated relays (${visibleRelays.length})`, 'trace', 'checking');
+      if (!visibleRelays.length) {
+        relayListEl.innerHTML = '<div class="small muted">No relays with loaded NIP-11 yet.</div>';
         return;
       }
 
       const learned = new Map([...relayCatalog.values()].flatMap((entry) => (entry.relays || []).map((relay) => [relay, entry])));
-      relayListEl.innerHTML = learnedRelays.map((relay) => {
+      relayListEl.innerHTML = visibleRelays.map((relay) => {
         const source = learned.get(relay);
         const info = relayInfoForUrl(relay);
-        const loading = relayInfoInFlight.has(normalizeRelayUrl(relay) || relay);
         const sourceLabel = source ? `learned from ${source.owner || 'unknown'}` : 'learned';
-        return relayRowHtml(relay, info, sourceLabel, loading);
+        return relayRowHtml(relay, info, sourceLabel, false);
       }).join('');
     }
 
