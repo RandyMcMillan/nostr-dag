@@ -1,7 +1,7 @@
 // Bridge page logic extracted from demo/bridge/index.html.
 import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     import { verifyEvent } from 'https://esm.sh/nostr-tools@2.10.4/pure';
-    import { createLoggerFooter } from './logger-footer.js';
+    import { createLoggerFooter } from './logger.js';
     import { createSharedHeader } from './page-header.mjs';
     import { resolveHref } from './page-path.js';
     import { createSharedLibp2pStack } from './libp2p-stack.mjs';
