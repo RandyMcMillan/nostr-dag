@@ -10,6 +10,36 @@
 </head>
 <body>
   <header id="sharedHeader"></header>
+  <script type="module">
+    import { createLoggerFooter } from '../shared/logger-footer.js';
+    import { createSharedHeader } from '../shared/page-header.mjs';
+    import { resolveHref } from '../shared/page-path.js';
+
+    if (!window.__bridgeChromeInitialized) {
+      window.__bridgeChromeInitialized = true;
+      createSharedHeader(document.getElementById('sharedHeader'), {
+        title: 'nostr-dag',
+        logoHref: resolveHref('../', window.location.href),
+        iconHref: resolveHref('../shared/favicon.ico', window.location.href),
+        subtitleHtml: '',
+        navItems: [
+          { label: 'Demo', href: resolveHref('../', window.location.href) },
+          { label: 'Git viewer', href: resolveHref('../git/', window.location.href) },
+          { label: 'Bridge', href: resolveHref('./', window.location.href), current: true },
+        ],
+      });
+
+      window.__sharedFooter = createLoggerFooter(document.getElementById('sharedFooter'), {
+        title: 'Logger',
+        initialState: 'idle',
+        initialTitle: 'bridge starting...',
+        initialLevel: 'trace',
+        maxEntries: 5000,
+      });
+      window.__sharedFooter.setLevel('trace');
+      window.__sharedFooter.close();
+    }
+  </script>
 
   <main class="page-content">
     <div class="panel bridge-hero">

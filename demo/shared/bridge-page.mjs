@@ -18,17 +18,20 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       'wss://nostr.wine',
     ];
 
-    createSharedHeader(document.getElementById('sharedHeader'), {
-      title: 'nostr-dag',
-      logoHref: resolveHref('../', window.location.href),
-      iconHref: resolveHref('../shared/favicon.ico', window.location.href),
-      subtitleHtml: '',
-      navItems: [
-        { label: 'Demo', href: resolveHref('../', window.location.href) },
-        { label: 'Git viewer', href: resolveHref('../git/', window.location.href) },
-        { label: 'Bridge', href: resolveHref('./', window.location.href), current: true },
-      ],
-    });
+    if (!window.__bridgeChromeInitialized) {
+      createSharedHeader(document.getElementById('sharedHeader'), {
+        title: 'nostr-dag',
+        logoHref: resolveHref('../', window.location.href),
+        iconHref: resolveHref('../shared/favicon.ico', window.location.href),
+        subtitleHtml: '',
+        navItems: [
+          { label: 'Demo', href: resolveHref('../', window.location.href) },
+          { label: 'Git viewer', href: resolveHref('../git/', window.location.href) },
+          { label: 'Bridge', href: resolveHref('./', window.location.href), current: true },
+        ],
+      });
+      window.__bridgeChromeInitialized = true;
+    }
 
     const pool = new SimplePool();
     const seen = new Set();
@@ -69,13 +72,15 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
 
     const sharedFooterLogBuffer = window.__sharedFooterLogBuffer || [];
     window.__sharedFooterLogBuffer = sharedFooterLogBuffer;
-    window.__sharedFooter = createLoggerFooter(document.getElementById('sharedFooter'), {
-      title: 'Logger',
-      initialState: 'idle',
-      initialTitle: 'bridge starting...',
-      initialLevel: 'trace',
-      maxEntries: 5000,
-    });
+    if (!window.__sharedFooter) {
+      window.__sharedFooter = createLoggerFooter(document.getElementById('sharedFooter'), {
+        title: 'Logger',
+        initialState: 'idle',
+        initialTitle: 'bridge starting...',
+        initialLevel: 'trace',
+        maxEntries: 5000,
+      });
+    }
     while (sharedFooterLogBuffer.length) {
       const [label, text, levelOrState, maybeState] = sharedFooterLogBuffer.shift();
       window.__sharedFooter.log(label, text, levelOrState, maybeState);
