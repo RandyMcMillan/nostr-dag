@@ -45,6 +45,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     let relayDiscoveryRunning = false;
     let relayCachePersistTimer = null;
     let bridgePresenceTimer = null;
+    let bridgeVerificationRunning = false;
     let defaultRelayRenderScheduled = false;
     let relayRenderScheduled = false;
     let peerRenderScheduled = false;
@@ -53,7 +54,8 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     const metrics = {
       nostrToLibp2p: 0,
       libp2pToNostr: 0,
-      relayPublishes: 0,
+      relayPublishesAttempted: 0,
+      relayPublishesSucceeded: 0,
     };
 
     const bridgeStatusEl = document.getElementById('bridgeStatus');
@@ -75,6 +77,9 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     let peerPollTimer = null;
     const localPeers = new Map();
     const remotePeers = new Map();
+    const bridgeVerificationQueue = [];
+    const bridgeVerificationSeen = new Map();
+    const bridgeVerificationBackoff = new Map();
 
     const sharedFooterLogBuffer = window.__sharedFooterLogBuffer || [];
     window.__sharedFooterLogBuffer = sharedFooterLogBuffer;
@@ -107,7 +112,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       nostrToLibp2pCountEl.textContent = String(metrics.nostrToLibp2p);
       libp2pToNostrCountEl.textContent = String(metrics.libp2pToNostr);
       seenCountEl.textContent = String(seen.size);
-      relayPublishCountEl.textContent = String(metrics.relayPublishes);
+      relayPublishCountEl.textContent = `${metrics.relayPublishesSucceeded}/${metrics.relayPublishesAttempted}`;
     }
 
     function bytesToHex(bytes) {
@@ -324,6 +329,73 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         bridgePresenceTimer = null;
         void broadcastBridgePresence(relayHints);
       }, 1000);
+    }
+
+    function verificationKey(eventId, relay) {
+      return `${eventId}:${relay}`;
+    }
+
+    function verificationBlocked(key) {
+      const until = bridgeVerificationBackoff.get(key);
+      if (!until) return false;
+      if (until > Date.now()) return true;
+      bridgeVerificationBackoff.delete(key);
+      return false;
+    }
+
+    function cacheVerification(eventId, relay, verified) {
+      const key = verificationKey(eventId, relay);
+      bridgeVerificationSeen.set(key, {
+        verified,
+        at: Date.now(),
+      });
+    }
+
+    function scheduleBridgeVerification(event, relayHints = [], reason = 'publish') {
+      if (!event?.id) return;
+      const relaysToCheck = prioritizeRelayUrls([
+        ...collectBridgeRelayHints(relayHints),
+        ...currentRelayUrls(),
+        ...DEFAULT_RELAYS,
+      ]).slice(0, 2);
+      for (const relay of relaysToCheck) {
+        const key = verificationKey(event.id, relay);
+        if (bridgeVerificationSeen.has(key) || verificationBlocked(key)) continue;
+        bridgeVerificationQueue.push({ event, relay, reason });
+        bridgeVerificationBackoff.set(key, Date.now() + 10_000);
+      }
+      void processBridgeVerificationQueue();
+    }
+
+    async function processBridgeVerificationQueue() {
+      if (bridgeVerificationRunning) return;
+      bridgeVerificationRunning = true;
+      try {
+        while (bridgeVerificationQueue.length) {
+          const { event, relay, reason } = bridgeVerificationQueue.shift();
+          const key = verificationKey(event.id, relay);
+          if (bridgeVerificationSeen.has(key)) continue;
+
+          window.__sharedFooter?.log('bridge', `verify ${reason} ${event.id} from ${relay}`, 'trace', 'checking');
+          try {
+            const verifiedEvents = await pool.querySync([relay], { ids: [event.id], limit: 1 }, { maxWait: 2000, label: 'bridge-verify' });
+            const found = Array.isArray(verifiedEvents) && verifiedEvents.some((item) => item?.id === event.id);
+            cacheVerification(event.id, relay, found);
+            if (found) {
+              window.__sharedFooter?.log('bridge', `verify ok ${event.id} from ${relay}`, 'info', 'available');
+            } else {
+              window.__sharedFooter?.log('bridge', `verify miss ${event.id} from ${relay}`, 'warn', 'checking');
+            }
+          } catch (error) {
+            bridgeVerificationBackoff.set(key, Date.now() + 60_000);
+            window.__sharedFooter?.log('bridge', `verify failed ${event.id} from ${relay}: ${error?.message || error}`, 'warn', 'unavailable');
+          }
+
+          await Promise.resolve();
+        }
+      } finally {
+        bridgeVerificationRunning = false;
+      }
     }
 
     function relayRowHtml(relay, info, source, loading) {
@@ -947,12 +1019,17 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         throw new Error('no relays configured');
       }
       const publishTargets = publishRelays.map((relay) => pool.publish([relay], event));
-      const result = await Promise.any(publishTargets);
-      metrics.relayPublishes += 1;
-      metrics.libp2pToNostr += direction === 'libp2p->nostr' ? 1 : 0;
+      const results = await Promise.allSettled(publishTargets);
+      const successes = results.filter((result) => result.status === 'fulfilled');
+      const failures = results.filter((result) => result.status === 'rejected');
+      metrics.relayPublishesAttempted += results.length;
+      metrics.relayPublishesSucceeded += successes.length;
+      metrics.libp2pToNostr += successes.length;
       refreshMetrics();
       window.__sharedFooter?.log('bridge', `${direction} ${event.kind} ${event.id} via ${publishRelays.join(', ')}`, 'info', 'available');
-      return result;
+      window.__sharedFooter?.log('bridge', `publish responses ${event.id}: ${successes.length}/${results.length} ok`, failures.length ? 'warn' : 'info', failures.length ? 'checking' : 'available');
+      scheduleBridgeVerification(event, publishRelays, direction);
+      return successes[0]?.value || null;
     }
 
     async function broadcastBridgePresence(relayHints = currentRelayUrls()) {
@@ -978,7 +1055,8 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         window.__sharedFooter?.log('bridge', `presence publish response ${relay} ${event.id}: ${response}`, 'info', 'available');
       }));
       const failed = results.filter((result) => result.status === 'rejected');
-      metrics.relayPublishes += results.length - failed.length;
+      metrics.relayPublishesAttempted += results.length;
+      metrics.relayPublishesSucceeded += results.length - failed.length;
       metrics.libp2pToNostr += results.length - failed.length;
       refreshMetrics();
       if (failed.length) {
@@ -987,6 +1065,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         }
       }
       window.__sharedFooter?.log('bridge', `bridge presence broadcast complete (${results.length - failed.length}/${results.length})`, failed.length ? 'warn' : 'info', failed.length ? 'checking' : 'available');
+      scheduleBridgeVerification(event, publishRelays, 'presence');
     }
 
     async function handleNostrEvent(event, source = 'relay') {
