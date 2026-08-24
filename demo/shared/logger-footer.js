@@ -182,7 +182,10 @@ export function createLoggerFooter(root, options = {}) {
     <div class="sticky-footer-inner small muted">
       <div class="footer-header">
         <div class="footer-status-wrap">
-          <span data-footer-status class="status status-idle" title=""></span>
+          <span data-footer-status class="status status-idle" title="">
+            <span class="status-dot" aria-hidden="true"></span>
+            <span data-footer-status-text>idle</span>
+          </span>
         </div>
         <div class="footer-log-wrap">
           <div class="footer-controls">
@@ -202,6 +205,7 @@ export function createLoggerFooter(root, options = {}) {
   `;
 
   const statusEl = root.querySelector('[data-footer-status]');
+  const statusTextEl = root.querySelector('[data-footer-status-text]');
   const toggleEl = root.querySelector('[data-footer-toggle]');
   const chevronEl = root.querySelector('[data-footer-chevron]');
   const copyEl = root.querySelector('[data-footer-copy]');
@@ -365,6 +369,7 @@ export function createLoggerFooter(root, options = {}) {
   function setState(state, text) {
     const nextState = state || normalizeState(text);
     statusEl.className = `status status-${nextState}`;
+    if (statusTextEl) statusTextEl.textContent = nextState;
     statusEl.title = text || initialTitle;
   }
 
