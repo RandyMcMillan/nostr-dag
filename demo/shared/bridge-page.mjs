@@ -274,7 +274,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     }
 
     function refreshRelayInfo(relayUrls) {
-      const urls = [...new Set((relayUrls || currentRelayUrls()).map((url) => normalizeRelayUrl(url)).filter(Boolean))];
+      const urls = prioritizeRelayUrls(relayUrls || currentRelayUrls());
       if (!urls.length) return;
       window.__sharedFooter?.log('bridge', `refresh nip11 for ${urls.length} relays`, 'trace', 'checking');
       for (const url of urls) {
@@ -400,8 +400,18 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       ])];
     }
 
+    function prioritizeRelayUrls(relayUrls) {
+      const normalized = [...new Set(relayUrls.map((url) => normalizeRelayUrl(url)).filter(Boolean))];
+      normalized.sort((a, b) => {
+        if (a === 'wss://nos.lol') return -1;
+        if (b === 'wss://nos.lol') return 1;
+        return a.localeCompare(b);
+      });
+      return normalized;
+    }
+
     function scheduleRelayDiscovery(relayUrls = currentRelayUrls()) {
-      const urls = [...new Set(relayUrls.map((url) => normalizeRelayUrl(url)).filter(Boolean))];
+      const urls = prioritizeRelayUrls(relayUrls);
       let added = false;
       for (const url of urls) {
         if (relayDiscoverySeen.has(url) || relayDiscoveryQueue.has(url)) continue;
@@ -429,16 +439,14 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
           }
 
           window.__sharedFooter?.log('bridge', `discover relays from ${relaysToQuery.length} known relays`, 'trace', 'checking');
-          window.__sharedFooter?.log('bridge', `subscribe relay discovery batch: ${relaysToQuery.join(', ')}`, 'trace', 'checking');
+          window.__sharedFooter?.log('bridge', `subscribe relay discovery batch (generic dump): ${relaysToQuery.join(', ')}`, 'trace', 'checking');
           for (const relay of relaysToQuery) {
             window.__sharedFooter?.log('bridge', `query known relay ${relay}`, 'trace', 'checking');
           }
-          pool.subscribeMany(relaysToQuery, { kinds: [3, 10002], limit: 200 }, {
+          pool.subscribeMany(relaysToQuery, { limit: 200 }, {
             onevent(event) {
-              if (event.kind === 10002 || event.kind === 3) {
-                window.__sharedFooter?.log('bridge', `discovery event kind ${event.kind} from ${event.pubkey}`, 'trace', 'checking');
-                recordRelayInfo(event);
-              }
+              window.__sharedFooter?.log('bridge', `discovery event kind ${event.kind} from ${event.pubkey || 'unknown'}`, 'trace', 'checking');
+              recordRelayInfo(event);
             },
             oneose() {},
           });
@@ -482,19 +490,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
 
     function recordRelayInfo(event) {
       if (!event?.pubkey) return;
-      const urls = new Set();
-      if (event.kind === 10002) {
-        for (const tag of event.tags || []) {
-          if (tag?.[0] === 'r' && tag?.[1]) collectRelayUrls(tag[1], urls);
-        }
-      } else if (event.kind === 3) {
-        try {
-          const legacy = typeof event.content === 'string' ? JSON.parse(event.content || '{}') : event.content || {};
-          collectRelayUrls(legacy, urls);
-        } catch {
-          collectRelayUrls(event.content || '', urls);
-        }
-      }
+      const urls = extractRelayUrlsFromEvent(event);
       if (!urls.size) return;
       window.__sharedFooter?.log('bridge', `accumulate ${urls.size} relays from kind ${event.kind} ${event.pubkey}`, 'trace', 'checking');
       relayCatalog.set(event.pubkey, {
@@ -506,6 +502,26 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       window.__sharedFooter?.log('bridge', `relay catalog size ${relayCatalog.size}`, 'trace', 'available');
       scheduleRelayDiscovery([...urls]);
       void refreshRelayInfo([...urls]);
+    }
+
+    function extractRelayUrlsFromEvent(event) {
+      const urls = new Set();
+      if (!event || typeof event !== 'object') return urls;
+      collectRelayUrls(event.tags || [], urls);
+      if (typeof event.content === 'string') {
+        try {
+          collectRelayUrls(JSON.parse(event.content || '{}'), urls);
+        } catch {
+          collectRelayUrls(event.content, urls);
+        }
+      } else {
+        collectRelayUrls(event.content, urls);
+      }
+      for (const value of Object.values(event)) {
+        if (value === event.tags || value === event.content) continue;
+        collectRelayUrls(value, urls);
+      }
+      return urls;
     }
 
     function formatPeerDetail(detail) {
@@ -709,7 +725,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
           }
         });
 
-        const relaysSnapshot = [...new Set([...DEFAULT_RELAYS, ...currentRelayUrls()])];
+        const relaysSnapshot = prioritizeRelayUrls([...DEFAULT_RELAYS, ...currentRelayUrls()]);
         window.__sharedFooter?.log('bridge', `subscribing Nostr relays: ${relaysSnapshot.join(', ')}`, 'trace', 'checking');
         pool.subscribeMany(relaysSnapshot, { kinds: [0, 1, 3, 10002, 21000], limit: 500 }, {
           onevent(event) {
