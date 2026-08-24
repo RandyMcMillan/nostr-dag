@@ -142,7 +142,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let http_client = Arc::clone(&http_client);
                 tokio::spawn(async move {
                     if let Err(err) = handle_connection(stream, &site_dir, logger_store, peer_store, http_client).await {
-                        error!(%peer, ?err, "request failed");
+                        if is_disconnect_error(&err) {
+                            trace!(%peer, ?err, "client disconnected");
+                        } else {
+                            error!(%peer, ?err, "request failed");
+                        }
                     }
                 });
             }
@@ -438,6 +442,13 @@ fn now_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+fn is_disconnect_error(err: &io::Error) -> bool {
+    matches!(
+        err.kind(),
+        io::ErrorKind::BrokenPipe | io::ErrorKind::ConnectionReset | io::ErrorKind::UnexpectedEof
+    )
 }
 
 async fn route_path(site_dir: &str, path: &str) -> Result<(Vec<u8>, &'static str), RouteError> {
