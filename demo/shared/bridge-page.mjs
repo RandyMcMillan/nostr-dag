@@ -88,7 +88,8 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
 
     function setStatus(text, state = 'checking') {
       bridgeStatusEl.className = `status status-${state}`;
-      bridgeStatusEl.innerHTML = `<span class="status-dot"></span><span>${text}</span>`;
+      bridgeStatusEl.innerHTML = `<span class="status-dot"></span><span></span>`;
+      bridgeStatusEl.querySelector('span:last-child').textContent = text;
       window.__sharedFooter?.log('bridge', text, state === 'available' ? 'info' : state, state);
     }
 
