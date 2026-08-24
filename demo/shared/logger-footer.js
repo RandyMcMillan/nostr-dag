@@ -215,6 +215,7 @@ export function createLoggerFooter(root, options = {}) {
   let footerObserver = null;
   let scrollbarTimer = null;
   let scrollbarListenersBound = false;
+  let renderScheduled = false;
 
   function persistState() {
     savePersistedFooterState(storageKey, { open, level });
@@ -305,6 +306,7 @@ export function createLoggerFooter(root, options = {}) {
   }
 
   function render() {
+    renderScheduled = false;
     chevronEl.className = `footer-chevron${open ? ' open' : ''}`;
     toggleEl.setAttribute('aria-expanded', open ? 'true' : 'false');
     renderLevelPills();
@@ -321,6 +323,17 @@ export function createLoggerFooter(root, options = {}) {
     scheduleScrollBottom();
     syncFooterSpacer();
     if (open) showScrollbars();
+  }
+
+  function scheduleRender() {
+    if (renderScheduled) return;
+    renderScheduled = true;
+    const run = () => render();
+    if (typeof globalThis.requestAnimationFrame === 'function') {
+      globalThis.requestAnimationFrame(run);
+    } else {
+      setTimeout(run, 0);
+    }
   }
 
   function copyVisibleLogs() {
@@ -379,7 +392,7 @@ export function createLoggerFooter(root, options = {}) {
     while (logs.length > maxEntries) logs.shift();
     setState(entry.state, label ? `${label}: ${text}` : String(text));
     mirrorLogEntry(entry);
-    render();
+    scheduleRender();
   }
 
   toggleEl.addEventListener('click', () => {
