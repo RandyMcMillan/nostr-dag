@@ -1,6 +1,6 @@
 // Bridge page logic extracted from demo/bridge/index.html.
 import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
-    import { verifyEvent } from 'https://esm.sh/nostr-tools@2.10.4/pure';
+    import { finalizeEvent, generateSecretKey, getPublicKey, verifyEvent } from 'https://esm.sh/nostr-tools@2.10.4/pure';
     import { createSharedHeader } from './page-header.mjs';
     import { resolveHref } from './page-path.js';
     import { createSharedLibp2pStack } from './libp2p-stack.mjs';
@@ -8,6 +8,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     const encoder = new TextEncoder();
     const decoder = new TextDecoder();
     const CACHE_KEY = 'nostr-dag-bridge-cache-v2';
+    const SIGNER_KEY = 'nostr-dag-bridge-signer-v1';
     const BRIDGE_PROTOCOL = 'nostr-dag-bridge';
     const BRIDGE_PROTOCOL_VERSION = 1;
     const DEFAULT_RELAYS = [
@@ -43,6 +44,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     const relayDiscoverySeen = new Set();
     let relayDiscoveryRunning = false;
     let relayCachePersistTimer = null;
+    let bridgePresenceTimer = null;
     let defaultRelayRenderScheduled = false;
     let relayRenderScheduled = false;
     let peerRenderScheduled = false;
@@ -108,6 +110,59 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       relayPublishCountEl.textContent = String(metrics.relayPublishes);
     }
 
+    function bytesToHex(bytes) {
+      return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+    }
+
+    function hexToBytes(hex) {
+      const clean = String(hex || '').trim();
+      if (!clean || clean.length % 2 !== 0) return null;
+      const out = new Uint8Array(clean.length / 2);
+      for (let i = 0; i < out.length; i += 1) {
+        const part = clean.slice(i * 2, i * 2 + 2);
+        const value = Number.parseInt(part, 16);
+        if (!Number.isFinite(value)) return null;
+        out[i] = value;
+      }
+      return out;
+    }
+
+    function getBridgeSigner() {
+      try {
+        const raw = window.localStorage.getItem(SIGNER_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          const secretKey = hexToBytes(parsed?.secretKeyHex);
+          if (secretKey) {
+            return {
+              secretKey,
+              publicKey: parsed?.publicKey || getPublicKey(secretKey),
+              created_at: parsed?.created_at || Date.now(),
+            };
+          }
+        }
+      } catch {
+        // fall through and create a new signer
+      }
+
+      const secretKey = generateSecretKey();
+      const signer = {
+        secretKey,
+        publicKey: getPublicKey(secretKey),
+        created_at: Date.now(),
+      };
+      try {
+        window.localStorage.setItem(SIGNER_KEY, JSON.stringify({
+          secretKeyHex: bytesToHex(secretKey),
+          publicKey: signer.publicKey,
+          created_at: signer.created_at,
+        }));
+      } catch {
+        // best effort only
+      }
+      return signer;
+    }
+
     function isNostrEvent(value) {
       return Boolean(
         value &&
@@ -151,6 +206,36 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         topic,
         ts: Date.now(),
       };
+    }
+
+    function buildBridgePresenceEvent(relayHints = []) {
+      const signer = getBridgeSigner();
+      const publishRelays = prioritizeRelayUrls([
+        ...collectBridgeRelayHints(relayHints),
+        ...currentRelayUrls(),
+        ...DEFAULT_RELAYS,
+      ]);
+      const payload = {
+        name: 'nostr-dag bridge',
+        display_name: 'nostr-dag bridge',
+        about: `libp2p peer ${node?.peerId?.toString?.() || 'starting'} broadcasting to Nostr relays.`,
+        bridge_peer_id: node?.peerId?.toString?.() || '',
+        bridge_protocol: BRIDGE_PROTOCOL,
+        bridge_topic: topic,
+        bridge_relays: publishRelays,
+        bridge_version: BRIDGE_PROTOCOL_VERSION,
+        updated_at: new Date().toISOString(),
+      };
+      return finalizeEvent({
+        kind: 0,
+        created_at: Math.floor(Date.now() / 1000),
+        tags: [
+          ['t', 'nostr-dag'],
+          ['t', 'bridge'],
+        ],
+        content: JSON.stringify(payload),
+        pubkey: signer.publicKey,
+      }, signer.secretKey);
     }
 
     // Accept either a bridge envelope or a raw Nostr event for compatibility.
@@ -231,6 +316,14 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         relayCachePersistTimer = null;
         void persistBridgeCache();
       }, 750);
+    }
+
+    function scheduleBridgePresenceBroadcast(relayHints = currentRelayUrls()) {
+      if (bridgePresenceTimer) clearTimeout(bridgePresenceTimer);
+      bridgePresenceTimer = window.setTimeout(() => {
+        bridgePresenceTimer = null;
+        void broadcastBridgePresence(relayHints);
+      }, 1000);
     }
 
     function relayRowHtml(relay, info, source, loading) {
@@ -746,6 +839,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       scheduleRelayRender();
       scheduleBridgeCachePersist();
       scheduleRelayDiscovery([...urls]);
+      scheduleBridgePresenceBroadcast([...urls]);
       void refreshRelayInfo([...urls]);
     }
 
@@ -859,6 +953,40 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       refreshMetrics();
       window.__sharedFooter?.log('bridge', `${direction} ${event.kind} ${event.id} via ${publishRelays.join(', ')}`, 'info', 'available');
       return result;
+    }
+
+    async function broadcastBridgePresence(relayHints = currentRelayUrls()) {
+      if (!node) return;
+      const publishRelays = prioritizeRelayUrls([
+        ...collectBridgeRelayHints(relayHints),
+        ...currentRelayUrls(),
+        ...DEFAULT_RELAYS,
+      ]);
+      if (!publishRelays.length) return;
+
+      const event = buildBridgePresenceEvent(publishRelays);
+      if (!verifyEvent(event)) {
+        window.__sharedFooter?.log('bridge', 'bridge presence event failed verification', 'error', 'unavailable');
+        return;
+      }
+
+      logRawNostrEvent('bridge presence raw', event);
+      window.__sharedFooter?.log('bridge', `broadcast bridge presence ${event.id} to ${publishRelays.length} relays`, 'info', 'checking');
+      const results = await Promise.allSettled(publishRelays.map(async (relay) => {
+        window.__sharedFooter?.log('bridge', `presence publish request ${relay} ${event.id}`, 'trace', 'checking');
+        const response = await pool.publish([relay], event);
+        window.__sharedFooter?.log('bridge', `presence publish response ${relay} ${event.id}: ${response}`, 'info', 'available');
+      }));
+      const failed = results.filter((result) => result.status === 'rejected');
+      metrics.relayPublishes += results.length - failed.length;
+      metrics.libp2pToNostr += results.length - failed.length;
+      refreshMetrics();
+      if (failed.length) {
+        for (const result of failed) {
+          window.__sharedFooter?.log('bridge', `presence publish failed: ${result.reason?.message || result.reason || 'unknown error'}`, 'warn', 'unavailable');
+        }
+      }
+      window.__sharedFooter?.log('bridge', `bridge presence broadcast complete (${results.length - failed.length}/${results.length})`, failed.length ? 'warn' : 'info', failed.length ? 'checking' : 'available');
     }
 
     async function handleNostrEvent(event, source = 'relay') {
@@ -987,6 +1115,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         }
         void refreshRelayInfo(relaysSnapshot);
         scheduleRelayDiscovery(relaysSnapshot);
+        scheduleBridgePresenceBroadcast(relaysSnapshot);
         void pollPeers();
         peerPollTimer = window.setInterval(() => {
           void pollPeers();
@@ -1007,6 +1136,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       void refreshRelayInfo(DEFAULT_RELAYS);
       void refreshRelayInfo(currentRelayUrls());
       scheduleRelayDiscovery(currentRelayUrls());
+      scheduleBridgePresenceBroadcast(currentRelayUrls());
       window.setTimeout(() => {
         void startBridge();
       }, 0);
