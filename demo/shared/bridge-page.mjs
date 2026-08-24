@@ -237,22 +237,28 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         const source = learned.get(relay);
         const info = relayInfoForUrl(relay);
         const loading = relayInfoInFlight.has(normalizeRelayUrl(relay) || relay);
+        const hasInfo = Boolean(info && !info.error);
+        const fields = hasInfo ? [
+          info.name || '',
+          info.description || '',
+          info.version ? `v${info.version}` : '',
+        ].filter(Boolean) : [];
         return `
           <div class="bridge-relay-row">
             <div class="bridge-relay-url mono">
               <div>${escapeHtml(relay)}</div>
-              ${info ? `<div class="small muted" style="margin-top:4px;">${escapeHtml(info.name || info.description || info.version || 'NIP-11 document loaded')}</div>` : loading ? '<div class="small muted" style="margin-top:4px;">Loading NIP-11…</div>' : ''}
+              ${hasInfo ? `<div class="small muted" style="margin-top:4px;">${escapeHtml(fields.join(' · '))}</div>` : loading ? '<div class="small muted" style="margin-top:4px;">Loading NIP-11…</div>' : ''}
             </div>
             <div class="bridge-relay-meta">
               <span class="bridge-pill">${source ? `learned from ${escapeHtml(source.owner || 'unknown')}` : 'configured'}</span>
               ${source ? `<span class="bridge-pill bridge-pill-source">kind ${escapeHtml(source.kind || 'unknown')}</span>` : ''}
-              ${info?.error ? `<span class="bridge-pill">NIP-11 unavailable</span>` : info ? `<span class="bridge-pill">NIP-11 loaded</span>` : loading ? '<span class="bridge-pill">NIP-11 loading</span>' : ''}
+              ${info?.error ? `<span class="bridge-pill">NIP-11 unavailable</span>` : hasInfo ? `<span class="bridge-pill">NIP-11 loaded</span>` : loading ? '<span class="bridge-pill">NIP-11 loading</span>' : ''}
             </div>
           </div>
           <div class="bridge-relay-details">
             ${info?.error ? `
               <div class="small muted">NIP-11 fetch failed: ${escapeHtml(info.error)}</div>
-            ` : info ? `
+            ` : hasInfo ? `
               <div class="small muted" style="margin-bottom:6px;">
                 ${info.name ? `<b>${escapeHtml(info.name)}</b>` : 'unnamed relay'}
                 ${info.version ? ` · v${escapeHtml(info.version)}` : ''}
