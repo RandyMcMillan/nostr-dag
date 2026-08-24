@@ -77,6 +77,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       maxEntries: 5000,
     });
     window.__sharedFooter.setLevel('trace');
+    window.__sharedFooter.close();
     while (sharedFooterLogBuffer.length) {
       const [label, text, levelOrState, maybeState] = sharedFooterLogBuffer.shift();
       window.__sharedFooter.log(label, text, levelOrState, maybeState);
