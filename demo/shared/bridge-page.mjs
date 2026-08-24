@@ -355,13 +355,15 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       const urls = prioritizeRelayUrls(relayUrls || currentRelayUrls());
       if (!urls.length) return;
       window.__sharedFooter?.log('bridge', `refresh nip11 for ${urls.length} relays`, 'trace', 'checking');
-      for (const url of urls) {
-        void fetchRelayInfo(url).finally(() => {
+      void (async () => {
+        for (const url of urls) {
+          await fetchRelayInfo(url);
           renderDefaultRelays();
           renderRelays();
           renderPeers();
-        });
-      }
+          await Promise.resolve();
+        }
+      })();
     }
 
     function renderDefaultRelays() {
