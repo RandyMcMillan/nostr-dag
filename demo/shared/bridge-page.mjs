@@ -209,12 +209,15 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       return request;
     }
 
-    async function refreshRelayInfo(relayUrls) {
+    function refreshRelayInfo(relayUrls) {
       const urls = [...new Set((relayUrls || currentRelayUrls()).map((url) => normalizeRelayUrl(url)).filter(Boolean))];
       if (!urls.length) return;
-      await Promise.allSettled(urls.map((url) => fetchRelayInfo(url)));
-      renderRelays();
-      renderPeers();
+      for (const url of urls) {
+        void fetchRelayInfo(url).finally(() => {
+          renderRelays();
+          renderPeers();
+        });
+      }
     }
 
     function renderRelays() {
