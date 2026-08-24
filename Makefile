@@ -49,6 +49,7 @@ ensure-wasm-target:
 	@rustup target list --installed | grep -qx "$(WASM_TARGET)" || rustup target add "$(WASM_TARGET)"
 
 wasm: ensure-wasm-target
+	rm -rf ./site
 	@if ! command -v $(WASM_PACK) >/dev/null 2>&1; then \
 		curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh; \
 	fi

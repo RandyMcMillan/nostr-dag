@@ -27,6 +27,7 @@ build-server:
     CARGO_TARGET_DIR=target cargo build --bin nostr-dag-server --features native
 
 ensure-wasm-target:
+    rm -rf ./site
     if ! rustup target list --installed | grep -qx wasm32-unknown-unknown; then rustup target add wasm32-unknown-unknown; fi
 
 wasm: ensure-wasm-target
