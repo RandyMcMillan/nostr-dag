@@ -191,7 +191,7 @@ export function createLoggerFooter(root, options = {}) {
               <span>${title}</span>
             </button>
             <div class="footer-actions">
-              <button data-footer-copy class="footer-copy" type="button">Copy</button>
+              <button data-footer-copy class="footer-copy" type="button">Save</button>
               <div class="footer-level-pills" data-footer-level></div>
             </div>
           </div>
@@ -336,39 +336,30 @@ export function createLoggerFooter(root, options = {}) {
     }
   }
 
-  function copyVisibleLogs() {
+  function saveVisibleLogs() {
     const visibleLogs = level === 'none' ? [] : logs.filter((entry) => entry.level === level);
     const text = visibleLogs.map((entry) => `[${entry.time}] ${entry.label ? `${entry.label}: ` : ''}${entry.text}`).join('\n');
-    if (!text) return;
+    const filename = `nostr-dag-${Math.floor(Date.now() / 1000)}.log`;
+    const blob = new Blob([text ? `${text}\n` : ''], { type: 'text/plain;charset=utf-8' });
+    const url = globalThis.URL?.createObjectURL?.(blob);
 
-    const copyWithClipboard = async () => {
-      if (globalThis.navigator?.clipboard?.writeText) {
-        await globalThis.navigator.clipboard.writeText(text);
-        return true;
-      }
-      return false;
-    };
-
-    void (async () => {
-      try {
-        const copied = await copyWithClipboard();
-        if (!copied) {
-          const textarea = globalThis.document?.createElement('textarea');
-          if (!textarea) return;
-          textarea.value = text;
-          textarea.setAttribute('readonly', 'true');
-          textarea.style.position = 'fixed';
-          textarea.style.opacity = '0';
-          globalThis.document.body.appendChild(textarea);
-          textarea.select();
-          globalThis.document.execCommand?.('copy');
-          textarea.remove();
-        }
-        log('logger', `copied ${visibleLogs.length} log lines`, 'debug', 'available');
-      } catch {
-        log('logger', 'copy logs failed', 'warn', 'unavailable');
-      }
-    })();
+    try {
+      if (!url) throw new Error('object-url-unavailable');
+      const anchor = globalThis.document?.createElement('a');
+      if (!anchor) throw new Error('download-anchor-unavailable');
+      anchor.href = url;
+      anchor.download = filename;
+      anchor.rel = 'noopener';
+      anchor.style.display = 'none';
+      globalThis.document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      setTimeout(() => globalThis.URL?.revokeObjectURL?.(url), 0);
+      log('logger', `saved ${visibleLogs.length} log lines to ${filename}`, 'debug', 'available');
+    } catch {
+      if (url) globalThis.URL?.revokeObjectURL?.(url);
+      log('logger', 'save logs failed', 'warn', 'unavailable');
+    }
   }
 
   function setState(state, text) {
@@ -402,7 +393,7 @@ export function createLoggerFooter(root, options = {}) {
     dispatchWindowResize();
   });
 
-  copyEl?.addEventListener('click', copyVisibleLogs);
+  copyEl?.addEventListener('click', saveVisibleLogs);
 
   setState(initialState, initialTitle);
   bindScrollLock();
