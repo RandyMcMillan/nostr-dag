@@ -42,7 +42,9 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     const relayDiscoverySeen = new Set();
     let relayDiscoveryRunning = false;
     let relayCachePersistTimer = null;
+    let defaultRelayRenderScheduled = false;
     let relayRenderScheduled = false;
+    let peerRenderScheduled = false;
     let rawEventLogCount = 0;
     let rawEventLogSuppressed = false;
     const metrics = {
@@ -52,8 +54,6 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     };
 
     const bridgeStatusEl = document.getElementById('bridgeStatus');
-    const topicInputEl = document.getElementById('topicInput');
-    const relayInputEl = document.getElementById('relayInput');
     const nostrToLibp2pCountEl = document.getElementById('nostrToLibp2pCount');
     const libp2pToNostrCountEl = document.getElementById('libp2pToNostrCount');
     const seenCountEl = document.getElementById('seenCount');
@@ -66,7 +66,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     const peerListEl = document.getElementById('peerList');
 
     let node = null;
-    let topic = topicInputEl.value.trim();
+    let topic = 'nostr/bridge';
     let relays = DEFAULT_RELAYS.slice();
     let started = false;
     let peerPollTimer = null;
@@ -112,14 +112,40 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       relayPublishCountEl.textContent = String(metrics.relayPublishes);
     }
 
-    function scheduleRelayRenders() {
+    function scheduleDefaultRelayRender() {
+      if (defaultRelayRenderScheduled) return;
+      defaultRelayRenderScheduled = true;
+      const run = () => {
+        renderDefaultRelays();
+        defaultRelayRenderScheduled = false;
+      };
+      if (typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(run);
+      } else {
+        window.setTimeout(run, 0);
+      }
+    }
+
+    function scheduleRelayRender() {
       if (relayRenderScheduled) return;
       relayRenderScheduled = true;
       const run = () => {
-        relayRenderScheduled = false;
-        renderDefaultRelays();
         renderRelays();
+        relayRenderScheduled = false;
+      };
+      if (typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(run);
+      } else {
+        window.setTimeout(run, 0);
+      }
+    }
+
+    function schedulePeerRender() {
+      if (peerRenderScheduled) return;
+      peerRenderScheduled = true;
+      const run = () => {
         renderPeers();
+        peerRenderScheduled = false;
       };
       if (typeof window.requestAnimationFrame === 'function') {
         window.requestAnimationFrame(run);
@@ -230,7 +256,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       }
     }
 
-    async function restoreRelayCache() {
+    function restoreRelayCache() {
       try {
         const raw = window.localStorage.getItem(CACHE_KEY);
         if (!raw) {
@@ -249,7 +275,6 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
               relays: [...new Set(entry.relays.map((relay) => normalizeRelayUrl(relay)).filter(Boolean))],
               updated_at: entry.updated_at || Date.now(),
             });
-            if (i % 10 === 9) await Promise.resolve();
           }
         }
         if (Array.isArray(payload.relayInfoCatalog)) {
@@ -259,7 +284,6 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
             const normalized = normalizeRelayUrl(url);
             if (!normalized || !info) continue;
             relayInfoCatalog.set(normalized, createNostrRelay(normalized, info));
-            if (i % 10 === 9) await Promise.resolve();
           }
         }
         window.__sharedFooter?.log('bridge', 'restored cached bridge relays', 'info', 'available');
@@ -385,7 +409,8 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       void (async () => {
         for (const url of urls) {
           await fetchRelayInfo(url);
-          scheduleRelayRenders();
+          scheduleDefaultRelayRender();
+          scheduleRelayRender();
           await Promise.resolve();
         }
       })();
@@ -500,22 +525,15 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         for (const peer of Array.isArray(peers) ? peers : []) {
           upsertPeer('localhost', peer);
         }
-        renderPeers();
+        schedulePeerRender();
       } catch (e) {
-        renderPeers();
+        schedulePeerRender();
       }
-    }
-
-    function parseRelays(value) {
-      return value
-        .split(/\s+/)
-        .map((line) => line.trim())
-        .filter(Boolean);
     }
 
     function currentRelayUrls() {
       return [...new Set([
-        ...parseRelays(relayInputEl.value),
+        ...relays,
         ...[...relayCatalog.values()].flatMap((entry) => entry.relays || []),
       ])];
     }
@@ -630,7 +648,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         updated_at: Date.now(),
       });
       window.__sharedFooter?.log('bridge', `relay catalog size ${relayCatalog.size}`, 'trace', 'available');
-      scheduleRelayRenders();
+      scheduleRelayRender();
       scheduleRelayCachePersist();
       scheduleRelayDiscovery([...urls]);
       void refreshRelayInfo([...urls]);
@@ -761,7 +779,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       }
       if (event.kind === 10002 || event.kind === 3) {
         recordRelayInfo(event);
-        scheduleRelayRenders();
+        scheduleRelayRender();
       }
       window.__sharedFooter?.log('nostr', `${source} kind ${event.kind} ${event.id} by ${event.pubkey}`, 'trace', 'checking');
       try {
@@ -789,9 +807,6 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     async function startBridge() {
       if (started) return;
       started = true;
-      relays = parseRelays(relayInputEl.value);
-      topic = topicInputEl.value.trim() || 'nostr/bridge';
-
       setStatus('starting libp2p node', 'checking');
       try {
         const configs = [
@@ -823,7 +838,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
                   relay_info: [...relayCatalog.values()],
                   updated_at: Date.now(),
                 });
-                renderPeers();
+                schedulePeerRender();
               },
               onStatus(state, peerId) {
                 setStatus(`${state} ${peerId}`, state === 'started' ? 'available' : 'checking');
@@ -874,7 +889,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         }
         void refreshRelayInfo(relaysSnapshot);
         scheduleRelayDiscovery(relaysSnapshot);
-        await pollPeers();
+        void pollPeers();
         peerPollTimer = window.setInterval(() => {
           void pollPeers();
         }, 2000);
@@ -884,25 +899,15 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       }
     }
 
-    topicInputEl.addEventListener('change', () => {
-      topic = topicInputEl.value.trim() || 'nostr/bridge';
-      window.__sharedFooter?.log('bridge', `topic updated to ${topic}`, 'debug', 'checking');
-    });
-
-    relayInputEl.addEventListener('change', () => {
-      relays = parseRelays(relayInputEl.value);
-      scheduleRelayRenders();
-      void refreshRelayInfo(relays);
-      scheduleRelayDiscovery(relays);
-      window.__sharedFooter?.log('bridge', `relay list updated (${relays.length})`, 'debug', 'checking');
-    });
-
-    scheduleRelayRenders();
-    void restoreRelayCache().then(() => {
-      scheduleRelayRenders();
-      void refreshRelayInfo(currentRelayUrls());
-      scheduleRelayDiscovery(currentRelayUrls());
-    });
+    restoreRelayCache();
     scheduleRelayDiscovery(DEFAULT_RELAYS);
     scheduleRelayDiscovery(relays);
-    void startBridge();
+    scheduleDefaultRelayRender();
+    scheduleRelayRender();
+    schedulePeerRender();
+    void refreshRelayInfo(DEFAULT_RELAYS);
+    void refreshRelayInfo(currentRelayUrls());
+    scheduleRelayDiscovery(currentRelayUrls());
+    window.setTimeout(() => {
+      void startBridge();
+    }, 0);
