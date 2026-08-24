@@ -234,6 +234,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
           let lastError = null;
           for (const candidate of candidates) {
             try {
+              window.__sharedFooter?.log('bridge', `query relay ${normalized} via ${candidate}`, 'trace', 'checking');
               const response = await fetch(candidate, {
                 method: 'GET',
                 cache: 'no-store',
@@ -429,6 +430,9 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
 
           window.__sharedFooter?.log('bridge', `discover relays from ${relaysToQuery.length} known relays`, 'trace', 'checking');
           window.__sharedFooter?.log('bridge', `subscribe relay discovery batch: ${relaysToQuery.join(', ')}`, 'trace', 'checking');
+          for (const relay of relaysToQuery) {
+            window.__sharedFooter?.log('bridge', `query known relay ${relay}`, 'trace', 'checking');
+          }
           pool.subscribeMany(relaysToQuery, { kinds: [3, 10002], limit: 200 }, {
             onevent(event) {
               if (event.kind === 10002 || event.kind === 3) {
@@ -717,6 +721,9 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
 
         setStatus(`bridging ${relaysSnapshot.length} relays on ${topic}`, 'available');
         window.__sharedFooter?.log('bridge', `bridge ready on topic ${topic}`, 'info', 'available');
+        for (const relay of relaysSnapshot) {
+          window.__sharedFooter?.log('bridge', `query nostr relay ${relay}`, 'trace', 'checking');
+        }
         void refreshRelayInfo(relaysSnapshot);
         scheduleRelayDiscovery(relaysSnapshot);
         await pollPeers();
