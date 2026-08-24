@@ -67,39 +67,6 @@
       </div>
     </details>
 
-    <div class="panel bridge-controls">
-      <div class="row">
-        <label class="small" style="min-width:100%;">
-          Bridge topic
-          <input id="topicInput" type="text" value="nostr/bridge" style="width:100%; margin-top:6px;" />
-        </label>
-        <label class="small" style="min-width:100%;">
-          Default relays
-          <textarea id="relayInput" rows="5" style="width:100%; margin-top:6px;">wss://relay.damus.io
-wss://nos.lol
-wss://relay.nostr.com
-wss://relay.nostr.band
-wss://relay.primal.net
-wss://nostr.wine</textarea>
-        </label>
-      </div>
-    </div>
-
-    <details class="panel bridge-collapsible">
-      <summary class="bridge-collapsible-summary">
-        <div class="row" style="justify-content:space-between;">
-          <div>
-            <h2 style="margin:0 0 6px;">Default Relays</h2>
-            <div class="small muted">Seed relays used by the bridge on startup.</div>
-          </div>
-          <div class="pill">Count: <b id="defaultRelayCount">0</b></div>
-        </div>
-      </summary>
-      <div class="bridge-collapsible-body">
-        <div id="defaultRelayList" class="bridge-relay-list"></div>
-      </div>
-    </details>
-
     <details class="panel bridge-collapsible">
       <summary class="bridge-collapsible-summary">
         <div class="row" style="justify-content:space-between;">
