@@ -185,6 +185,41 @@ wss://nostr.wine</textarea>
         .filter(Boolean);
     }
 
+    function createNostrRelay(relayUrl, data = {}) {
+      const url = normalizeRelayUrl(relayUrl) || String(relayUrl || '').trim();
+      const limitation = data.limitation && typeof data.limitation === 'object' ? data.limitation : {};
+      return {
+        url,
+        fetch_url: data.fetch_url || '',
+        fetched_at: data.fetched_at || 0,
+        name: data.name || '',
+        description: data.description || '',
+        pubkey: data.pubkey || '',
+        contact: data.contact || '',
+        software: data.software || '',
+        version: data.version || '',
+        icon: data.icon || '',
+        negentropy: Boolean(data.negentropy),
+        supported_nips: Array.isArray(data.supported_nips)
+          ? data.supported_nips.filter((nip) => Number.isFinite(Number(nip))).map((nip) => Number(nip))
+          : [],
+        limitation: {
+          max_limit: limitation.max_limit ?? null,
+          max_message_length: limitation.max_message_length ?? null,
+          max_subscriptions: limitation.max_subscriptions ?? null,
+          max_filters: limitation.max_filters ?? null,
+          max_event_tags: limitation.max_event_tags ?? null,
+          max_content_length: limitation.max_content_length ?? null,
+          min_pow_difficulty: limitation.min_pow_difficulty ?? null,
+          auth_required: Boolean(limitation.auth_required),
+          payment_required: Boolean(limitation.payment_required),
+        },
+        relay_countries: Array.isArray(data.relay_countries) ? data.relay_countries.filter(Boolean) : [],
+        learned_from: data.learned_from || '',
+        error: data.error || '',
+      };
+    }
+
     function nip11FetchUrl(relayUrl) {
       const normalized = normalizeRelayUrl(relayUrl);
       if (!normalized) return null;
@@ -223,12 +258,11 @@ wss://nostr.wine</textarea>
               });
               if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
               const data = await response.json();
-              const record = {
-                url: normalized,
+              const record = createNostrRelay(normalized, {
+                ...data,
                 fetch_url: candidate,
                 fetched_at: Date.now(),
-                ...data,
-              };
+              });
               relayInfoCatalog.set(normalized, record);
               return record;
             } catch (error) {
@@ -237,12 +271,11 @@ wss://nostr.wine</textarea>
           }
           throw lastError || new Error('unable to fetch NIP-11');
         } catch (error) {
-          const record = {
-            url: normalized,
+          const record = createNostrRelay(normalized, {
             fetch_url: fetchUrl,
             fetched_at: Date.now(),
             error: error?.message || String(error),
-          };
+          });
           relayInfoCatalog.set(normalized, record);
           return record;
         } finally {
