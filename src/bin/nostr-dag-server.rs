@@ -7,13 +7,14 @@
 use std::env;
 use std::io;
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use tokio::fs;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::Semaphore;
 use tracing::{debug, error, info, trace};
 
 use nostr_dag::FAVICON_ICO;
@@ -25,6 +26,7 @@ const LOGGER_ROUTE_PREFIX: &str = "/logger";
 const LOGGER_MAX_ENTRIES: usize = 10_000;
 const PEERS_ROUTE_PREFIX: &str = "/peers";
 const NIP11_ROUTE_PREFIX: &str = "/nip11";
+const NIP11_MAX_CONCURRENT: usize = 8;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct LoggerEntry {
@@ -54,6 +56,12 @@ struct PeerEntry {
 #[derive(Default)]
 struct PeerStore {
     entries: Mutex<std::collections::BTreeMap<String, PeerEntry>>,
+}
+
+static NIP11_SEMAPHORE: OnceLock<Semaphore> = OnceLock::new();
+
+fn nip11_semaphore() -> &'static Semaphore {
+    NIP11_SEMAPHORE.get_or_init(|| Semaphore::new(NIP11_MAX_CONCURRENT))
 }
 
 impl LoggerStore {
@@ -358,6 +366,10 @@ async fn handle_nip11_get(
     request: &str,
     http_client: &Arc<reqwest::Client>,
 ) -> Result<(Vec<u8>, &'static str), RouteError> {
+    let _permit = nip11_semaphore()
+        .acquire()
+        .await
+        .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))?;
     let relay = query_param(request, "relay").ok_or(RouteError::BadRequest)?;
     let relay = urlencoding::decode(&relay)
         .map_err(|_| RouteError::BadRequest)?
