@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="light dark" />
+  <link rel="icon" href="../shared/favicon.ico" />
+  <link rel="stylesheet" href="../shared/page.css" />
+  <title>nostr-dag Relay Detail</title>
+</head>
+<body>
+  <header id="sharedHeader"></header>
+  <script type="module">
+    import { createLoggerFooter } from '../shared/logger.js';
+    import { createSharedHeader } from '../shared/page-header.mjs';
+    import { resolveHref } from '../shared/page-path.js';
+
+    if (!window.__bridgeChromeInitialized) {
+      window.__bridgeChromeInitialized = true;
+      createSharedHeader(document.getElementById('sharedHeader'), {
+        title: 'nostr-dag',
+        logoHref: resolveHref('../', window.location.href),
+        iconHref: resolveHref('../shared/favicon.ico', window.location.href),
+        subtitleHtml: '',
+        navItems: [
+          { label: 'Demo', href: resolveHref('../', window.location.href) },
+          { label: 'Git viewer', href: resolveHref('../git/', window.location.href) },
+          { label: 'Bridge', href: resolveHref('./', window.location.href), current: true },
+        ],
+      });
+
+      const initFooter = () => {
+        window.__sharedFooter = createLoggerFooter(document.getElementById('sharedFooter'), {
+          title: 'Logger',
+          initialState: 'idle',
+          initialTitle: 'relay detail loading...',
+          initialLevel: 'trace',
+          maxEntries: 5000,
+        });
+        window.__sharedFooter.close();
+        window.__flushSharedFooterLogBuffer?.();
+      };
+      if (typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(() => window.setTimeout(initFooter, 0));
+      } else {
+        window.setTimeout(initFooter, 0);
+      }
+    }
+  </script>
+
+  <main class="page-content">
+    <div id="relayDetail" class="panel bridge-relay-detail-page"></div>
+  </main>
+
+  <footer id="sharedFooter"></footer>
+
+  <script type="module">
+    import '../shared/bridge-relay-page.mjs';
+  </script>
+</body>
+</html>

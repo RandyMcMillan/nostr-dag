@@ -46,7 +46,7 @@ site: wasm
     cp demo/git/index.html site/git/index.html
     cp demo/git/blame.html site/git/blame.html
     mkdir -p site/bridge
-    cp demo/bridge/index.html site/bridge/index.html
+    cp demo/bridge/*.html site/bridge/
 
 demo:
     ./demo/run.sh

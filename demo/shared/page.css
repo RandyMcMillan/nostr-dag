@@ -307,6 +307,21 @@ button:hover, a.button:hover { background:var(--button-hover); }
   gap:12px;
 }
 
+.bridge-relay-link {
+  display:block;
+  color:inherit;
+  text-decoration:none;
+}
+
+.bridge-relay-link:hover {
+  border-color:var(--accent);
+  background:rgba(255,255,255,.03);
+}
+
+.bridge-relay-detail-card {
+  padding:0;
+}
+
 .bridge-relay-learned {
   margin-top:6px;
   overflow-wrap:anywhere;
@@ -328,6 +343,27 @@ button:hover, a.button:hover { background:var(--button-hover); }
 
 .bridge-relay-details {
   padding:10px 12px 12px;
+}
+
+.bridge-relay-section + .bridge-relay-section {
+  margin-top:12px;
+}
+
+.bridge-relay-section-title {
+  margin:0 0 8px;
+  font-size:13px;
+}
+
+.bridge-relay-pre {
+  margin:0;
+  padding:12px;
+  border:1px solid var(--border);
+  border-radius:10px;
+  background:var(--surface);
+  color:var(--fg);
+  overflow:auto;
+  white-space:pre-wrap;
+  word-break:break-word;
 }
 
 .bridge-relay-grid {

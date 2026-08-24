@@ -408,9 +408,10 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       const learnedFrom = source && source !== 'default'
         ? `<div class="bridge-relay-learned small muted">Learned from ${escapeHtml(source)}</div>`
         : '';
+      const detailHref = resolveHref(`./relay.html?relay=${encodeURIComponent(relay)}`, window.location.href);
       return `
-        <details class="bridge-card bridge-relay-card">
-          <summary class="bridge-card-summary">
+        <a class="bridge-card bridge-relay-card bridge-relay-link" href="${escapeHtml(detailHref)}">
+          <div class="bridge-card-summary">
             <div class="bridge-relay-row">
               <div class="bridge-relay-url mono">
                 <div>${escapeHtml(relay)}</div>
@@ -421,42 +422,8 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
               </div>
             </div>
             ${learnedFrom}
-          </summary>
-          <div class="bridge-relay-details">
-          ${info?.error ? `
-            <div class="small muted">NIP-11 fetch failed: ${escapeHtml(info.error)}</div>
-          ` : hasInfo ? `
-            <div class="small muted" style="margin-bottom:6px;">
-              ${info.name ? `<b>${escapeHtml(info.name)}</b>` : 'unnamed relay'}
-              ${info.version ? ` · v${escapeHtml(info.version)}` : ''}
-            </div>
-            ${info.description ? `<div class="small muted">${escapeHtml(info.description)}</div>` : ''}
-            <div class="bridge-relay-grid" style="margin-top:8px;">
-              ${info.pubkey ? `<span class="bridge-pill bridge-pill-relay">pubkey ${escapeHtml(info.pubkey)}</span>` : ''}
-              ${info.contact ? `<span class="bridge-pill bridge-pill-relay">${escapeHtml(info.contact)}</span>` : ''}
-              ${info.software ? `<span class="bridge-pill bridge-pill-relay">${escapeHtml(info.software)}</span>` : ''}
-              ${info.icon ? `<span class="bridge-pill bridge-pill-relay">icon</span>` : ''}
-              ${info.negentropy ? '<span class="bridge-pill bridge-pill-relay">negentropy</span>' : ''}
-              ${typeof info.limitation?.auth_required === 'boolean' ? `<span class="bridge-pill bridge-pill-relay">${info.limitation.auth_required ? 'auth required' : 'no auth'}</span>` : ''}
-              ${typeof info.limitation?.payment_required === 'boolean' ? `<span class="bridge-pill bridge-pill-relay">${info.limitation.payment_required ? 'payment required' : 'free'}</span>` : ''}
-            </div>
-            <div class="bridge-relay-grid" style="margin-top:8px;">
-              ${Array.isArray(info.supported_nips) && info.supported_nips.length
-                ? info.supported_nips.map((nip) => `<span class="bridge-pill bridge-pill-relay">NIP-${escapeHtml(nip)}</span>`).join('')
-                : '<span class="bridge-pill">supported_nips unknown</span>'}
-            </div>
-            ${Array.isArray(info.relay_countries) && info.relay_countries.length ? `
-              <div class="bridge-relay-grid" style="margin-top:8px;">
-                ${info.relay_countries.map((country) => `<span class="bridge-pill bridge-pill-relay">${escapeHtml(country)}</span>`).join('')}
-              </div>
-            ` : ''}
-          ` : loading ? `
-            <div class="small muted">Loading NIP-11 metadata…</div>
-          ` : `
-            <div class="small muted">NIP-11 metadata not loaded yet.</div>
-          `}
           </div>
-        </details>
+        </a>
       `;
     }
 
