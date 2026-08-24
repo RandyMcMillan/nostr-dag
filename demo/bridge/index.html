@@ -110,6 +110,8 @@ wss://nostr.wine</textarea>
     const pool = new SimplePool();
     const seen = new Set();
     const relayCatalog = new Map();
+    const relayInfoCatalog = new Map();
+    const relayInfoInFlight = new Map();
     const metrics = {
       nostrToLibp2p: 0,
       libp2pToNostr: 0,
@@ -173,6 +175,76 @@ wss://nostr.wine</textarea>
       relayPublishCountEl.textContent = String(metrics.relayPublishes);
     }
 
+    function relayInfoForUrl(url) {
+      return relayInfoCatalog.get(normalizeRelayUrl(url) || url) || null;
+    }
+
+    function relayInfoForUrls(urls) {
+      return [...new Set(urls.map((url) => normalizeRelayUrl(url) || url))]
+        .map((url) => relayInfoForUrl(url))
+        .filter(Boolean);
+    }
+
+    function nip11FetchUrl(relayUrl) {
+      const normalized = normalizeRelayUrl(relayUrl);
+      if (!normalized) return null;
+      const parsed = new URL(normalized);
+      if (parsed.protocol === 'ws:') parsed.protocol = 'http:';
+      if (parsed.protocol === 'wss:') parsed.protocol = 'https:';
+      return parsed.toString().replace(/\/$/, '');
+    }
+
+    async function fetchRelayInfo(relayUrl) {
+      const normalized = normalizeRelayUrl(relayUrl);
+      const fetchUrl = nip11FetchUrl(relayUrl);
+      if (!normalized) return null;
+      if (relayInfoCatalog.has(normalized)) return relayInfoCatalog.get(normalized);
+      if (relayInfoInFlight.has(normalized)) return relayInfoInFlight.get(normalized);
+
+      const request = (async () => {
+        try {
+          if (!fetchUrl) throw new Error('invalid relay url');
+          const response = await fetch(fetchUrl, {
+            method: 'GET',
+            cache: 'no-store',
+            headers: { Accept: 'application/nostr+json' },
+          });
+          if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+          const data = await response.json();
+          const record = {
+            url: normalized,
+            fetch_url: fetchUrl,
+            fetched_at: Date.now(),
+            ...data,
+          };
+          relayInfoCatalog.set(normalized, record);
+          return record;
+        } catch (error) {
+          const record = {
+            url: normalized,
+            fetch_url: fetchUrl,
+            fetched_at: Date.now(),
+            error: error?.message || String(error),
+          };
+          relayInfoCatalog.set(normalized, record);
+          return record;
+        } finally {
+          relayInfoInFlight.delete(normalized);
+        }
+      })();
+
+      relayInfoInFlight.set(normalized, request);
+      return request;
+    }
+
+    async function refreshRelayInfo(relayUrls) {
+      const urls = [...new Set((relayUrls || currentRelayUrls()).map((url) => normalizeRelayUrl(url)).filter(Boolean))];
+      if (!urls.length) return;
+      await Promise.allSettled(urls.map((url) => fetchRelayInfo(url)));
+      renderRelays();
+      renderPeers();
+    }
+
     function renderRelays() {
       const entries = [...new Set([
         ...parseRelays(relayInputEl.value),
@@ -188,12 +260,17 @@ wss://nostr.wine</textarea>
       const learned = new Map([...relayCatalog.values()].flatMap((entry) => (entry.relays || []).map((relay) => [relay, entry])));
       relayListEl.innerHTML = entries.map((relay) => {
         const source = learned.get(relay);
+        const info = relayInfoForUrl(relay);
         return `
           <div class="bridge-relay-row">
-            <div class="bridge-relay-url mono">${escapeHtml(relay)}</div>
+            <div class="bridge-relay-url mono">
+              <div>${escapeHtml(relay)}</div>
+              ${info ? `<div class="small muted" style="margin-top:4px;">${escapeHtml(info.name || info.description || info.version || 'NIP-11 document loaded')}</div>` : ''}
+            </div>
             <div class="bridge-relay-meta">
               <span class="bridge-pill">${source ? `learned from ${escapeHtml(source.owner || 'unknown')}` : 'configured'}</span>
               ${source ? `<span class="bridge-pill bridge-pill-source">kind ${escapeHtml(source.kind || 'unknown')}</span>` : ''}
+              ${info?.error ? `<span class="bridge-pill">NIP-11 unavailable</span>` : info ? `<span class="bridge-pill">NIP-11 loaded</span>` : ''}
             </div>
           </div>
         `;
@@ -248,25 +325,65 @@ wss://nostr.wine</textarea>
                     .map((relay) => `<span class="bridge-pill bridge-pill-relay">${escapeHtml(relay)}</span>`).join('')
                 : '<span class="bridge-pill">none</span>'}
             </div>
-            ${relaySources.length ? `
-              <div class="bridge-peer-relay-sources">
-                <div class="bridge-peer-relay-source-head mono">Nostr relay info</div>
-                ${relaySources.map((entry) => `
-                  <div class="bridge-peer-relay-source">
-                    <div class="bridge-peer-relay-source-head mono">${escapeHtml(entry.owner || 'unknown')} · kind ${escapeHtml(entry.kind || 'unknown')}</div>
-                    <div class="bridge-relay-grid" style="margin-top:6px;">
-                      ${(entry.relays || []).length
-                        ? entry.relays.map((relay) => `<span class="bridge-pill bridge-pill-relay">${escapeHtml(relay)}</span>`).join('')
-                        : '<span class="bridge-pill">none</span>'}
-                    </div>
-                  </div>
-                `).join('')}
-              </div>
-            ` : ''}
+            ${renderRelayInfoBlocks(peer.relays && peer.relays.length ? peer.relays : relaysNow)}
           </div>
           <div class="bridge-peer-detail mono">${peer.detail ? escapeHtml(formatPeerDetail(peer.detail)) : 'no detail'}</div>
         </div>
       `).join('');
+    }
+
+    function renderRelayInfoBlocks(relayUrls) {
+      const infos = relayInfoForUrls(relayUrls);
+      if (!infos.length) {
+        return '<div class="small muted" style="margin-top:8px;">NIP-11 relay info not loaded yet.</div>';
+      }
+      return `
+        <div class="bridge-peer-relay-sources">
+          <div class="bridge-peer-relay-source-head mono">NIP-11 relay info</div>
+          ${infos.map((info) => `
+            <div class="bridge-peer-relay-source">
+              <div class="bridge-peer-relay-source-head mono">${escapeHtml(info.url || 'unknown')}</div>
+              <div class="small muted" style="margin-top:4px;">
+                ${escapeHtml(info.name || 'unnamed relay')}
+                ${info.version ? ` · v${escapeHtml(info.version)}` : ''}
+              </div>
+              ${info.description ? `<div class="small muted" style="margin-top:6px;">${escapeHtml(info.description)}</div>` : ''}
+              <div class="bridge-relay-grid" style="margin-top:8px;">
+                ${info.pubkey ? `<span class="bridge-pill bridge-pill-relay">pubkey ${escapeHtml(info.pubkey)}</span>` : ''}
+                ${info.icon ? `<span class="bridge-pill bridge-pill-relay">icon</span>` : ''}
+                ${info.negentropy ? '<span class="bridge-pill bridge-pill-relay">negentropy</span>' : ''}
+                ${typeof info.limitation?.auth_required === 'boolean' ? `<span class="bridge-pill bridge-pill-relay">${info.limitation.auth_required ? 'auth required' : 'no auth'}</span>` : ''}
+                ${typeof info.limitation?.payment_required === 'boolean' ? `<span class="bridge-pill bridge-pill-relay">${info.limitation.payment_required ? 'payment required' : 'free'}</span>` : ''}
+              </div>
+              <div class="bridge-relay-grid" style="margin-top:8px;">
+                ${Array.isArray(info.supported_nips) && info.supported_nips.length
+                  ? info.supported_nips.map((nip) => `<span class="bridge-pill bridge-pill-relay">NIP-${escapeHtml(nip)}</span>`).join('')
+                  : '<span class="bridge-pill">supported_nips unknown</span>'}
+              </div>
+              <div class="small muted" style="margin-top:8px;">
+                ${info.contact ? `contact: ${escapeHtml(info.contact)}` : ''}
+                ${info.software ? `${info.contact ? ' · ' : ''}software: ${escapeHtml(info.software)}` : ''}
+                ${info.version && (info.contact || info.software) ? ' · ' : ''}
+                ${info.version ? `version: ${escapeHtml(info.version)}` : ''}
+              </div>
+              ${info.limitation ? `
+                <div class="small muted" style="margin-top:8px;">
+                  limitation:
+                  ${Object.entries(info.limitation)
+                    .filter(([, value]) => value !== undefined && value !== null && value !== '')
+                    .map(([key, value]) => `${escapeHtml(key)}=${escapeHtml(Array.isArray(value) ? value.join(',') : value)}`)
+                    .join(' · ')}
+                </div>
+              ` : ''}
+              ${Array.isArray(info.relay_countries) && info.relay_countries.length ? `
+                <div class="bridge-relay-grid" style="margin-top:8px;">
+                  ${info.relay_countries.map((country) => `<span class="bridge-pill bridge-pill-relay">${escapeHtml(country)}</span>`).join('')}
+                </div>
+              ` : ''}
+            </div>
+          `).join('')}
+        </div>
+      `;
     }
 
     // Poll the local preview server when available. Pages deployments just render browser peers.
@@ -351,6 +468,7 @@ wss://nostr.wine</textarea>
         relays: [...urls],
         updated_at: Date.now(),
       });
+      void refreshRelayInfo([...urls]);
     }
 
     function formatPeerDetail(detail) {
@@ -517,10 +635,10 @@ wss://nostr.wine</textarea>
                   detail: peer.detail,
                   source: 'browser',
                   relays: currentRelayUrls(),
-                    relay_info: [...relayCatalog.values()],
-                    updated_at: Date.now(),
-                  });
-                  renderPeers();
+                  relay_info: [...relayCatalog.values()],
+                  updated_at: Date.now(),
+                });
+                renderPeers();
               },
               onStatus(state, peerId) {
                 setStatus(`${state} ${peerId}`, state === 'started' ? 'available' : 'checking');
@@ -563,6 +681,7 @@ wss://nostr.wine</textarea>
 
         setStatus(`bridging ${relaysSnapshot.length} relays on ${topic}`, 'available');
         window.__sharedFooter?.log('bridge', `bridge ready on topic ${topic}`, 'info', 'available');
+        void refreshRelayInfo(relaysSnapshot);
         await pollPeers();
         peerPollTimer = window.setInterval(() => {
           void pollPeers();
@@ -581,6 +700,7 @@ wss://nostr.wine</textarea>
     relayInputEl.addEventListener('change', () => {
       relays = parseRelays(relayInputEl.value);
       renderRelays();
+      void refreshRelayInfo(relays);
       window.__sharedFooter?.log('bridge', `relay list updated (${relays.length})`, 'debug', 'checking');
     });
 
