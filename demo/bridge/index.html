@@ -52,6 +52,21 @@
       </div>
     </div>
 
+    <details class="panel bridge-collapsible">
+      <summary class="bridge-collapsible-summary">
+        <div class="row" style="justify-content:space-between;">
+          <div>
+            <h2 style="margin:0 0 6px;">Peers</h2>
+            <div class="small muted">Live local browser peers plus the optional localhost <code>/peers</code> registry.</div>
+          </div>
+          <div class="pill">Count: <b id="peerCount">0</b></div>
+        </div>
+      </summary>
+      <div class="bridge-collapsible-body">
+        <div id="peerList"></div>
+      </div>
+    </details>
+
     <div class="panel bridge-controls">
       <div class="row">
         <label class="small" style="min-width:100%;">
@@ -110,21 +125,6 @@ wss://nostr.wine</textarea>
       <div class="small muted" style="margin-top:10px;">Bridge peer will also report to <code>/peers</code> when running on localhost.</div>
       <p class="small muted" style="margin-bottom:0;">Events are forwarded as JSON envelopes over libp2p pubsub and published back to the configured WSS relays when received from the swarm.</p>
     </div>
-
-    <details class="panel bridge-collapsible">
-      <summary class="bridge-collapsible-summary">
-        <div class="row" style="justify-content:space-between;">
-          <div>
-            <h2 style="margin:0 0 6px;">Peers</h2>
-            <div class="small muted">Live local browser peers plus the optional localhost <code>/peers</code> registry.</div>
-          </div>
-          <div class="pill">Count: <b id="peerCount">0</b></div>
-        </div>
-      </summary>
-      <div class="bridge-collapsible-body">
-        <div id="peerList"></div>
-      </div>
-    </details>
   </main>
 
   <footer id="sharedFooter"></footer>
