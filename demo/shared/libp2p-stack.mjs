@@ -22,13 +22,59 @@ export const DEFAULT_BOOTSTRAP_PEERS = [
 const peerLabel = (event) => event?.detail?.peerId?.toString?.() || event?.detail?.remotePeer?.toString?.() || "peer";
 
 const describePeerDetail = (detail) => {
-  if (!detail || typeof detail !== "object") return "no detail";
+  const scalarText = (value) => {
+    if (value == null) return "";
+    if (typeof value === "string") return value;
+    if (typeof value === "number" || typeof value === "boolean") return String(value);
+    if (typeof value?.toString === "function") {
+      const text = value.toString();
+      if (text && text !== "[object Object]") return text;
+    }
+    if (value?.bytes instanceof Uint8Array) {
+      return [...value.bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+    }
+    if (value?.multihash?.bytes instanceof Uint8Array) {
+      return [...value.multihash.bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+    }
+    return "";
+  };
+  const parseKeyValueString = (text) => {
+    const entries = [];
+    for (const token of String(text).split(/\s+/)) {
+      const [key, ...rest] = token.split("=");
+      if (!key || !rest.length) continue;
+      entries.push([key, rest.join("=")]);
+    }
+    return entries;
+  };
+  const entriesToText = (entries) => entries
+    .flatMap(([key, value]) => {
+      if (value == null || value === "") return [];
+      if (key === "keys") {
+        return ["keys:", ...String(value).split(",").filter(Boolean).map((item) => `  - ${item}`)];
+      }
+      return [`${key}: ${value}`];
+    })
+    .join("\n");
+  if (!detail) return "no detail";
+  if (typeof detail === "string") {
+    const parsed = parseKeyValueString(detail);
+    return parsed.length ? entriesToText(parsed) : detail;
+  }
+  if (typeof detail !== "object") return String(detail);
   const fields = [];
-  if (detail.peerId?.toString?.()) fields.push(`peerId=${detail.peerId.toString()}`);
-  if (detail.remotePeer?.toString?.()) fields.push(`remotePeer=${detail.remotePeer.toString()}`);
-  if (detail.connection?.stat?.direction) fields.push(`direction=${detail.connection.stat.direction}`);
-  if (detail.connection?.remoteAddr?.toString?.()) fields.push(`remoteAddr=${detail.connection.remoteAddr.toString()}`);
-  return fields.length ? fields.join(" ") : `keys=${Object.keys(detail).join(",") || "none"}`;
+  if (scalarText(detail.peerId)) fields.push(["peerId", scalarText(detail.peerId)]);
+  if (scalarText(detail.remotePeer)) fields.push(["remotePeer", scalarText(detail.remotePeer)]);
+  if (detail.connection?.stat?.direction) fields.push(["direction", detail.connection.stat.direction]);
+  if (scalarText(detail.connection?.remoteAddr)) fields.push(["remoteAddr", scalarText(detail.connection.remoteAddr)]);
+  if (scalarText(detail.id)) fields.push(["id", scalarText(detail.id)]);
+  if (detail.multiaddrs?.length) fields.push(["multiaddrs", detail.multiaddrs.map((addr) => scalarText(addr) || String(addr)).join(" | ")]);
+  if (detail.type) fields.push(["type", detail.type]);
+  if (scalarText(detail.multihash)) fields.push(["multihash", scalarText(detail.multihash)]);
+  if (scalarText(detail.publicKey)) fields.push(["publicKey", scalarText(detail.publicKey)]);
+  if (detail.keys && Array.isArray(detail.keys)) fields.push(["keys", detail.keys.join(",")]);
+  if (detail.keys && !Array.isArray(detail.keys) && typeof detail.keys === "string") fields.push(["keys", detail.keys]);
+  return fields.length ? entriesToText(fields) : JSON.stringify(detail, null, 2);
 };
 
 const emitLog = (onLog, level, text, state = "checking") => {
