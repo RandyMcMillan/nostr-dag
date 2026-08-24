@@ -201,7 +201,6 @@ export function createLoggerFooter(root, options = {}) {
     </div>
   `;
   const statusEl = root.querySelector('[data-footer-status]');
-  const statusEl = root.querySelector('[data-footer-status]');
   const toggleEl = root.querySelector('[data-footer-toggle]');
   const chevronEl = root.querySelector('[data-footer-chevron]');
   const copyEl = root.querySelector('[data-footer-copy]');
