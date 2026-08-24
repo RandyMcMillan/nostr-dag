@@ -52,7 +52,16 @@ wasm: ensure-wasm-target
 	@if ! command -v $(WASM_PACK) >/dev/null 2>&1; then \
 		curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh; \
 	fi
-	LLVM_PATH=$$(brew --prefix llvm) && AR="$$LLVM_PATH/bin/llvm-ar" CC="$$LLVM_PATH/bin/clang" CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) $(WASM_PACK) build --target web --release --out-dir site/pkg -- --no-default-features --features wasm
+	@set -e; \
+	if command -v brew >/dev/null 2>&1 && brew --prefix llvm >/dev/null 2>&1; then \
+		LLVM_PATH="$$(brew --prefix llvm)"; \
+		CC="$$LLVM_PATH/bin/clang"; \
+		AR="$$LLVM_PATH/bin/llvm-ar"; \
+	else \
+		CC="$$(command -v clang || xcrun --sdk macosx --find clang)"; \
+		AR="$$(command -v llvm-ar || xcrun --sdk macosx --find llvm-ar || command -v ar)"; \
+	fi; \
+	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) CC="$$CC" AR="$$AR" $(WASM_PACK) build --target web --release --out-dir site/pkg -- --no-default-features --features wasm
 
 site: wasm
 	mkdir -p site
