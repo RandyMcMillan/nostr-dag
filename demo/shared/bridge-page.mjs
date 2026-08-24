@@ -405,6 +405,9 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         info.description || '',
         info.version ? `v${info.version}` : '',
       ].filter(Boolean) : [];
+      const learnedFrom = source && source !== 'default'
+        ? `<div class="bridge-relay-learned small muted">Learned from ${escapeHtml(source)}</div>`
+        : '';
       return `
         <details class="bridge-card bridge-relay-card">
           <summary class="bridge-card-summary">
@@ -414,10 +417,10 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
                 ${hasInfo ? `<div class="small muted" style="margin-top:4px;">${escapeHtml(fields.join(' · '))}</div>` : loading ? '<div class="small muted" style="margin-top:4px;">Loading NIP-11…</div>' : ''}
               </div>
               <div class="bridge-relay-meta">
-                ${source ? `<span class="bridge-pill">${escapeHtml(source)}</span>` : ''}
                 ${info?.error ? `<span class="bridge-pill">NIP-11 unavailable</span>` : hasInfo ? '<span class="bridge-pill bridge-pill-ok" aria-label="NIP-11 loaded"><span class="bridge-pill-dot" aria-hidden="true"></span></span>' : loading ? '<span class="bridge-pill">NIP-11 loading</span>' : ''}
               </div>
             </div>
+            ${learnedFrom}
           </summary>
           <div class="bridge-relay-details">
           ${info?.error ? `
@@ -702,8 +705,8 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         const sourceLabel = defaultRelays.includes(relay)
           ? 'default'
           : source
-            ? `learned from ${source.owner || 'unknown'}`
-            : 'learned';
+            ? (source.owner || 'unknown')
+            : 'unknown';
         return relayRowHtml(relay, info, sourceLabel, loading);
       }).join('');
     }
