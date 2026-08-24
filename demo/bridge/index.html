@@ -40,6 +40,17 @@ wss://nostr.wine</textarea>
       </div>
     </div>
 
+    <div class="panel bridge-relays">
+      <div class="row" style="justify-content:space-between;">
+        <div>
+          <h2 style="margin:0 0 6px;">Relay list</h2>
+          <div class="small muted">Current Nostr relays used by the bridge, plus any relay metadata learned from events.</div>
+        </div>
+        <div class="pill">Count: <b id="relayCount">0</b></div>
+      </div>
+      <div id="relayList" class="bridge-relay-list" style="margin-top:12px;"></div>
+    </div>
+
     <div class="panel bridge-metrics">
       <div class="row">
         <span class="pill">Nostr → libp2p: <b id="nostrToLibp2pCount">0</b></span>
@@ -112,6 +123,8 @@ wss://nostr.wine</textarea>
     const libp2pToNostrCountEl = document.getElementById('libp2pToNostrCount');
     const seenCountEl = document.getElementById('seenCount');
     const relayPublishCountEl = document.getElementById('relayPublishCount');
+    const relayCountEl = document.getElementById('relayCount');
+    const relayListEl = document.getElementById('relayList');
     const peerCountEl = document.getElementById('peerCount');
     const peerListEl = document.getElementById('peerList');
 
@@ -160,6 +173,33 @@ wss://nostr.wine</textarea>
       relayPublishCountEl.textContent = String(metrics.relayPublishes);
     }
 
+    function renderRelays() {
+      const entries = [...new Set([
+        ...parseRelays(relayInputEl.value),
+        ...[...relayCatalog.values()].flatMap((entry) => entry.relays || []),
+      ])].sort();
+
+      relayCountEl.textContent = String(entries.length);
+      if (!entries.length) {
+        relayListEl.innerHTML = '<div class="small muted">No relays configured.</div>';
+        return;
+      }
+
+      const learned = new Map([...relayCatalog.values()].flatMap((entry) => (entry.relays || []).map((relay) => [relay, entry])));
+      relayListEl.innerHTML = entries.map((relay) => {
+        const source = learned.get(relay);
+        return `
+          <div class="bridge-relay-row">
+            <div class="bridge-relay-url mono">${escapeHtml(relay)}</div>
+            <div class="bridge-relay-meta">
+              <span class="bridge-pill">${source ? `learned from ${escapeHtml(source.owner || 'unknown')}` : 'configured'}</span>
+              ${source ? `<span class="bridge-pill bridge-pill-source">kind ${escapeHtml(source.kind || 'unknown')}</span>` : ''}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
     // Keep one merged peer registry in the browser so the bridge works on Pages and localhost.
     function upsertPeer(source, peer) {
       if (!peer?.peer_id) return;
@@ -203,12 +243,14 @@ wss://nostr.wine</textarea>
           <div class="bridge-peer-relays">
             <div class="bridge-peer-relays-label">Relays</div>
             <div class="bridge-relay-grid">
-              ${relaysNow.length
-                ? relaysNow.map((relay) => `<span class="bridge-pill bridge-pill-relay">${escapeHtml(relay)}</span>`).join('')
+              ${(peer.relays && peer.relays.length ? peer.relays : relaysNow).length
+                ? (peer.relays && peer.relays.length ? peer.relays : relaysNow)
+                    .map((relay) => `<span class="bridge-pill bridge-pill-relay">${escapeHtml(relay)}</span>`).join('')
                 : '<span class="bridge-pill">none</span>'}
             </div>
             ${relaySources.length ? `
               <div class="bridge-peer-relay-sources">
+                <div class="bridge-peer-relay-source-head mono">Nostr relay info</div>
                 ${relaySources.map((entry) => `
                   <div class="bridge-peer-relay-source">
                     <div class="bridge-peer-relay-source-head mono">${escapeHtml(entry.owner || 'unknown')} · kind ${escapeHtml(entry.kind || 'unknown')}</div>
@@ -415,6 +457,7 @@ wss://nostr.wine</textarea>
       }
       if (event.kind === 10002 || event.kind === 3) {
         recordRelayInfo(event);
+        renderRelays();
         renderPeers();
       }
       window.__sharedFooter?.log('nostr', `${source} kind ${event.kind} ${event.id} by ${event.pubkey}`, 'trace', 'checking');
@@ -474,9 +517,10 @@ wss://nostr.wine</textarea>
                   detail: peer.detail,
                   source: 'browser',
                   relays: currentRelayUrls(),
-                  updated_at: Date.now(),
-                });
-                renderPeers();
+                    relay_info: [...relayCatalog.values()],
+                    updated_at: Date.now(),
+                  });
+                  renderPeers();
               },
               onStatus(state, peerId) {
                 setStatus(`${state} ${peerId}`, state === 'started' ? 'available' : 'checking');
@@ -536,9 +580,11 @@ wss://nostr.wine</textarea>
 
     relayInputEl.addEventListener('change', () => {
       relays = parseRelays(relayInputEl.value);
+      renderRelays();
       window.__sharedFooter?.log('bridge', `relay list updated (${relays.length})`, 'debug', 'checking');
     });
 
+    renderRelays();
     void startBridge();
   </script>
 </body>

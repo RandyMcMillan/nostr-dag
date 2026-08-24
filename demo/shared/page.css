@@ -178,6 +178,7 @@ button:hover, a.button:hover { background:var(--button-hover); }
 
 .bridge-hero,
 .bridge-controls,
+.bridge-relays,
 .bridge-metrics,
 .bridge-peers { margin-bottom: 16px; }
 
@@ -228,6 +229,36 @@ button:hover, a.button:hover { background:var(--button-hover); }
 .bridge-pill-source {
   background:rgba(251,146,60,.15);
   border-color:var(--border-strong);
+}
+
+.bridge-relay-list {
+  display:grid;
+  gap:10px;
+}
+
+.bridge-relay-row {
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:12px;
+  padding:10px 12px;
+  border:1px solid var(--border);
+  border-radius:10px;
+  background:var(--surface);
+}
+
+.bridge-relay-url {
+  font-size:12px;
+  line-height:1.4;
+  overflow-wrap:anywhere;
+  min-width:0;
+}
+
+.bridge-relay-meta {
+  display:flex;
+  gap:6px;
+  flex-wrap:wrap;
+  justify-content:flex-end;
 }
 
 .bridge-peer-relays {
