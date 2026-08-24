@@ -452,6 +452,9 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         return;
       }
       window.__sharedFooter?.log('bridge', `render peers (${peers.length})`, 'trace', 'checking');
+      const openPeerIds = [...peerListEl.querySelectorAll('details[open][data-peer-id]')]
+        .map((el) => el.getAttribute('data-peer-id'))
+        .filter(Boolean);
       const relaysNow = currentRelayUrls();
       peerListEl.innerHTML = peers.map((peer) => `
         <details class="bridge-card bridge-peer" data-peer-id="${escapeHtml(peer.peer_id)}">
@@ -478,6 +481,10 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
           <div class="bridge-peer-detail mono">${peer.detail ? escapeHtml(formatPeerDetail(peer.detail)) : 'no detail'}</div>
         </details>
       `).join('');
+      for (const peerId of openPeerIds) {
+        const card = peerListEl.querySelector(`details[data-peer-id="${CSS.escape(peerId)}"]`);
+        if (card) card.open = true;
+      }
     }
 
     // Poll the local preview server when available. Pages deployments just render browser peers.
