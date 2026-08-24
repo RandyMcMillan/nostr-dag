@@ -184,11 +184,12 @@ export function createLoggerFooter(root, options = {}) {
         <div class="footer-log-wrap">
           <div class="footer-controls">
             <button data-footer-toggle class="footer-toggle" type="button" aria-expanded="false" aria-controls="footerLogPanel">
-              <span data-footer-status class="status status-idle" title="" aria-hidden="true">
-                <span class="status-dot" aria-hidden="true"></span>
+              <span class="footer-toggle-label">
+                <span>${title}</span>
+                <span data-footer-status class="status status-idle" title="" aria-hidden="true">
+                  <span class="status-dot" aria-hidden="true"></span>
+                </span>
               </span>
-              <span data-footer-chevron class="footer-chevron">▸</span>
-              <span>${title}</span>
             </button>
             <div class="footer-actions">
               <button data-footer-copy class="footer-copy" type="button">Save</button>
@@ -202,7 +203,6 @@ export function createLoggerFooter(root, options = {}) {
   `;
   const statusEl = root.querySelector('[data-footer-status]');
   const toggleEl = root.querySelector('[data-footer-toggle]');
-  const chevronEl = root.querySelector('[data-footer-chevron]');
   const copyEl = root.querySelector('[data-footer-copy]');
   const levelEl = root.querySelector('[data-footer-level]');
   const logEl = root.querySelector('[data-footer-log]');
@@ -306,7 +306,6 @@ export function createLoggerFooter(root, options = {}) {
 
   function render() {
     renderScheduled = false;
-    chevronEl.className = `footer-chevron${open ? ' open' : ''}`;
     toggleEl.setAttribute('aria-expanded', open ? 'true' : 'false');
     renderLevelPills();
     logEl.hidden = !open;
