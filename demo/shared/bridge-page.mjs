@@ -566,7 +566,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     function normalizeRelayUrl(url) {
       try {
         const parsed = new URL(url);
-        if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') return null;
+        if (parsed.protocol !== 'wss:') return null;
         return parsed.toString().replace(/\/$/, '');
       } catch {
         return null;
