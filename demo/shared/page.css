@@ -222,6 +222,28 @@ button:hover, a.button:hover { background:var(--button-hover); }
   border-bottom:1px solid rgba(148,163,184,.18);
 }
 
+.bridge-collapsible {
+  padding:0;
+}
+
+.bridge-collapsible-summary {
+  list-style:none;
+  cursor:pointer;
+  padding:12px 14px;
+}
+
+.bridge-collapsible-summary::-webkit-details-marker {
+  display:none;
+}
+
+.bridge-collapsible[open] .bridge-collapsible-summary {
+  border-bottom:1px solid rgba(148,163,184,.18);
+}
+
+.bridge-collapsible-body {
+  padding:12px 14px 14px;
+}
+
 .bridge-peer-title {
   font-size:13px;
   line-height:1.3;

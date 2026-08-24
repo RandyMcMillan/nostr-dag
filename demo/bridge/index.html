@@ -40,27 +40,35 @@ wss://nostr.wine</textarea>
       </div>
     </div>
 
-    <div class="panel bridge-default-relays">
-      <div class="row" style="justify-content:space-between;">
-        <div>
-          <h2 style="margin:0 0 6px;">Default Relays</h2>
-          <div class="small muted">Seed relays used by the bridge on startup.</div>
+    <details class="panel bridge-collapsible">
+      <summary class="bridge-collapsible-summary">
+        <div class="row" style="justify-content:space-between;">
+          <div>
+            <h2 style="margin:0 0 6px;">Default Relays</h2>
+            <div class="small muted">Seed relays used by the bridge on startup.</div>
+          </div>
+          <div class="pill">Count: <b id="defaultRelayCount">0</b></div>
         </div>
-        <div class="pill">Count: <b id="defaultRelayCount">0</b></div>
+      </summary>
+      <div class="bridge-collapsible-body">
+        <div id="defaultRelayList" class="bridge-relay-list"></div>
       </div>
-      <div id="defaultRelayList" class="bridge-relay-list" style="margin-top:12px;"></div>
-    </div>
+    </details>
 
-    <div class="panel bridge-accumulated-relays">
-      <div class="row" style="justify-content:space-between;">
-        <div>
-          <h2 style="margin:0 0 6px;">Relays</h2>
-          <div class="small muted">Accumulated relays learned from Nostr users and relay-list metadata.</div>
+    <details class="panel bridge-collapsible">
+      <summary class="bridge-collapsible-summary">
+        <div class="row" style="justify-content:space-between;">
+          <div>
+            <h2 style="margin:0 0 6px;">Relays</h2>
+            <div class="small muted">Accumulated relays learned from Nostr users and relay-list metadata.</div>
+          </div>
+          <div class="pill">Count: <b id="relayCount">0</b></div>
         </div>
-        <div class="pill">Count: <b id="relayCount">0</b></div>
+      </summary>
+      <div class="bridge-collapsible-body">
+        <div id="relayList" class="bridge-relay-list"></div>
       </div>
-      <div id="relayList" class="bridge-relay-list" style="margin-top:12px;"></div>
-    </div>
+    </details>
 
     <div class="panel bridge-metrics">
       <div class="row">
@@ -73,16 +81,20 @@ wss://nostr.wine</textarea>
       <p class="small muted" style="margin-bottom:0;">Events are forwarded as JSON envelopes over libp2p pubsub and published back to the configured WSS relays when received from the swarm.</p>
     </div>
 
-    <div class="panel bridge-peers">
-      <div class="row" style="justify-content:space-between;">
-        <div>
-          <h2 style="margin:0 0 6px;">Peers</h2>
-          <div class="small muted">Live local browser peers plus the optional localhost <code>/peers</code> registry.</div>
+    <details class="panel bridge-collapsible">
+      <summary class="bridge-collapsible-summary">
+        <div class="row" style="justify-content:space-between;">
+          <div>
+            <h2 style="margin:0 0 6px;">Peers</h2>
+            <div class="small muted">Live local browser peers plus the optional localhost <code>/peers</code> registry.</div>
+          </div>
+          <div class="pill">Count: <b id="peerCount">0</b></div>
         </div>
-        <div class="pill">Count: <b id="peerCount">0</b></div>
+      </summary>
+      <div class="bridge-collapsible-body">
+        <div id="peerList"></div>
       </div>
-      <div id="peerList" style="margin-top:12px;"></div>
-    </div>
+    </details>
   </main>
 
   <footer id="sharedFooter"></footer>
