@@ -28,6 +28,15 @@ function normalizeLevel(value) {
   return LOG_LEVELS.includes(level) ? level : 'info';
 }
 
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
 function parseLogArgs(levelOrState = 'info', maybeState = null) {
   if (maybeState === null && !LOG_LEVELS.includes(String(levelOrState).toLowerCase())) {
     return {
@@ -304,8 +313,8 @@ export function createLoggerFooter(root, options = {}) {
     logEl.innerHTML = visibleLogs.length
       ? visibleLogs.map((entry) => `
         <div class="footer-log-item">
-          <span class="footer-log-time mono">${entry.time}</span>
-          <span>${entry.label ? `${entry.label}: ` : ''}${entry.text}</span>
+          <span class="footer-log-time mono">${escapeHtml(entry.time)}</span>
+          <span>${entry.label ? `${escapeHtml(entry.label)}: ` : ''}${escapeHtml(entry.text)}</span>
         </div>
       `).join('')
       : '<div class="muted">No log entries yet.</div>';
