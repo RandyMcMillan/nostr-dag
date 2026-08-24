@@ -21,7 +21,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     createSharedHeader(document.getElementById('sharedHeader'), {
       title: 'nostr-dag',
       logoHref: resolveHref('../', window.location.href),
-      iconHref: resolveHref('./favicon.ico', window.location.href),
+      iconHref: resolveHref('../shared/favicon.ico', window.location.href),
       subtitleHtml: '',
       navItems: [
         { label: 'Demo', href: resolveHref('../', window.location.href) },
