@@ -401,11 +401,11 @@ button:hover, a.button:hover { background:var(--button-hover); }
     -webkit-backdrop-filter:saturate(160%) blur(16px);
   }
   .sticky-footer-inner { max-width:100%; }
-  .footer-header { flex-wrap:wrap; align-items:stretch; gap:8px; }
-  .footer-status-wrap { width:100%; }
-  .footer-log-wrap { width:100%; min-width:0; }
+  .footer-header { flex-wrap:nowrap; align-items:center; gap:8px; }
+  .footer-log-wrap { flex:1 1 auto; min-width:0; }
   .footer-controls { flex-wrap:wrap; align-items:center; gap:8px; }
-  .footer-toggle { flex:1 1 auto; width:auto; min-width:0; justify-content:flex-start; }
+  .footer-toggle { flex:1 1 auto; width:auto; min-width:0; justify-content:flex-start; gap:8px; }
+  .footer-toggle .status { flex:0 0 auto; padding:0; background:transparent; }
   .footer-actions {
     width:100%;
     margin-left:0;
@@ -415,6 +415,7 @@ button:hover, a.button:hover { background:var(--button-hover); }
     gap:6px;
   }
   .footer-copy { flex:0 0 auto; width:100%; justify-content:center; }
+  .footer-status-wrap { display:none; }
   .footer-level-pills {
     margin-left:0;
     width:100%;
