@@ -186,7 +186,7 @@ wss://nostr.wine</textarea>
             </div>
             <span class="chip">${peer.source || 'browser'}</span>
           </div>
-          <div class="small" style="margin-top:8px; word-break:break-word;">${peer.detail ? String(peer.detail) : 'no detail'}</div>
+          <div class="small mono" style="margin-top:8px; word-break:break-word; white-space:pre-wrap;">${peer.detail ? String(peer.detail) : 'no detail'}</div>
         </div>
       `).join('');
     }
@@ -216,6 +216,25 @@ wss://nostr.wine</textarea>
 
     function kindTopic(event) {
       return `${topic}/${event.kind}`;
+    }
+
+    function formatPeerDetail(detail) {
+      if (detail == null) return 'no detail';
+      if (typeof detail === 'string') return detail;
+      if (Array.isArray(detail)) return detail.map((item) => formatPeerDetail(item)).join(', ');
+      if (typeof detail === 'object') {
+        const fields = [];
+        if (detail.peerId?.toString?.()) fields.push(`peerId=${detail.peerId.toString()}`);
+        if (detail.remotePeer?.toString?.()) fields.push(`remotePeer=${detail.remotePeer.toString()}`);
+        if (detail.connection?.stat?.direction) fields.push(`direction=${detail.connection.stat.direction}`);
+        if (detail.connection?.remoteAddr?.toString?.()) fields.push(`remoteAddr=${detail.connection.remoteAddr.toString()}`);
+        if (detail.id?.toString?.()) fields.push(`id=${detail.id.toString()}`);
+        if (detail.multiaddrs?.length) fields.push(`multiaddrs=${detail.multiaddrs.map((addr) => addr?.toString?.() || String(addr)).join(' | ')}`);
+        if (detail.type) fields.push(`type=${detail.type}`);
+        if (detail.publicKey) fields.push(`publicKey=${detail.publicKey?.toString?.() || String(detail.publicKey)}`);
+        return fields.length ? fields.join(' ') : JSON.stringify(detail);
+      }
+      return String(detail);
     }
 
     function markSeen(event) {
@@ -317,7 +336,7 @@ wss://nostr.wine</textarea>
                   peer_id: peer.peer,
                   kind: peer.kind,
                   path: window.location.pathname || '/',
-                  detail: peer.detail ? JSON.stringify(peer.detail) : 'none',
+                  detail: formatPeerDetail(peer.detail),
                   source: 'browser',
                   updated_at: Date.now(),
                 });
