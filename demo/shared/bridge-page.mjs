@@ -34,6 +34,9 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     const relayCatalog = new Map();
     const relayInfoCatalog = new Map();
     const relayInfoInFlight = new Map();
+    const relayDiscoveryQueue = new Set();
+    const relayDiscoverySeen = new Set();
+    let relayDiscoveryRunning = false;
     const metrics = {
       nostrToLibp2p: 0,
       libp2pToNostr: 0,
@@ -389,6 +392,50 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       ])];
     }
 
+    function scheduleRelayDiscovery(relayUrls = currentRelayUrls()) {
+      const urls = [...new Set(relayUrls.map((url) => normalizeRelayUrl(url)).filter(Boolean))];
+      let added = false;
+      for (const url of urls) {
+        if (relayDiscoverySeen.has(url) || relayDiscoveryQueue.has(url)) continue;
+        relayDiscoveryQueue.add(url);
+        added = true;
+      }
+      if (added) {
+        void processRelayDiscoveryQueue();
+      }
+    }
+
+    async function processRelayDiscoveryQueue() {
+      if (relayDiscoveryRunning) return;
+      relayDiscoveryRunning = true;
+      try {
+        while (relayDiscoveryQueue.size) {
+          const batch = [...relayDiscoveryQueue];
+          relayDiscoveryQueue.clear();
+          const relaysToQuery = batch.filter((url) => !relayDiscoverySeen.has(url));
+          if (!relaysToQuery.length) continue;
+
+          for (const relay of relaysToQuery) {
+            relayDiscoverySeen.add(relay);
+          }
+
+          window.__sharedFooter?.log('bridge', `discover relays from ${relaysToQuery.length} known relays`, 'trace', 'checking');
+          pool.subscribeMany(relaysToQuery, { kinds: [3, 10002], limit: 200 }, {
+            onevent(event) {
+              if (event.kind === 10002 || event.kind === 3) {
+                recordRelayInfo(event);
+              }
+            },
+            oneose() {},
+          });
+
+          await Promise.resolve();
+        }
+      } finally {
+        relayDiscoveryRunning = false;
+      }
+    }
+
     function kindTopic(event) {
       return `${topic}/${event.kind}`;
     }
@@ -441,6 +488,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         relays: [...urls],
         updated_at: Date.now(),
       });
+      scheduleRelayDiscovery([...urls]);
       void refreshRelayInfo([...urls]);
     }
 
@@ -644,7 +692,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
           }
         });
 
-        const relaysSnapshot = relays.slice();
+        const relaysSnapshot = [...new Set([...DEFAULT_RELAYS, ...currentRelayUrls()])];
         pool.subscribeMany(relaysSnapshot, { kinds: [0, 1, 3, 10002, 21000], limit: 500 }, {
           onevent(event) {
             void handleNostrEvent(event, 'relay');
@@ -655,6 +703,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         setStatus(`bridging ${relaysSnapshot.length} relays on ${topic}`, 'available');
         window.__sharedFooter?.log('bridge', `bridge ready on topic ${topic}`, 'info', 'available');
         void refreshRelayInfo(relaysSnapshot);
+        scheduleRelayDiscovery(relaysSnapshot);
         await pollPeers();
         peerPollTimer = window.setInterval(() => {
           void pollPeers();
@@ -675,9 +724,12 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       renderDefaultRelays();
       renderRelays();
       void refreshRelayInfo(relays);
+      scheduleRelayDiscovery(relays);
       window.__sharedFooter?.log('bridge', `relay list updated (${relays.length})`, 'debug', 'checking');
     });
 
     renderDefaultRelays();
     renderRelays();
+    scheduleRelayDiscovery(DEFAULT_RELAYS);
+    scheduleRelayDiscovery(relays);
     void startBridge();
