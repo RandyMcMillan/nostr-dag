@@ -8,6 +8,8 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     const encoder = new TextEncoder();
     const decoder = new TextDecoder();
     const CACHE_KEY = 'nostr-dag-bridge-cache-v2';
+    const BRIDGE_PROTOCOL = 'nostr-dag-bridge';
+    const BRIDGE_PROTOCOL_VERSION = 1;
     const DEFAULT_RELAYS = [
       'wss://relay.damus.io',
       'wss://nos.lol',
@@ -104,6 +106,77 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       libp2pToNostrCountEl.textContent = String(metrics.libp2pToNostr);
       seenCountEl.textContent = String(seen.size);
       relayPublishCountEl.textContent = String(metrics.relayPublishes);
+    }
+
+    function isNostrEvent(value) {
+      return Boolean(
+        value &&
+        typeof value === 'object' &&
+        typeof value.id === 'string' &&
+        typeof value.pubkey === 'string' &&
+        typeof value.sig === 'string' &&
+        typeof value.content === 'string' &&
+        Array.isArray(value.tags) &&
+        Number.isFinite(Number(value.kind)) &&
+        Number.isFinite(Number(value.created_at))
+      );
+    }
+
+    function collectBridgeRelayHints(value, found = new Set()) {
+      if (!value) return found;
+      if (typeof value === 'string') {
+        const normalized = normalizeRelayUrl(value);
+        if (normalized) found.add(normalized);
+        return found;
+      }
+      if (Array.isArray(value)) {
+        for (const item of value) collectBridgeRelayHints(item, found);
+        return found;
+      }
+      if (typeof value === 'object') {
+        for (const item of Object.values(value)) collectBridgeRelayHints(item, found);
+      }
+      return found;
+    }
+
+    function buildBridgeEnvelope(event, direction, relayHints = []) {
+      return {
+        protocol: BRIDGE_PROTOCOL,
+        version: BRIDGE_PROTOCOL_VERSION,
+        direction,
+        event,
+        relay_hints: [...new Set(relayHints.filter(Boolean))],
+        topic,
+        ts: Date.now(),
+      };
+    }
+
+    function unwrapBridgeEnvelope(message) {
+      if (!message || typeof message !== 'object') return null;
+      if (isNostrEvent(message)) {
+        return {
+          event: message,
+          relayHints: [],
+          direction: 'libp2p->nostr',
+        };
+      }
+      const protocol = message.protocol || message.source;
+      const event = message.event || message.payload?.event || message.payload || null;
+      const relayHints = [
+        ...collectBridgeRelayHints(message.relay_hints),
+        ...collectBridgeRelayHints(message.relayHints),
+        ...collectBridgeRelayHints(message.relays),
+        ...collectBridgeRelayHints(message.relayTargets),
+      ];
+      if (protocol && protocol !== BRIDGE_PROTOCOL && protocol !== 'nostr-dag-bridge') {
+        return null;
+      }
+      if (!event || !isNostrEvent(event)) return null;
+      return {
+        event,
+        relayHints,
+        direction: message.direction || 'libp2p->nostr',
+      };
     }
 
     function scheduleDefaultRelayRender() {
@@ -759,29 +832,28 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
 
     async function publishToLibp2p(event, direction) {
       if (!node) return;
-      const payload = {
-        source: 'nostr-dag-bridge',
-        direction,
-        topic: kindTopic(event),
-        event,
-        ts: Date.now(),
-      };
+      const payload = buildBridgeEnvelope(event, direction, currentRelayUrls());
       await node.services.pubsub.publish(topic, encoder.encode(JSON.stringify(payload)));
       metrics.nostrToLibp2p += direction === 'nostr->libp2p' ? 1 : 0;
       refreshMetrics();
       window.__sharedFooter?.log('bridge', `${direction} ${event.kind} ${event.id}`, 'trace', 'available');
     }
 
-    async function publishToRelays(event, direction) {
-      if (!relays.length) {
+    async function publishToRelays(event, direction, relayHints = []) {
+      const publishRelays = prioritizeRelayUrls([
+        ...collectBridgeRelayHints(relayHints),
+        ...currentRelayUrls(),
+        ...DEFAULT_RELAYS,
+      ]);
+      if (!publishRelays.length) {
         throw new Error('no relays configured');
       }
-      const publishTargets = relays.map((relay) => pool.publish([relay], event));
+      const publishTargets = publishRelays.map((relay) => pool.publish([relay], event));
       const result = await Promise.any(publishTargets);
       metrics.relayPublishes += 1;
       metrics.libp2pToNostr += direction === 'libp2p->nostr' ? 1 : 0;
       refreshMetrics();
-      window.__sharedFooter?.log('bridge', `${direction} ${event.kind} ${event.id}`, 'info', 'available');
+      window.__sharedFooter?.log('bridge', `${direction} ${event.kind} ${event.id} via ${publishRelays.join(', ')}`, 'info', 'available');
       return result;
     }
 
@@ -807,15 +879,21 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       }
     }
 
-    async function handleLibp2pMessage(event) {
-      if (!event || typeof event !== 'object' || !event.id) return;
+    async function handleLibp2pMessage(message) {
+      const envelope = unwrapBridgeEnvelope(message);
+      if (!envelope) {
+        window.__sharedFooter?.log('bridge', 'rejected libp2p payload with unsupported protocol', 'warn', 'unavailable');
+        return;
+      }
+      const { event, relayHints, direction } = envelope;
+      if (!markSeen(event)) return;
       if (!verifyEvent(event)) {
         window.__sharedFooter?.log('bridge', `rejected libp2p payload ${event.id}`, 'warn', 'unavailable');
         return;
       }
-      if (!markSeen(event)) return;
+      window.__sharedFooter?.log('bridge', `libp2p→nostr ${direction} ${event.kind} ${event.id}`, 'trace', 'checking');
       try {
-        await publishToRelays(event, 'libp2p->nostr');
+        await publishToRelays(event, 'libp2p->nostr', relayHints);
       } catch (e) {
         window.__sharedFooter?.log('bridge', `relay publish failed: ${e.message}`, 'error', 'unavailable');
       }
@@ -882,9 +960,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
           const payload = evt.detail?.data;
           try {
             const message = JSON.parse(decoder.decode(payload));
-            if (message?.event?.id) {
-              void handleLibp2pMessage(message.event);
-            }
+            void handleLibp2pMessage(message);
           } catch {
             window.__sharedFooter?.log('bridge', 'ignored malformed pubsub payload', 'warn', 'unavailable');
           }
