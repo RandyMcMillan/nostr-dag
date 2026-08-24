@@ -45,6 +45,9 @@ build-server:
 	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) $(CARGO) build --bin nostr-dag-server --features native
 
 wasm:
+	@if ! command -v $(WASM_PACK) >/dev/null 2>&1; then \
+		curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh; \
+	fi
 	LLVM_PATH=$$(brew --prefix llvm) && AR="$$LLVM_PATH/bin/llvm-ar" CC="$$LLVM_PATH/bin/clang" CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) $(WASM_PACK) build --target web --release --out-dir site/pkg -- --no-default-features --features wasm
 
 site: wasm
