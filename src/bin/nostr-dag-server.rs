@@ -196,7 +196,7 @@ async fn handle_connection(
                 response_text(404, "Not Found", "Not Found", "text/plain; charset=utf-8")
             }
             Err(RouteError::Io(err)) => {
-                error!(?err, path = %path, "failed to proxy nip11 payload");
+                trace!(?err, path = %path, "failed to proxy nip11 payload");
                 response_text(502, "Bad Gateway", "Bad Gateway", "text/plain; charset=utf-8")
             }
         }
