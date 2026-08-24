@@ -42,6 +42,9 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     const relayDiscoverySeen = new Set();
     let relayDiscoveryRunning = false;
     let relayCachePersistTimer = null;
+    let relayRenderScheduled = false;
+    let rawEventLogCount = 0;
+    let rawEventLogSuppressed = false;
     const metrics = {
       nostrToLibp2p: 0,
       libp2pToNostr: 0,
@@ -107,6 +110,22 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       libp2pToNostrCountEl.textContent = String(metrics.libp2pToNostr);
       seenCountEl.textContent = String(seen.size);
       relayPublishCountEl.textContent = String(metrics.relayPublishes);
+    }
+
+    function scheduleRelayRenders() {
+      if (relayRenderScheduled) return;
+      relayRenderScheduled = true;
+      const run = () => {
+        relayRenderScheduled = false;
+        renderDefaultRelays();
+        renderRelays();
+        renderPeers();
+      };
+      if (typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(run);
+      } else {
+        window.setTimeout(run, 0);
+      }
     }
 
     function scheduleRelayCachePersist() {
@@ -177,6 +196,14 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     }
 
     function logRawNostrEvent(prefix, event) {
+      if (rawEventLogCount >= 25) {
+        if (!rawEventLogSuppressed) {
+          rawEventLogSuppressed = true;
+          window.__sharedFooter?.log('bridge', 'raw relay event logging suppressed after 25 entries', 'trace', 'available');
+        }
+        return;
+      }
+      rawEventLogCount += 1;
       window.__sharedFooter?.log('bridge', `${prefix} ${JSON.stringify(event)}`, 'trace', 'available');
     }
 
@@ -358,9 +385,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       void (async () => {
         for (const url of urls) {
           await fetchRelayInfo(url);
-          renderDefaultRelays();
-          renderRelays();
-          renderPeers();
+          scheduleRelayRenders();
           await Promise.resolve();
         }
       })();
@@ -592,7 +617,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         updated_at: Date.now(),
       });
       window.__sharedFooter?.log('bridge', `relay catalog size ${relayCatalog.size}`, 'trace', 'available');
-      renderRelays();
+      scheduleRelayRenders();
       scheduleRelayCachePersist();
       scheduleRelayDiscovery([...urls]);
       void refreshRelayInfo([...urls]);
@@ -723,8 +748,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       }
       if (event.kind === 10002 || event.kind === 3) {
         recordRelayInfo(event);
-        renderRelays();
-        renderPeers();
+        scheduleRelayRenders();
       }
       window.__sharedFooter?.log('nostr', `${source} kind ${event.kind} ${event.id} by ${event.pubkey}`, 'trace', 'checking');
       try {
@@ -854,17 +878,15 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
 
     relayInputEl.addEventListener('change', () => {
       relays = parseRelays(relayInputEl.value);
-      renderDefaultRelays();
-      renderRelays();
+      scheduleRelayRenders();
       void refreshRelayInfo(relays);
       scheduleRelayDiscovery(relays);
       window.__sharedFooter?.log('bridge', `relay list updated (${relays.length})`, 'debug', 'checking');
     });
 
-    renderDefaultRelays();
-    renderRelays();
+    scheduleRelayRenders();
     void restoreRelayCache().then(() => {
-      renderRelays();
+      scheduleRelayRenders();
       void refreshRelayInfo(currentRelayUrls());
       scheduleRelayDiscovery(currentRelayUrls());
     });
