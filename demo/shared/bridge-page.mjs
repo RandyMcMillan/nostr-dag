@@ -47,6 +47,8 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     const libp2pToNostrCountEl = document.getElementById('libp2pToNostrCount');
     const seenCountEl = document.getElementById('seenCount');
     const relayPublishCountEl = document.getElementById('relayPublishCount');
+    const defaultRelayCountEl = document.getElementById('defaultRelayCount');
+    const defaultRelayListEl = document.getElementById('defaultRelayList');
     const relayCountEl = document.getElementById('relayCount');
     const relayListEl = document.getElementById('relayList');
     const peerCountEl = document.getElementById('peerCount');
@@ -95,6 +97,61 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       libp2pToNostrCountEl.textContent = String(metrics.libp2pToNostr);
       seenCountEl.textContent = String(seen.size);
       relayPublishCountEl.textContent = String(metrics.relayPublishes);
+    }
+
+    function relayRowHtml(relay, info, source, loading) {
+      const hasInfo = Boolean(info && !info.error);
+      const fields = hasInfo ? [
+        info.name || '',
+        info.description || '',
+        info.version ? `v${info.version}` : '',
+      ].filter(Boolean) : [];
+      return `
+        <div class="bridge-relay-row">
+          <div class="bridge-relay-url mono">
+            <div>${escapeHtml(relay)}</div>
+            ${hasInfo ? `<div class="small muted" style="margin-top:4px;">${escapeHtml(fields.join(' · '))}</div>` : loading ? '<div class="small muted" style="margin-top:4px;">Loading NIP-11…</div>' : ''}
+          </div>
+          <div class="bridge-relay-meta">
+            ${source ? `<span class="bridge-pill">${escapeHtml(source)}</span>` : ''}
+            ${info?.error ? `<span class="bridge-pill">NIP-11 unavailable</span>` : hasInfo ? `<span class="bridge-pill">NIP-11 loaded</span>` : loading ? '<span class="bridge-pill">NIP-11 loading</span>' : ''}
+          </div>
+        </div>
+        <div class="bridge-relay-details">
+          ${info?.error ? `
+            <div class="small muted">NIP-11 fetch failed: ${escapeHtml(info.error)}</div>
+          ` : hasInfo ? `
+            <div class="small muted" style="margin-bottom:6px;">
+              ${info.name ? `<b>${escapeHtml(info.name)}</b>` : 'unnamed relay'}
+              ${info.version ? ` · v${escapeHtml(info.version)}` : ''}
+            </div>
+            ${info.description ? `<div class="small muted">${escapeHtml(info.description)}</div>` : ''}
+            <div class="bridge-relay-grid" style="margin-top:8px;">
+              ${info.pubkey ? `<span class="bridge-pill bridge-pill-relay">pubkey ${escapeHtml(info.pubkey)}</span>` : ''}
+              ${info.contact ? `<span class="bridge-pill bridge-pill-relay">${escapeHtml(info.contact)}</span>` : ''}
+              ${info.software ? `<span class="bridge-pill bridge-pill-relay">${escapeHtml(info.software)}</span>` : ''}
+              ${info.icon ? `<span class="bridge-pill bridge-pill-relay">icon</span>` : ''}
+              ${info.negentropy ? '<span class="bridge-pill bridge-pill-relay">negentropy</span>' : ''}
+              ${typeof info.limitation?.auth_required === 'boolean' ? `<span class="bridge-pill bridge-pill-relay">${info.limitation.auth_required ? 'auth required' : 'no auth'}</span>` : ''}
+              ${typeof info.limitation?.payment_required === 'boolean' ? `<span class="bridge-pill bridge-pill-relay">${info.limitation.payment_required ? 'payment required' : 'free'}</span>` : ''}
+            </div>
+            <div class="bridge-relay-grid" style="margin-top:8px;">
+              ${Array.isArray(info.supported_nips) && info.supported_nips.length
+                ? info.supported_nips.map((nip) => `<span class="bridge-pill bridge-pill-relay">NIP-${escapeHtml(nip)}</span>`).join('')
+                : '<span class="bridge-pill">supported_nips unknown</span>'}
+            </div>
+            ${Array.isArray(info.relay_countries) && info.relay_countries.length ? `
+              <div class="bridge-relay-grid" style="margin-top:8px;">
+                ${info.relay_countries.map((country) => `<span class="bridge-pill bridge-pill-relay">${escapeHtml(country)}</span>`).join('')}
+              </div>
+            ` : ''}
+          ` : loading ? `
+            <div class="small muted">Loading NIP-11 metadata…</div>
+          ` : `
+            <div class="small muted">NIP-11 metadata not loaded yet.</div>
+          `}
+        </div>
+      `;
     }
 
     function relayInfoForUrl(url) {
@@ -214,82 +271,38 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       if (!urls.length) return;
       for (const url of urls) {
         void fetchRelayInfo(url).finally(() => {
+          renderDefaultRelays();
           renderRelays();
           renderPeers();
         });
       }
     }
 
-    function renderRelays() {
-      const entries = [...new Set([
-        ...parseRelays(relayInputEl.value),
-        ...[...relayCatalog.values()].flatMap((entry) => entry.relays || []),
-      ])].sort();
+    function renderDefaultRelays() {
+      const entries = [...DEFAULT_RELAYS].sort();
+      defaultRelayCountEl.textContent = String(entries.length);
+      defaultRelayListEl.innerHTML = entries.map((relay) => {
+        const info = relayInfoForUrl(relay);
+        const loading = relayInfoInFlight.has(normalizeRelayUrl(relay) || relay);
+        return relayRowHtml(relay, info, 'default', loading);
+      }).join('');
+    }
 
-      relayCountEl.textContent = String(entries.length);
-      if (!entries.length) {
-        relayListEl.innerHTML = '<div class="small muted">No relays configured.</div>';
+    function renderRelays() {
+      const learnedRelays = [...new Set([...relayCatalog.values()].flatMap((entry) => entry.relays || []))].sort();
+      relayCountEl.textContent = String(learnedRelays.length);
+      if (!learnedRelays.length) {
+        relayListEl.innerHTML = '<div class="small muted">No relays accumulated yet.</div>';
         return;
       }
 
       const learned = new Map([...relayCatalog.values()].flatMap((entry) => (entry.relays || []).map((relay) => [relay, entry])));
-      relayListEl.innerHTML = entries.map((relay) => {
+      relayListEl.innerHTML = learnedRelays.map((relay) => {
         const source = learned.get(relay);
         const info = relayInfoForUrl(relay);
         const loading = relayInfoInFlight.has(normalizeRelayUrl(relay) || relay);
-        const hasInfo = Boolean(info && !info.error);
-        const fields = hasInfo ? [
-          info.name || '',
-          info.description || '',
-          info.version ? `v${info.version}` : '',
-        ].filter(Boolean) : [];
-        return `
-          <div class="bridge-relay-row">
-            <div class="bridge-relay-url mono">
-              <div>${escapeHtml(relay)}</div>
-              ${hasInfo ? `<div class="small muted" style="margin-top:4px;">${escapeHtml(fields.join(' · '))}</div>` : loading ? '<div class="small muted" style="margin-top:4px;">Loading NIP-11…</div>' : ''}
-            </div>
-            <div class="bridge-relay-meta">
-              <span class="bridge-pill">${source ? `learned from ${escapeHtml(source.owner || 'unknown')}` : 'configured'}</span>
-              ${source ? `<span class="bridge-pill bridge-pill-source">kind ${escapeHtml(source.kind || 'unknown')}</span>` : ''}
-              ${info?.error ? `<span class="bridge-pill">NIP-11 unavailable</span>` : hasInfo ? `<span class="bridge-pill">NIP-11 loaded</span>` : loading ? '<span class="bridge-pill">NIP-11 loading</span>' : ''}
-            </div>
-          </div>
-          <div class="bridge-relay-details">
-            ${info?.error ? `
-              <div class="small muted">NIP-11 fetch failed: ${escapeHtml(info.error)}</div>
-            ` : hasInfo ? `
-              <div class="small muted" style="margin-bottom:6px;">
-                ${info.name ? `<b>${escapeHtml(info.name)}</b>` : 'unnamed relay'}
-                ${info.version ? ` · v${escapeHtml(info.version)}` : ''}
-              </div>
-              ${info.description ? `<div class="small muted">${escapeHtml(info.description)}</div>` : ''}
-              <div class="bridge-relay-grid" style="margin-top:8px;">
-                ${info.pubkey ? `<span class="bridge-pill bridge-pill-relay">pubkey ${escapeHtml(info.pubkey)}</span>` : ''}
-                ${info.contact ? `<span class="bridge-pill bridge-pill-relay">${escapeHtml(info.contact)}</span>` : ''}
-                ${info.software ? `<span class="bridge-pill bridge-pill-relay">${escapeHtml(info.software)}</span>` : ''}
-                ${info.icon ? `<span class="bridge-pill bridge-pill-relay">icon</span>` : ''}
-                ${info.negentropy ? '<span class="bridge-pill bridge-pill-relay">negentropy</span>' : ''}
-                ${typeof info.limitation?.auth_required === 'boolean' ? `<span class="bridge-pill bridge-pill-relay">${info.limitation.auth_required ? 'auth required' : 'no auth'}</span>` : ''}
-                ${typeof info.limitation?.payment_required === 'boolean' ? `<span class="bridge-pill bridge-pill-relay">${info.limitation.payment_required ? 'payment required' : 'free'}</span>` : ''}
-              </div>
-              <div class="bridge-relay-grid" style="margin-top:8px;">
-                ${Array.isArray(info.supported_nips) && info.supported_nips.length
-                  ? info.supported_nips.map((nip) => `<span class="bridge-pill bridge-pill-relay">NIP-${escapeHtml(nip)}</span>`).join('')
-                  : '<span class="bridge-pill">supported_nips unknown</span>'}
-              </div>
-              ${Array.isArray(info.relay_countries) && info.relay_countries.length ? `
-                <div class="bridge-relay-grid" style="margin-top:8px;">
-                  ${info.relay_countries.map((country) => `<span class="bridge-pill bridge-pill-relay">${escapeHtml(country)}</span>`).join('')}
-                </div>
-              ` : ''}
-            ` : loading ? `
-              <div class="small muted">Loading NIP-11 metadata…</div>
-            ` : `
-              <div class="small muted">NIP-11 metadata not loaded yet.</div>
-            `}
-          </div>
-        `;
+        const sourceLabel = source ? `learned from ${source.owner || 'unknown'}` : 'learned';
+        return relayRowHtml(relay, info, sourceLabel, loading);
       }).join('');
     }
 
@@ -659,10 +672,12 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
 
     relayInputEl.addEventListener('change', () => {
       relays = parseRelays(relayInputEl.value);
+      renderDefaultRelays();
       renderRelays();
       void refreshRelayInfo(relays);
       window.__sharedFooter?.log('bridge', `relay list updated (${relays.length})`, 'debug', 'checking');
     });
 
+    renderDefaultRelays();
     renderRelays();
     void startBridge();

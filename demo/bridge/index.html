@@ -40,11 +40,22 @@ wss://nostr.wine</textarea>
       </div>
     </div>
 
-    <div class="panel bridge-relays">
+    <div class="panel bridge-default-relays">
       <div class="row" style="justify-content:space-between;">
         <div>
-          <h2 style="margin:0 0 6px;">Relay list</h2>
-          <div class="small muted">Current Nostr relays used by the bridge, plus any relay metadata learned from events.</div>
+          <h2 style="margin:0 0 6px;">Default Relays</h2>
+          <div class="small muted">Seed relays used by the bridge on startup.</div>
+        </div>
+        <div class="pill">Count: <b id="defaultRelayCount">0</b></div>
+      </div>
+      <div id="defaultRelayList" class="bridge-relay-list" style="margin-top:12px;"></div>
+    </div>
+
+    <div class="panel bridge-accumulated-relays">
+      <div class="row" style="justify-content:space-between;">
+        <div>
+          <h2 style="margin:0 0 6px;">Relays</h2>
+          <div class="small muted">Accumulated relays learned from Nostr users and relay-list metadata.</div>
         </div>
         <div class="pill">Count: <b id="relayCount">0</b></div>
       </div>

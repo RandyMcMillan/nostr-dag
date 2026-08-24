@@ -178,6 +178,8 @@ button:hover, a.button:hover { background:var(--button-hover); }
 
 .bridge-hero,
 .bridge-controls,
+.bridge-default-relays,
+.bridge-accumulated-relays,
 .bridge-relays,
 .bridge-metrics,
 .bridge-peers { margin-bottom: 16px; }
