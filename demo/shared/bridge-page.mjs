@@ -240,15 +240,17 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
                 cache: 'no-store',
                 headers: { Accept: 'application/nostr+json' },
               });
-              if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-              const data = await response.json();
+              const raw = await response.text();
+              window.__sharedFooter?.log('bridge', `nip11 raw ${normalized} via ${candidate}\n${raw}`, 'trace', response.ok ? 'available' : 'unavailable');
+              if (!response.ok) throw new Error(`${response.status} ${response.statusText}\n${raw}`);
+              const data = JSON.parse(raw || '{}');
               const record = createNostrRelay(normalized, {
                 ...data,
                 fetch_url: candidate,
                 fetched_at: Date.now(),
               });
               relayInfoCatalog.set(normalized, record);
-              window.__sharedFooter?.log('bridge', `loaded nip11 ${normalized}`, 'trace', 'available');
+              window.__sharedFooter?.log('bridge', `fetch nip11 ${normalized} ok ${record.name || record.version || 'loaded'}`, 'trace', 'available');
               return record;
             } catch (error) {
               lastError = error;
@@ -262,7 +264,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
             error: error?.message || String(error),
           });
           relayInfoCatalog.set(normalized, record);
-          window.__sharedFooter?.log('bridge', `nip11 failed ${normalized}: ${record.error}`, 'trace', 'unavailable');
+          window.__sharedFooter?.log('bridge', `fetch nip11 ${normalized} failed ${record.error}`, 'trace', 'unavailable');
           return record;
         } finally {
           relayInfoInFlight.delete(normalized);
