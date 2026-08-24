@@ -455,7 +455,6 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       const openPeerIds = [...peerListEl.querySelectorAll('details[open][data-peer-id]')]
         .map((el) => el.getAttribute('data-peer-id'))
         .filter(Boolean);
-      const relaysNow = currentRelayUrls();
       peerListEl.innerHTML = peers.map((peer) => `
         <details class="bridge-card bridge-peer" data-peer-id="${escapeHtml(peer.peer_id)}">
           <summary class="bridge-card-summary">
@@ -469,15 +468,6 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
               </div>
             </div>
           </summary>
-          <div class="bridge-peer-relays">
-            <div class="bridge-peer-relays-label">Relays</div>
-            <div class="bridge-relay-grid">
-              ${(peer.relays && peer.relays.length ? peer.relays : relaysNow).length
-                ? (peer.relays && peer.relays.length ? peer.relays : relaysNow)
-                    .map((relay) => `<span class="bridge-pill bridge-pill-relay">${escapeHtml(relay)}</span>`).join('')
-                : '<span class="bridge-pill">none</span>'}
-            </div>
-          </div>
           <div class="bridge-peer-detail mono">${peer.detail ? escapeHtml(formatPeerDetail(peer.detail)) : 'no detail'}</div>
         </details>
       `).join('');
