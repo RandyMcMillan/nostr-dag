@@ -29,15 +29,23 @@
         ],
       });
 
-      window.__sharedFooter = createLoggerFooter(document.getElementById('sharedFooter'), {
-        title: 'Logger',
-        initialState: 'idle',
-        initialTitle: 'bridge starting...',
-        initialLevel: 'trace',
-        maxEntries: 5000,
-      });
-      window.__sharedFooter.setLevel('trace');
-      window.__sharedFooter.close();
+      const initFooter = () => {
+        window.__sharedFooter = createLoggerFooter(document.getElementById('sharedFooter'), {
+          title: 'Logger',
+          initialState: 'idle',
+          initialTitle: 'bridge starting...',
+          initialLevel: 'trace',
+          maxEntries: 5000,
+        });
+        window.__sharedFooter.setLevel('trace');
+        window.__sharedFooter.close();
+        window.__flushSharedFooterLogBuffer?.();
+      };
+      if (typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(() => window.setTimeout(initFooter, 0));
+      } else {
+        window.setTimeout(initFooter, 0);
+      }
     }
   </script>
 
