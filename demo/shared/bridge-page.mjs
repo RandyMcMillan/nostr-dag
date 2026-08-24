@@ -425,9 +425,18 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     }
 
     // Keep one merged peer registry in the browser so the bridge works on Pages and localhost.
+    function peerKey(peer) {
+      return `${peer.source || 'browser'}:${peer.path || '/'}:${peer.peer_id}:${peer.kind || 'unknown'}`;
+    }
+
     function upsertPeer(source, peer) {
       if (!peer?.peer_id) return;
-      const key = `${source}:${peer.path || '/'}:${peer.peer_id}:${peer.kind || 'unknown'}`;
+      const key = peerKey({
+        source,
+        path: peer.path || '/',
+        peer_id: peer.peer_id,
+        kind: peer.kind || 'unknown',
+      });
       const record = {
         ...peer,
         source: peer.source || source,
@@ -452,11 +461,11 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         return;
       }
       window.__sharedFooter?.log('bridge', `render peers (${peers.length})`, 'trace', 'checking');
-      const openPeerIds = [...peerListEl.querySelectorAll('details[open][data-peer-id]')]
-        .map((el) => el.getAttribute('data-peer-id'))
+      const openPeerKeys = [...peerListEl.querySelectorAll('details[open][data-peer-key]')]
+        .map((el) => el.getAttribute('data-peer-key'))
         .filter(Boolean);
       peerListEl.innerHTML = peers.map((peer) => `
-        <details class="bridge-card bridge-peer" data-peer-id="${escapeHtml(peer.peer_id)}">
+        <details class="bridge-card bridge-peer" data-peer-key="${escapeHtml(peerKey(peer))}">
           <summary class="bridge-card-summary">
             <div class="bridge-peer-head">
               <div class="bridge-peer-title mono">${escapeHtml(peer.peer_id)}</div>
@@ -471,9 +480,13 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
           <div class="bridge-peer-detail mono">${peer.detail ? escapeHtml(formatPeerDetail(peer.detail)) : 'no detail'}</div>
         </details>
       `).join('');
-      for (const peerId of openPeerIds) {
-        const card = peerListEl.querySelector(`details[data-peer-id="${CSS.escape(peerId)}"]`);
-        if (card) card.open = true;
+      for (const peerKeyValue of openPeerKeys) {
+        for (const card of peerListEl.querySelectorAll('details[data-peer-key]')) {
+          if (card.getAttribute('data-peer-key') === peerKeyValue) {
+            card.open = true;
+            break;
+          }
+        }
       }
     }
 
