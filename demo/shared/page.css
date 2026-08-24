@@ -387,8 +387,34 @@ button:hover, a.button:hover { background:var(--button-hover); }
   .panel { padding:12px; }
   .row { gap:8px; }
   button, input, select { width:100%; }
-  .footer-header { align-items:center; }
-  .footer-controls { flex-direction:row; align-items:center; gap:8px; }
+  .sticky-footer {
+    left:8px;
+    right:8px;
+    bottom:8px;
+    padding:8px 10px calc(8px + env(safe-area-inset-bottom));
+    border-radius:18px 18px 0 0;
+    resize:none;
+    min-height:64px;
+    max-height:55vh;
+    box-shadow:0 -10px 28px rgba(0,0,0,.28);
+    backdrop-filter:saturate(160%) blur(16px);
+    -webkit-backdrop-filter:saturate(160%) blur(16px);
+  }
+  .sticky-footer-inner { max-width:100%; }
+  .footer-header { flex-wrap:wrap; align-items:stretch; gap:8px; }
+  .footer-status-wrap { width:100%; }
+  .footer-log-wrap { width:100%; min-width:0; }
+  .footer-controls { flex-wrap:wrap; align-items:center; gap:8px; }
+  .footer-toggle { flex:1 1 auto; width:auto; min-width:0; justify-content:flex-start; }
+  .footer-actions {
+    width:100%;
+    margin-left:0;
+    display:flex;
+    flex-direction:column;
+    align-items:stretch;
+    gap:6px;
+  }
+  .footer-copy { flex:0 0 auto; width:100%; justify-content:center; }
   .footer-level-pills {
     margin-left:0;
     width:100%;
@@ -398,12 +424,13 @@ button:hover, a.button:hover { background:var(--button-hover); }
     display:flex;
     flex-wrap:nowrap;
     flex:1 1 auto;
-    justify-content:space-evenly;
+    justify-content:flex-start;
     border-radius:999px;
+    margin-top:2px;
     -webkit-overflow-scrolling:touch;
   }
   .footer-pill {
-    flex:1 1 0;
+    flex:0 0 auto;
     min-width:0;
     width:auto;
     display:inline-flex;
@@ -412,6 +439,7 @@ button:hover, a.button:hover { background:var(--button-hover); }
     font-size:12px;
     white-space:nowrap;
   }
+  .footer-log { max-height:28vh; }
 }
 
 
