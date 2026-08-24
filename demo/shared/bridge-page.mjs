@@ -120,17 +120,20 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         info.version ? `v${info.version}` : '',
       ].filter(Boolean) : [];
       return `
-        <div class="bridge-relay-row">
-          <div class="bridge-relay-url mono">
-            <div>${escapeHtml(relay)}</div>
-            ${hasInfo ? `<div class="small muted" style="margin-top:4px;">${escapeHtml(fields.join(' · '))}</div>` : loading ? '<div class="small muted" style="margin-top:4px;">Loading NIP-11…</div>' : ''}
-          </div>
-          <div class="bridge-relay-meta">
-            ${source ? `<span class="bridge-pill">${escapeHtml(source)}</span>` : ''}
-            ${info?.error ? `<span class="bridge-pill">NIP-11 unavailable</span>` : hasInfo ? `<span class="bridge-pill">NIP-11 loaded</span>` : loading ? '<span class="bridge-pill">NIP-11 loading</span>' : ''}
-          </div>
-        </div>
-        <div class="bridge-relay-details">
+        <details class="bridge-card bridge-relay-card">
+          <summary class="bridge-card-summary">
+            <div class="bridge-relay-row">
+              <div class="bridge-relay-url mono">
+                <div>${escapeHtml(relay)}</div>
+                ${hasInfo ? `<div class="small muted" style="margin-top:4px;">${escapeHtml(fields.join(' · '))}</div>` : loading ? '<div class="small muted" style="margin-top:4px;">Loading NIP-11…</div>' : ''}
+              </div>
+              <div class="bridge-relay-meta">
+                ${source ? `<span class="bridge-pill">${escapeHtml(source)}</span>` : ''}
+                ${info?.error ? `<span class="bridge-pill">NIP-11 unavailable</span>` : hasInfo ? `<span class="bridge-pill">NIP-11 loaded</span>` : loading ? '<span class="bridge-pill">NIP-11 loading</span>' : ''}
+              </div>
+            </div>
+          </summary>
+          <div class="bridge-relay-details">
           ${info?.error ? `
             <div class="small muted">NIP-11 fetch failed: ${escapeHtml(info.error)}</div>
           ` : hasInfo ? `
@@ -163,7 +166,8 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
           ` : `
             <div class="small muted">NIP-11 metadata not loaded yet.</div>
           `}
-        </div>
+          </div>
+        </details>
       `;
     }
 
@@ -415,16 +419,18 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       window.__sharedFooter?.log('bridge', `render peers (${peers.length})`, 'trace', 'checking');
       const relaysNow = currentRelayUrls();
       peerListEl.innerHTML = peers.map((peer) => `
-        <div class="bridge-peer">
-          <div class="bridge-peer-head">
-            <div class="bridge-peer-title mono">${escapeHtml(peer.peer_id)}</div>
-            <div class="bridge-peer-meta">
-              <span class="bridge-pill">${escapeHtml(peer.kind || 'unknown')}</span>
-              <span class="bridge-pill">${escapeHtml(peer.path || '/')}</span>
-              <span class="bridge-pill">${escapeHtml(new Date(peer.updated_at || Date.now()).toLocaleTimeString())}</span>
-              <span class="bridge-pill bridge-pill-source">${escapeHtml(peer.source || 'browser')}</span>
+        <details class="bridge-card bridge-peer" data-peer-id="${escapeHtml(peer.peer_id)}">
+          <summary class="bridge-card-summary">
+            <div class="bridge-peer-head">
+              <div class="bridge-peer-title mono">${escapeHtml(peer.peer_id)}</div>
+              <div class="bridge-peer-meta">
+                <span class="bridge-pill">${escapeHtml(peer.kind || 'unknown')}</span>
+                <span class="bridge-pill">${escapeHtml(peer.path || '/')}</span>
+                <span class="bridge-pill">${escapeHtml(new Date(peer.updated_at || Date.now()).toLocaleTimeString())}</span>
+                <span class="bridge-pill bridge-pill-source">${escapeHtml(peer.source || 'browser')}</span>
+              </div>
             </div>
-          </div>
+          </summary>
           <div class="bridge-peer-relays">
             <div class="bridge-peer-relays-label">Relays</div>
             <div class="bridge-relay-grid">
@@ -435,7 +441,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
             </div>
           </div>
           <div class="bridge-peer-detail mono">${peer.detail ? escapeHtml(formatPeerDetail(peer.detail)) : 'no detail'}</div>
-        </div>
+        </details>
       `).join('');
     }
 
