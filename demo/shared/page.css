@@ -280,6 +280,21 @@ button:hover, a.button:hover { background:var(--button-hover); }
   border-color:var(--border-strong);
 }
 
+.bridge-pill-ok {
+  background:rgba(34,197,94,.12);
+  border-color:rgba(34,197,94,.35);
+  min-width:24px;
+  justify-content:center;
+}
+
+.bridge-pill-dot {
+  width:8px;
+  height:8px;
+  border-radius:999px;
+  background:#22c55e;
+  display:inline-block;
+}
+
 .bridge-relay-list {
   display:grid;
   gap:10px;
