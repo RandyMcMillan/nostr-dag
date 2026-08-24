@@ -194,31 +194,48 @@ wss://nostr.wine</textarea>
       return parsed.toString().replace(/\/$/, '');
     }
 
+    function nip11ProxyUrl(relayUrl) {
+      const normalized = normalizeRelayUrl(relayUrl);
+      if (!normalized) return null;
+      const url = new URL('/nip11', window.location.href);
+      url.searchParams.set('relay', normalized);
+      return url.toString();
+    }
+
     async function fetchRelayInfo(relayUrl) {
       const normalized = normalizeRelayUrl(relayUrl);
       const fetchUrl = nip11FetchUrl(relayUrl);
+      const proxyUrl = nip11ProxyUrl(relayUrl);
       if (!normalized) return null;
       if (relayInfoCatalog.has(normalized)) return relayInfoCatalog.get(normalized);
       if (relayInfoInFlight.has(normalized)) return relayInfoInFlight.get(normalized);
 
       const request = (async () => {
         try {
-          if (!fetchUrl) throw new Error('invalid relay url');
-          const response = await fetch(fetchUrl, {
-            method: 'GET',
-            cache: 'no-store',
-            headers: { Accept: 'application/nostr+json' },
-          });
-          if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-          const data = await response.json();
-          const record = {
-            url: normalized,
-            fetch_url: fetchUrl,
-            fetched_at: Date.now(),
-            ...data,
-          };
-          relayInfoCatalog.set(normalized, record);
-          return record;
+          const candidates = [proxyUrl, fetchUrl].filter(Boolean);
+          let lastError = null;
+          for (const candidate of candidates) {
+            try {
+              const response = await fetch(candidate, {
+                method: 'GET',
+                cache: 'no-store',
+                headers: { Accept: 'application/nostr+json' },
+              });
+              if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+              const data = await response.json();
+              const record = {
+                url: normalized,
+                fetch_url: candidate,
+                fetched_at: Date.now(),
+                ...data,
+              };
+              relayInfoCatalog.set(normalized, record);
+              return record;
+            } catch (error) {
+              lastError = error;
+            }
+          }
+          throw lastError || new Error('unable to fetch NIP-11');
         } catch (error) {
           const record = {
             url: normalized,
@@ -261,17 +278,52 @@ wss://nostr.wine</textarea>
       relayListEl.innerHTML = entries.map((relay) => {
         const source = learned.get(relay);
         const info = relayInfoForUrl(relay);
+        const loading = relayInfoInFlight.has(normalizeRelayUrl(relay) || relay);
         return `
           <div class="bridge-relay-row">
             <div class="bridge-relay-url mono">
               <div>${escapeHtml(relay)}</div>
-              ${info ? `<div class="small muted" style="margin-top:4px;">${escapeHtml(info.name || info.description || info.version || 'NIP-11 document loaded')}</div>` : ''}
+              ${info ? `<div class="small muted" style="margin-top:4px;">${escapeHtml(info.name || info.description || info.version || 'NIP-11 document loaded')}</div>` : loading ? '<div class="small muted" style="margin-top:4px;">Loading NIP-11…</div>' : ''}
             </div>
             <div class="bridge-relay-meta">
               <span class="bridge-pill">${source ? `learned from ${escapeHtml(source.owner || 'unknown')}` : 'configured'}</span>
               ${source ? `<span class="bridge-pill bridge-pill-source">kind ${escapeHtml(source.kind || 'unknown')}</span>` : ''}
-              ${info?.error ? `<span class="bridge-pill">NIP-11 unavailable</span>` : info ? `<span class="bridge-pill">NIP-11 loaded</span>` : ''}
+              ${info?.error ? `<span class="bridge-pill">NIP-11 unavailable</span>` : info ? `<span class="bridge-pill">NIP-11 loaded</span>` : loading ? '<span class="bridge-pill">NIP-11 loading</span>' : ''}
             </div>
+          </div>
+          <div class="bridge-relay-details">
+            ${info?.error ? `
+              <div class="small muted">NIP-11 fetch failed: ${escapeHtml(info.error)}</div>
+            ` : info ? `
+              <div class="small muted" style="margin-bottom:6px;">
+                ${info.name ? `<b>${escapeHtml(info.name)}</b>` : 'unnamed relay'}
+                ${info.version ? ` · v${escapeHtml(info.version)}` : ''}
+              </div>
+              ${info.description ? `<div class="small muted">${escapeHtml(info.description)}</div>` : ''}
+              <div class="bridge-relay-grid" style="margin-top:8px;">
+                ${info.pubkey ? `<span class="bridge-pill bridge-pill-relay">pubkey ${escapeHtml(info.pubkey)}</span>` : ''}
+                ${info.contact ? `<span class="bridge-pill bridge-pill-relay">${escapeHtml(info.contact)}</span>` : ''}
+                ${info.software ? `<span class="bridge-pill bridge-pill-relay">${escapeHtml(info.software)}</span>` : ''}
+                ${info.icon ? `<span class="bridge-pill bridge-pill-relay">icon</span>` : ''}
+                ${info.negentropy ? '<span class="bridge-pill bridge-pill-relay">negentropy</span>' : ''}
+                ${typeof info.limitation?.auth_required === 'boolean' ? `<span class="bridge-pill bridge-pill-relay">${info.limitation.auth_required ? 'auth required' : 'no auth'}</span>` : ''}
+                ${typeof info.limitation?.payment_required === 'boolean' ? `<span class="bridge-pill bridge-pill-relay">${info.limitation.payment_required ? 'payment required' : 'free'}</span>` : ''}
+              </div>
+              <div class="bridge-relay-grid" style="margin-top:8px;">
+                ${Array.isArray(info.supported_nips) && info.supported_nips.length
+                  ? info.supported_nips.map((nip) => `<span class="bridge-pill bridge-pill-relay">NIP-${escapeHtml(nip)}</span>`).join('')
+                  : '<span class="bridge-pill">supported_nips unknown</span>'}
+              </div>
+              ${Array.isArray(info.relay_countries) && info.relay_countries.length ? `
+                <div class="bridge-relay-grid" style="margin-top:8px;">
+                  ${info.relay_countries.map((country) => `<span class="bridge-pill bridge-pill-relay">${escapeHtml(country)}</span>`).join('')}
+                </div>
+              ` : ''}
+            ` : loading ? `
+              <div class="small muted">Loading NIP-11 metadata…</div>
+            ` : `
+              <div class="small muted">NIP-11 metadata not loaded yet.</div>
+            `}
           </div>
         `;
       }).join('');
@@ -305,7 +357,6 @@ wss://nostr.wine</textarea>
         return;
       }
       const relaysNow = currentRelayUrls();
-      const relaySources = [...relayCatalog.values()].sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0));
       peerListEl.innerHTML = peers.map((peer) => `
         <div class="bridge-peer">
           <div class="bridge-peer-head">
@@ -325,65 +376,10 @@ wss://nostr.wine</textarea>
                     .map((relay) => `<span class="bridge-pill bridge-pill-relay">${escapeHtml(relay)}</span>`).join('')
                 : '<span class="bridge-pill">none</span>'}
             </div>
-            ${renderRelayInfoBlocks(peer.relays && peer.relays.length ? peer.relays : relaysNow)}
           </div>
           <div class="bridge-peer-detail mono">${peer.detail ? escapeHtml(formatPeerDetail(peer.detail)) : 'no detail'}</div>
         </div>
       `).join('');
-    }
-
-    function renderRelayInfoBlocks(relayUrls) {
-      const infos = relayInfoForUrls(relayUrls);
-      if (!infos.length) {
-        return '<div class="small muted" style="margin-top:8px;">NIP-11 relay info not loaded yet.</div>';
-      }
-      return `
-        <div class="bridge-peer-relay-sources">
-          <div class="bridge-peer-relay-source-head mono">NIP-11 relay info</div>
-          ${infos.map((info) => `
-            <div class="bridge-peer-relay-source">
-              <div class="bridge-peer-relay-source-head mono">${escapeHtml(info.url || 'unknown')}</div>
-              <div class="small muted" style="margin-top:4px;">
-                ${escapeHtml(info.name || 'unnamed relay')}
-                ${info.version ? ` · v${escapeHtml(info.version)}` : ''}
-              </div>
-              ${info.description ? `<div class="small muted" style="margin-top:6px;">${escapeHtml(info.description)}</div>` : ''}
-              <div class="bridge-relay-grid" style="margin-top:8px;">
-                ${info.pubkey ? `<span class="bridge-pill bridge-pill-relay">pubkey ${escapeHtml(info.pubkey)}</span>` : ''}
-                ${info.icon ? `<span class="bridge-pill bridge-pill-relay">icon</span>` : ''}
-                ${info.negentropy ? '<span class="bridge-pill bridge-pill-relay">negentropy</span>' : ''}
-                ${typeof info.limitation?.auth_required === 'boolean' ? `<span class="bridge-pill bridge-pill-relay">${info.limitation.auth_required ? 'auth required' : 'no auth'}</span>` : ''}
-                ${typeof info.limitation?.payment_required === 'boolean' ? `<span class="bridge-pill bridge-pill-relay">${info.limitation.payment_required ? 'payment required' : 'free'}</span>` : ''}
-              </div>
-              <div class="bridge-relay-grid" style="margin-top:8px;">
-                ${Array.isArray(info.supported_nips) && info.supported_nips.length
-                  ? info.supported_nips.map((nip) => `<span class="bridge-pill bridge-pill-relay">NIP-${escapeHtml(nip)}</span>`).join('')
-                  : '<span class="bridge-pill">supported_nips unknown</span>'}
-              </div>
-              <div class="small muted" style="margin-top:8px;">
-                ${info.contact ? `contact: ${escapeHtml(info.contact)}` : ''}
-                ${info.software ? `${info.contact ? ' · ' : ''}software: ${escapeHtml(info.software)}` : ''}
-                ${info.version && (info.contact || info.software) ? ' · ' : ''}
-                ${info.version ? `version: ${escapeHtml(info.version)}` : ''}
-              </div>
-              ${info.limitation ? `
-                <div class="small muted" style="margin-top:8px;">
-                  limitation:
-                  ${Object.entries(info.limitation)
-                    .filter(([, value]) => value !== undefined && value !== null && value !== '')
-                    .map(([key, value]) => `${escapeHtml(key)}=${escapeHtml(Array.isArray(value) ? value.join(',') : value)}`)
-                    .join(' · ')}
-                </div>
-              ` : ''}
-              ${Array.isArray(info.relay_countries) && info.relay_countries.length ? `
-                <div class="bridge-relay-grid" style="margin-top:8px;">
-                  ${info.relay_countries.map((country) => `<span class="bridge-pill bridge-pill-relay">${escapeHtml(country)}</span>`).join('')}
-                </div>
-              ` : ''}
-            </div>
-          `).join('')}
-        </div>
-      `;
     }
 
     // Poll the local preview server when available. Pages deployments just render browser peers.

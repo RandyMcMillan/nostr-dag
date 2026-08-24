@@ -24,6 +24,7 @@ const DEFAULT_SITE_DIR: &str = "site";
 const LOGGER_ROUTE_PREFIX: &str = "/logger";
 const LOGGER_MAX_ENTRIES: usize = 10_000;
 const PEERS_ROUTE_PREFIX: &str = "/peers";
+const NIP11_ROUTE_PREFIX: &str = "/nip11";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct LoggerEntry {
@@ -115,6 +116,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let site_dir = env::var("SITE_DIR").unwrap_or_else(|_| DEFAULT_SITE_DIR.to_string());
     let logger_store = Arc::new(LoggerStore::default());
     let peer_store = Arc::new(PeerStore::default());
+    let http_client = Arc::new(reqwest::Client::builder().user_agent("nostr-dag/0.9.1").build()?);
 
     let addr = format!("{host}:{port}");
     let listener = TcpListener::bind(&addr).await?;
@@ -129,8 +131,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let site_dir = site_dir.clone();
                 let logger_store = Arc::clone(&logger_store);
                 let peer_store = Arc::clone(&peer_store);
+                let http_client = Arc::clone(&http_client);
                 tokio::spawn(async move {
-                    if let Err(err) = handle_connection(stream, &site_dir, logger_store, peer_store).await {
+                    if let Err(err) = handle_connection(stream, &site_dir, logger_store, peer_store, http_client).await {
                         error!(%peer, ?err, "request failed");
                     }
                 });
@@ -150,6 +153,7 @@ async fn handle_connection(
     site_dir: &str,
     logger_store: Arc<LoggerStore>,
     peer_store: Arc<PeerStore>,
+    http_client: Arc<reqwest::Client>,
 ) -> io::Result<()> {
     let request = read_http_request(&mut stream).await?;
     if request.is_empty() {
@@ -180,6 +184,20 @@ async fn handle_connection(
             Err(err) => {
                 error!(?err, "peer ingest failed");
                 response_text(400, "Bad Request", "Bad Request", "text/plain; charset=utf-8")
+            }
+        }
+    } else if method == "GET" && path == NIP11_ROUTE_PREFIX {
+        match handle_nip11_get(&request, &http_client).await {
+            Ok((body, content_type)) => response_bytes(200, "OK", body, content_type, head_only),
+            Err(RouteError::BadRequest) => {
+                response_text(400, "Bad Request", "Bad Request", "text/plain; charset=utf-8")
+            }
+            Err(RouteError::NotFound) => {
+                response_text(404, "Not Found", "Not Found", "text/plain; charset=utf-8")
+            }
+            Err(RouteError::Io(err)) => {
+                error!(?err, path = %path, "failed to proxy nip11 payload");
+                response_text(502, "Bad Gateway", "Bad Gateway", "text/plain; charset=utf-8")
             }
         }
     } else if method != "GET" && method != "HEAD" {
@@ -334,6 +352,73 @@ fn handle_peer_get(path: &str, peer_store: &Arc<PeerStore>) -> Result<(Vec<u8>, 
     serde_json::to_vec(&payload)
         .map(|body| (body, "application/json; charset=utf-8"))
         .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))
+}
+
+async fn handle_nip11_get(
+    request: &str,
+    http_client: &Arc<reqwest::Client>,
+) -> Result<(Vec<u8>, &'static str), RouteError> {
+    let relay = query_param(request, "relay").ok_or(RouteError::BadRequest)?;
+    let relay = urlencoding::decode(&relay)
+        .map_err(|_| RouteError::BadRequest)?
+        .into_owned();
+    let relay = normalize_nip11_url(&relay).ok_or(RouteError::BadRequest)?;
+
+    let response = http_client
+        .get(&relay)
+        .header(reqwest::header::ACCEPT, "application/nostr+json")
+        .send()
+        .await
+        .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))?;
+
+    if !response.status().is_success() {
+        return Err(RouteError::NotFound);
+    }
+
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("application/nostr+json; charset=utf-8")
+        .to_string();
+    let body = response
+        .bytes()
+        .await
+        .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))?
+        .to_vec();
+    Ok((body, Box::leak(content_type.into_boxed_str())))
+}
+
+fn query_param(request: &str, name: &str) -> Option<String> {
+    let query = request
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|path| path.split_once('?').map(|(_, query)| query))?;
+
+    query.split('&').find_map(|pair| {
+        let (key, value) = pair.split_once('=')?;
+        if key == name {
+            Some(value.to_string())
+        } else {
+            None
+        }
+    })
+}
+
+fn normalize_nip11_url(url: &str) -> Option<String> {
+    let mut parsed = reqwest::Url::parse(url).ok()?;
+    match parsed.scheme() {
+        "ws" => {
+            let _ = parsed.set_scheme("http");
+        }
+        "wss" => {
+            let _ = parsed.set_scheme("https");
+        }
+        "http" | "https" => {}
+        _ => return None,
+    }
+    Some(parsed.to_string().trim_end_matches('/').to_string())
 }
 
 fn now_ms() -> u64 {
