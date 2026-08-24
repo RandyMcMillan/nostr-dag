@@ -226,6 +226,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       if (!normalized) return null;
       if (relayInfoCatalog.has(normalized)) return relayInfoCatalog.get(normalized);
       if (relayInfoInFlight.has(normalized)) return relayInfoInFlight.get(normalized);
+      window.__sharedFooter?.log('bridge', `fetch nip11 ${normalized}`, 'trace', 'checking');
 
       const request = (async () => {
         try {
@@ -246,6 +247,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
                 fetched_at: Date.now(),
               });
               relayInfoCatalog.set(normalized, record);
+              window.__sharedFooter?.log('bridge', `loaded nip11 ${normalized}`, 'trace', 'available');
               return record;
             } catch (error) {
               lastError = error;
@@ -259,6 +261,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
             error: error?.message || String(error),
           });
           relayInfoCatalog.set(normalized, record);
+          window.__sharedFooter?.log('bridge', `nip11 failed ${normalized}: ${record.error}`, 'trace', 'unavailable');
           return record;
         } finally {
           relayInfoInFlight.delete(normalized);
@@ -272,6 +275,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     function refreshRelayInfo(relayUrls) {
       const urls = [...new Set((relayUrls || currentRelayUrls()).map((url) => normalizeRelayUrl(url)).filter(Boolean))];
       if (!urls.length) return;
+      window.__sharedFooter?.log('bridge', `refresh nip11 for ${urls.length} relays`, 'trace', 'checking');
       for (const url of urls) {
         void fetchRelayInfo(url).finally(() => {
           renderDefaultRelays();
@@ -284,6 +288,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     function renderDefaultRelays() {
       const entries = [...DEFAULT_RELAYS].sort();
       defaultRelayCountEl.textContent = String(entries.length);
+      window.__sharedFooter?.log('bridge', `render default relays (${entries.length})`, 'trace', 'checking');
       defaultRelayListEl.innerHTML = entries.map((relay) => {
         const info = relayInfoForUrl(relay);
         const loading = relayInfoInFlight.has(normalizeRelayUrl(relay) || relay);
@@ -294,6 +299,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     function renderRelays() {
       const learnedRelays = [...new Set([...relayCatalog.values()].flatMap((entry) => entry.relays || []))].sort();
       relayCountEl.textContent = String(learnedRelays.length);
+      window.__sharedFooter?.log('bridge', `render accumulated relays (${learnedRelays.length})`, 'trace', 'checking');
       if (!learnedRelays.length) {
         relayListEl.innerHTML = '<div class="small muted">No relays accumulated yet.</div>';
         return;
@@ -336,6 +342,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         peerListEl.innerHTML = '<div class="small muted">No peers reported yet.</div>';
         return;
       }
+      window.__sharedFooter?.log('bridge', `render peers (${peers.length})`, 'trace', 'checking');
       const relaysNow = currentRelayUrls();
       peerListEl.innerHTML = peers.map((peer) => `
         <div class="bridge-peer">
@@ -401,6 +408,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         added = true;
       }
       if (added) {
+        window.__sharedFooter?.log('bridge', `queue relay discovery (${urls.length})`, 'trace', 'checking');
         void processRelayDiscoveryQueue();
       }
     }
@@ -482,6 +490,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         }
       }
       if (!urls.size) return;
+      window.__sharedFooter?.log('bridge', `accumulate ${urls.size} relays from kind ${event.kind} ${event.pubkey}`, 'trace', 'checking');
       relayCatalog.set(event.pubkey, {
         owner: event.pubkey,
         kind: event.kind,
