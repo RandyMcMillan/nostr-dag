@@ -428,24 +428,31 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     }
 
     function renderRelays() {
+      const defaultRelays = [...new Set(DEFAULT_RELAYS)];
       const learnedRelays = [...new Set([...relayCatalog.values()].flatMap((entry) => entry.relays || []))].sort();
       const visibleRelays = learnedRelays.filter((relay) => {
         const info = relayInfoForUrl(relay);
-        return Boolean(info && !info.error);
+        return Boolean(info && !info.error && !defaultRelays.includes(relay));
       });
-      relayCountEl.textContent = String(visibleRelays.length);
-      window.__sharedFooter?.log('bridge', `render accumulated relays (${visibleRelays.length})`, 'trace', 'checking');
-      if (!visibleRelays.length) {
+      const combinedRelays = [...defaultRelays, ...visibleRelays];
+      relayCountEl.textContent = String(combinedRelays.length);
+      window.__sharedFooter?.log('bridge', `render accumulated relays (${combinedRelays.length})`, 'trace', 'checking');
+      if (!combinedRelays.length) {
         relayListEl.innerHTML = '<div class="small muted">No relays with loaded NIP-11 yet.</div>';
         return;
       }
 
       const learned = new Map([...relayCatalog.values()].flatMap((entry) => (entry.relays || []).map((relay) => [relay, entry])));
-      relayListEl.innerHTML = visibleRelays.map((relay) => {
-        const source = learned.get(relay);
+      relayListEl.innerHTML = combinedRelays.map((relay) => {
         const info = relayInfoForUrl(relay);
-        const sourceLabel = source ? `learned from ${source.owner || 'unknown'}` : 'learned';
-        return relayRowHtml(relay, info, sourceLabel, false);
+        const source = learned.get(relay);
+        const loading = relayInfoInFlight.has(normalizeRelayUrl(relay) || relay);
+        const sourceLabel = defaultRelays.includes(relay)
+          ? 'default'
+          : source
+            ? `learned from ${source.owner || 'unknown'}`
+            : 'learned';
+        return relayRowHtml(relay, info, sourceLabel, loading);
       }).join('');
     }
 
