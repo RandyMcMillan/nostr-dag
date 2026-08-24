@@ -181,15 +181,12 @@ export function createLoggerFooter(root, options = {}) {
   root.innerHTML = `
     <div class="sticky-footer-inner small muted">
       <div class="footer-header">
-        <div class="footer-status-wrap">
-          <span data-footer-status class="status status-idle" title="">
-            <span class="status-dot" aria-hidden="true"></span>
-            <span data-footer-status-text>idle</span>
-          </span>
-        </div>
         <div class="footer-log-wrap">
           <div class="footer-controls">
             <button data-footer-toggle class="footer-toggle" type="button" aria-expanded="false" aria-controls="footerLogPanel">
+              <span data-footer-status class="status status-idle" title="" aria-hidden="true">
+                <span class="status-dot" aria-hidden="true"></span>
+              </span>
               <span data-footer-chevron class="footer-chevron">▸</span>
               <span>${title}</span>
             </button>
@@ -203,9 +200,8 @@ export function createLoggerFooter(root, options = {}) {
       <div data-footer-log class="footer-log" hidden></div>
     </div>
   `;
-
   const statusEl = root.querySelector('[data-footer-status]');
-  const statusTextEl = root.querySelector('[data-footer-status-text]');
+  const statusEl = root.querySelector('[data-footer-status]');
   const toggleEl = root.querySelector('[data-footer-toggle]');
   const chevronEl = root.querySelector('[data-footer-chevron]');
   const copyEl = root.querySelector('[data-footer-copy]');
@@ -369,7 +365,6 @@ export function createLoggerFooter(root, options = {}) {
   function setState(state, text) {
     const nextState = state || normalizeState(text);
     statusEl.className = `status status-${nextState}`;
-    if (statusTextEl) statusTextEl.textContent = nextState;
     statusEl.title = text || initialTitle;
   }
 
