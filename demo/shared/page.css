@@ -425,7 +425,7 @@ button:hover, a.button:hover { background:var(--button-hover); }
     padding:0;
     background:transparent;
     line-height:0;
-    transform:translateY(-1px);
+    transform:translateY(-6px);
   }
   .footer-actions {
     width:100%;
