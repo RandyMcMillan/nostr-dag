@@ -230,6 +230,54 @@ button:hover, a.button:hover { background:var(--button-hover); }
   border-color:var(--border-strong);
 }
 
+.bridge-peer-relays {
+  border-top:1px solid rgba(148,163,184,.18);
+  padding-top:10px;
+  margin-top:10px;
+}
+
+.bridge-peer-relays-label {
+  font-size:11px;
+  font-weight:700;
+  letter-spacing:.06em;
+  text-transform:uppercase;
+  color:var(--muted);
+  margin-bottom:8px;
+}
+
+.bridge-relay-grid {
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+}
+
+.bridge-pill-relay {
+  background:rgba(34,197,94,.12);
+  border-color:rgba(34,197,94,.35);
+  overflow-wrap:anywhere;
+  white-space:normal;
+}
+
+.bridge-peer-relay-sources {
+  display:grid;
+  gap:10px;
+  margin-top:10px;
+}
+
+.bridge-peer-relay-source {
+  border:1px solid rgba(148,163,184,.16);
+  border-radius:10px;
+  padding:10px;
+  background:rgba(2,6,23,.18);
+}
+
+.bridge-peer-relay-source-head {
+  font-size:11px;
+  line-height:1.35;
+  color:var(--muted);
+  overflow-wrap:anywhere;
+}
+
 .bridge-peer-detail {
   font-size:12px;
   line-height:1.45;

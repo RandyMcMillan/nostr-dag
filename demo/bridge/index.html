@@ -98,6 +98,7 @@ wss://nostr.wine</textarea>
 
     const pool = new SimplePool();
     const seen = new Set();
+    const relayCatalog = new Map();
     const metrics = {
       nostrToLibp2p: 0,
       libp2pToNostr: 0,
@@ -143,6 +144,15 @@ wss://nostr.wine</textarea>
       window.__sharedFooter?.log('bridge', text, state === 'available' ? 'info' : state, state);
     }
 
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+
     function refreshMetrics() {
       nostrToLibp2pCountEl.textContent = String(metrics.nostrToLibp2p);
       libp2pToNostrCountEl.textContent = String(metrics.libp2pToNostr);
@@ -177,18 +187,42 @@ wss://nostr.wine</textarea>
         peerListEl.innerHTML = '<div class="small muted">No peers reported yet.</div>';
         return;
       }
+      const relaysNow = currentRelayUrls();
+      const relaySources = [...relayCatalog.values()].sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0));
       peerListEl.innerHTML = peers.map((peer) => `
         <div class="bridge-peer">
           <div class="bridge-peer-head">
-            <div class="bridge-peer-title mono">${peer.peer_id}</div>
+            <div class="bridge-peer-title mono">${escapeHtml(peer.peer_id)}</div>
             <div class="bridge-peer-meta">
-              <span class="bridge-pill">${peer.kind || 'unknown'}</span>
-              <span class="bridge-pill">${peer.path || '/'}</span>
-              <span class="bridge-pill">${new Date(peer.updated_at || Date.now()).toLocaleTimeString()}</span>
-              <span class="bridge-pill bridge-pill-source">${peer.source || 'browser'}</span>
+              <span class="bridge-pill">${escapeHtml(peer.kind || 'unknown')}</span>
+              <span class="bridge-pill">${escapeHtml(peer.path || '/')}</span>
+              <span class="bridge-pill">${escapeHtml(new Date(peer.updated_at || Date.now()).toLocaleTimeString())}</span>
+              <span class="bridge-pill bridge-pill-source">${escapeHtml(peer.source || 'browser')}</span>
             </div>
           </div>
-          <div class="bridge-peer-detail mono">${peer.detail ? formatPeerDetail(peer.detail) : 'no detail'}</div>
+          <div class="bridge-peer-relays">
+            <div class="bridge-peer-relays-label">Relays</div>
+            <div class="bridge-relay-grid">
+              ${relaysNow.length
+                ? relaysNow.map((relay) => `<span class="bridge-pill bridge-pill-relay">${escapeHtml(relay)}</span>`).join('')
+                : '<span class="bridge-pill">none</span>'}
+            </div>
+            ${relaySources.length ? `
+              <div class="bridge-peer-relay-sources">
+                ${relaySources.map((entry) => `
+                  <div class="bridge-peer-relay-source">
+                    <div class="bridge-peer-relay-source-head mono">${escapeHtml(entry.owner || 'unknown')} · kind ${escapeHtml(entry.kind || 'unknown')}</div>
+                    <div class="bridge-relay-grid" style="margin-top:6px;">
+                      ${(entry.relays || []).length
+                        ? entry.relays.map((relay) => `<span class="bridge-pill bridge-pill-relay">${escapeHtml(relay)}</span>`).join('')
+                        : '<span class="bridge-pill">none</span>'}
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            ` : ''}
+          </div>
+          <div class="bridge-peer-detail mono">${peer.detail ? escapeHtml(formatPeerDetail(peer.detail)) : 'no detail'}</div>
         </div>
       `).join('');
     }
@@ -216,8 +250,65 @@ wss://nostr.wine</textarea>
         .filter(Boolean);
     }
 
+    function currentRelayUrls() {
+      return [...new Set([
+        ...parseRelays(relayInputEl.value),
+        ...[...relayCatalog.values()].flatMap((entry) => entry.relays || []),
+      ])];
+    }
+
     function kindTopic(event) {
       return `${topic}/${event.kind}`;
+    }
+
+    function collectRelayUrls(value, found = new Set()) {
+      if (typeof value === 'string') {
+        const normalized = normalizeRelayUrl(value);
+        if (normalized) found.add(normalized);
+        return found;
+      }
+      if (Array.isArray(value)) {
+        for (const item of value) collectRelayUrls(item, found);
+        return found;
+      }
+      if (value && typeof value === 'object') {
+        for (const item of Object.values(value)) collectRelayUrls(item, found);
+      }
+      return found;
+    }
+
+    function normalizeRelayUrl(url) {
+      try {
+        const parsed = new URL(url);
+        if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') return null;
+        return parsed.toString().replace(/\/$/, '');
+      } catch {
+        return null;
+      }
+    }
+
+    function recordRelayInfo(event) {
+      if (!event?.pubkey) return;
+      const urls = new Set();
+      if (event.kind === 10002) {
+        for (const tag of event.tags || []) {
+          if (tag?.[0] === 'r' && tag?.[1]) collectRelayUrls(tag[1], urls);
+        }
+      } else if (event.kind === 3) {
+        try {
+          const legacy = typeof event.content === 'string' ? JSON.parse(event.content || '{}') : event.content || {};
+          collectRelayUrls(legacy, urls);
+        } catch {
+          collectRelayUrls(event.content || '', urls);
+        }
+      }
+      if (!urls.size) return;
+      relayCatalog.set(event.pubkey, {
+        owner: event.pubkey,
+        kind: event.kind,
+        relays: [...urls],
+        updated_at: Date.now(),
+      });
     }
 
     function formatPeerDetail(detail) {
@@ -322,6 +413,10 @@ wss://nostr.wine</textarea>
         window.__sharedFooter?.log('bridge', `deduped ${event.id}`, 'trace', 'available');
         return;
       }
+      if (event.kind === 10002 || event.kind === 3) {
+        recordRelayInfo(event);
+        renderPeers();
+      }
       window.__sharedFooter?.log('nostr', `${source} kind ${event.kind} ${event.id} by ${event.pubkey}`, 'trace', 'checking');
       try {
         await publishToLibp2p(event, 'nostr->libp2p');
@@ -378,6 +473,7 @@ wss://nostr.wine</textarea>
                   path: window.location.pathname || '/',
                   detail: peer.detail,
                   source: 'browser',
+                  relays: currentRelayUrls(),
                   updated_at: Date.now(),
                 });
                 renderPeers();
