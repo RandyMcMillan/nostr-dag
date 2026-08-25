@@ -1,6 +1,9 @@
 [build]
 target-dir = "target"
 
+[target.wasm32-unknown-unknown]
+rustflags = ["--cfg", "getrandom_backend=\"wasm_js\""]
+
 [alias]
 # Native-only helpers; JS test aggregation stays in Make/just because Cargo aliases cannot run Node.
 test-native = "test --features native"
