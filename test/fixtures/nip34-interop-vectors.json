@@ -1,0 +1,30 @@
+[
+  {
+    "name": "announcement naddr",
+    "input": "nostr://naddr1qqx8xq",
+    "kind": "announcement",
+    "naddr": "naddr1qqx8xq",
+    "normalized": "nostr://naddr1qqx8xq",
+    "helper": "nostr::nostr://naddr1qqx8xq"
+  },
+  {
+    "name": "coordinate owner identifier",
+    "input": "nostr://npub15qydau2hjma6ngxkl2cyar74wzyjshvl65za5k5rl69264ar2exs5cyejr/my%20%F0%9F%9A%80%20repo",
+    "kind": "coordinate",
+    "owner": "npub15qydau2hjma6ngxkl2cyar74wzyjshvl65za5k5rl69264ar2exs5cyejr",
+    "relay_hint": null,
+    "identifier": "my 🚀 repo",
+    "normalized": "nostr://npub15qydau2hjma6ngxkl2cyar74wzyjshvl65za5k5rl69264ar2exs5cyejr/my%20%F0%9F%9A%80%20repo",
+    "helper": "nostr::nostr://npub15qydau2hjma6ngxkl2cyar74wzyjshvl65za5k5rl69264ar2exs5cyejr/my%20%F0%9F%9A%80%20repo"
+  },
+  {
+    "name": "coordinate with relay hint",
+    "input": "nostr://danconwaydev.com/ws%3A%2F%2Flocalhost%3A7334/my-local-only-repo",
+    "kind": "coordinate",
+    "owner": "danconwaydev.com",
+    "relay_hint": "ws://localhost:7334",
+    "identifier": "my-local-only-repo",
+    "normalized": "nostr://danconwaydev.com/ws%3A%2F%2Flocalhost%3A7334/my-local-only-repo",
+    "helper": "nostr::nostr://danconwaydev.com/ws%3A%2F%2Flocalhost%3A7334/my-local-only-repo"
+  }
+]

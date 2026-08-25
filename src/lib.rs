@@ -2,6 +2,7 @@ mod dag;
 mod error;
 mod event;
 mod assets;
+pub mod nip34;
 #[cfg(feature = "native")]
 pub mod store;
 
@@ -19,6 +20,7 @@ pub use assets::FAVICON_ICO;
 pub use dag::{Dag, InsertResult};
 pub use error::DagError;
 pub use event::{create_ack_event, parents_of, DAG_EVENT_KIND};
+pub use nip34::{git_remote_helper_url, normalize_nostr_clone_url, parse_nostr_clone_url, Nip34Error, NostrRemote};
 
 #[cfg(feature = "wasm")]
 mod wasm {
