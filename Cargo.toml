@@ -24,6 +24,8 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = true }
 urlencoding = { version = "2", optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+web-sys = { version = "0.3", optional = true, features = ["Request", "RequestInit", "RequestMode", "Response", "Window"] }
 getrandom = { version = "0.2", features = ["js"], optional = true }
 serde-wasm-bindgen = { version = "0.6", optional = true }
 serde_json = { version = "1", optional = true }
@@ -79,7 +81,7 @@ required-features = ["p2p"]
 default = []
 native = ["dep:tokio", "dep:tracing-subscriber", "dep:nostr-relay-pool", "dep:serde", "dep:serde_json", "dep:reqwest", "dep:urlencoding", "dep:rusqlite", "dep:git2"]
 relay = ["native", "dep:nostr-relay-builder"]
-wasm = ["dep:wasm-bindgen", "dep:getrandom", "dep:serde-wasm-bindgen", "dep:serde_json"]
+wasm = ["dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:web-sys", "dep:getrandom", "dep:serde-wasm-bindgen", "dep:serde_json"]
 p2p = ["native", "dep:libp2p"]
 p2p-wasm = ["wasm", "dep:libp2p", "dep:futures"]
 
