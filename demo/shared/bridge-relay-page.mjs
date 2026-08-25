@@ -154,8 +154,16 @@ async function fetchRelayInfo(relayUrl) {
   });
 }
 
+function supportsNip34GitKinds(info) {
+  if (!info || typeof info !== 'object') return false;
+  if (Array.isArray(info.supported_nips) && info.supported_nips.some((nip) => Number(nip) === 34)) return true;
+  const supportedKinds = Array.isArray(info.supported_kinds) ? info.supported_kinds : [];
+  return supportedKinds.some((kind) => [30617, 30618, 30619, 30620, 30621, 30622].includes(Number(kind)));
+}
+
 function relayHeaderHtml(relay, info, source, loading) {
   const hasInfo = Boolean(info && !info.error);
+  const gitCapable = hasInfo && supportsNip34GitKinds(info);
   const fields = hasInfo ? [
     info.name || '',
     info.description || '',
@@ -170,6 +178,7 @@ function relayHeaderHtml(relay, info, source, loading) {
             ${hasInfo ? `<div class="small muted" style="margin-top:4px;">${escapeHtml(fields.join(' · '))}</div>` : loading ? '<div class="small muted" style="margin-top:4px;">Loading NIP-11…</div>' : ''}
           </div>
           <div class="bridge-relay-meta">
+            ${gitCapable ? '<span class="bridge-pill bridge-pill-git" aria-label="Supports NIP-34 git kinds" title="Supports NIP-34 git kinds"><span aria-hidden="true">⎇</span></span>' : ''}
             ${info?.error ? `<span class="bridge-pill">NIP-11 unavailable</span>` : hasInfo ? '<span class="bridge-pill bridge-pill-ok" aria-label="NIP-11 loaded"><span class="bridge-pill-dot" aria-hidden="true"></span></span>' : loading ? '<span class="bridge-pill">NIP-11 loading</span>' : ''}
           </div>
         </div>
