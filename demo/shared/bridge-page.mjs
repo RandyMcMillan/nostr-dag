@@ -4,6 +4,9 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     import { createSharedHeader } from './page-header.mjs';
     import { resolveHref } from './page-path.js';
     import { createSharedLibp2pStack } from './libp2p-stack.mjs';
+    // Persistent IndexedDB store for all Nostr events and relationships
+    // seen by the bridge (events, tags, relays, users, DAG edges, peer acks).
+    import { getDagDb } from './dag-db.mjs';
 
     const encoder = new TextEncoder();
     const decoder = new TextDecoder();
@@ -383,6 +386,11 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
             cacheVerification(event.id, relay, found);
             if (found) {
               window.__sharedFooter?.log('bridge', `verify ok ${event.id} from ${relay}`, 'info', 'available');
+              // Record the verified relay association in IndexedDB.
+              try {
+                const db = await getDagDb();
+                await db.upsertEventRelay(event.id, relay, true);
+              } catch { /* non-fatal */ }
             } else {
               window.__sharedFooter?.log('bridge', `verify miss ${event.id} from ${relay}`, 'warn', 'checking');
             }
@@ -1038,7 +1046,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       scheduleBridgeVerification(event, publishRelays, 'presence');
     }
 
-    async function handleNostrEvent(event, source = 'relay') {
+    async function handleNostrEvent(event, source = 'relay', sourceRelay = null) {
       if (!event || typeof event !== 'object' || !event.id) return;
       if (!verifyEvent(event)) {
         window.__sharedFooter?.log('bridge', `rejected invalid event ${event.id}`, 'warn', 'unavailable');
@@ -1053,6 +1061,18 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         scheduleRelayRender();
       }
       window.__sharedFooter?.log('nostr', `${source} kind ${event.kind} ${event.id} by ${event.pubkey}`, 'trace', 'checking');
+      // Persist every verified event and its relationships to IndexedDB.
+      try {
+        const db = await getDagDb();
+        await db.upsertEvent(event, sourceRelay);
+        if (sourceRelay) {
+          await db.upsertEventRelay(event.id, sourceRelay, false);
+        }
+        // Mirror to the local server store when running on localhost.
+        void db.syncEventToServer(event, sourceRelay);
+      } catch (dbErr) {
+        window.__sharedFooter?.log('bridge', `dag-db persist failed: ${dbErr.message}`, 'warn', 'unavailable');
+      }
       try {
         await publishToLibp2p(event, 'nostr->libp2p');
       } catch (e) {
@@ -1073,6 +1093,20 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         return;
       }
       window.__sharedFooter?.log('bridge', `libp2p→nostr ${direction} ${event.kind} ${event.id}`, 'trace', 'checking');
+      // Persist event from libp2p, recording all relay hints as known sources.
+      try {
+        const db = await getDagDb();
+        const firstRelay = relayHints?.[0] ?? null;
+        await db.upsertEvent(event, firstRelay);
+        if (Array.isArray(relayHints)) {
+          for (const relay of relayHints) {
+            await db.upsertEventRelay(event.id, relay, false);
+          }
+        }
+        void db.syncEventToServer(event, firstRelay);
+      } catch (dbErr) {
+        window.__sharedFooter?.log('bridge', `dag-db persist (libp2p) failed: ${dbErr.message}`, 'warn', 'unavailable');
+      }
       try {
         await publishToRelays(event, 'libp2p->nostr', relayHints);
       } catch (e) {
@@ -1152,7 +1186,10 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         pool.subscribeMany(relaysSnapshot, [{ limit: 500 }], {
           onevent(event) {
             logRawNostrEvent('relay event raw', event);
-            void handleNostrEvent(event, 'relay');
+            // sourceRelay is unavailable from SimplePool's onevent callback;
+            // pass null and let upsertEventRelay be called when a relay is
+            // known (e.g. from the relay_hints in a libp2p envelope).
+            void handleNostrEvent(event, 'relay', null);
           },
           oneose() {},
         });
