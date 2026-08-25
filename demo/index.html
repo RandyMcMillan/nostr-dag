@@ -107,8 +107,11 @@
 
   <script type="module">
     // Step 4: import the WASM DAG and browser-only Nostr/libp2p helpers.
-    const wasmModuleUrl = resolveHref('./pkg/nostr_dag.js', window.location.href);
-    const wasmBinaryUrl = resolveHref('./pkg/nostr_dag_bg.wasm', window.location.href);
+    // Use new URL() to produce a full absolute URL (with origin) so that
+    // dynamic import() and wasm-bindgen's fetch() resolve correctly on
+    // GitHub Pages, where the site is served under a sub-path prefix.
+    const wasmModuleUrl = new URL('./pkg/nostr_dag.js', window.location.href).href;
+    const wasmBinaryUrl = new URL('./pkg/nostr_dag_bg.wasm', window.location.href).href;
     const wasmPkg = await import(wasmModuleUrl);
     const init = wasmPkg.default;
     const { WasmDag } = wasmPkg;
