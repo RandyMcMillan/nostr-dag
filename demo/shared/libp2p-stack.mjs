@@ -163,6 +163,8 @@ export async function createSharedLibp2pStack({
   useWasmP2p = true,
   wasmModule = null,
 } = {}) {
+  // Resolve the bootstrap peer list early so both WASM and JS paths can use it.
+  const peers = [...new Set(bootstrapPeers.filter(Boolean))];
   // ---------------------------------------------------------------------------
   // Try the WASM P2pNode first (src/p2p.rs, p2p-wasm feature)
   // ---------------------------------------------------------------------------
@@ -181,26 +183,53 @@ export async function createSharedLibp2pStack({
         });
         await p2pNode.start();
         emitLog(onLog, "info", "WASM P2pNode started", "available");
-        onStatus?.("available");
+        // Dial bootstrap peers so the WASM node can join the gossipsub mesh.
+        // p2pNode.dial is optional (not present in all builds); skip silently if absent.
+        if (typeof p2pNode.dial === "function") {
+          for (const addr of peers) {
+            try {
+              await p2pNode.dial(addr);
+              emitLog(onLog, "debug", `WASM P2pNode dialed bootstrap peer: ${addr}`, "checking");
+            } catch (dialErr) {
+              emitLog(onLog, "warn", `WASM P2pNode dial failed (${addr}): ${dialErr?.message || dialErr}`, "checking");
+            }
+          }
+        } else {
+          emitLog(onLog, "debug", `WASM P2pNode has no dial method; bootstrap peers skipped (${peers.length} configured)`, "checking");
+        }
+        const wasmPeerId = typeof p2pNode.peer_id === "function" ? p2pNode.peer_id() : "wasm-p2p-node";
+        onStatus?.("started", wasmPeerId);
+        globalThis.__currentLibp2pPeerId = wasmPeerId;
+        reportPeers({
+          peer_id: wasmPeerId,
+          kind: "started",
+          path: globalThis.location?.pathname || "/",
+          detail: `wasm-p2p-node bootstrap-peers=${peers.length}`,
+          source: globalThis.location?.pathname || "/",
+          updated_at: Date.now(),
+        });
         // Return a minimal adapter that matches the JS node surface used by
         // callers (publish, subscribe, peerId string, stop).
         return {
-          _wasmNode: p2pNode,
-          peerId: { toString: () => "wasm-p2p-node" },
-          services: {
-            pubsub: {
-              publish: async (_topic, data) => {
-                const msg = typeof data === "string" ? data : new TextDecoder().decode(data);
-                await p2pNode.broadcast(msg);
-              },
-              subscribe: (_topic) => {},
-              addEventListener: (event, cb) => {
-                if (event === "message") handlers.push((msg) => cb({ detail: { data: new TextEncoder().encode(msg) } }));
+          node: {
+            _wasmNode: p2pNode,
+            peerId: { toString: () => wasmPeerId },
+            services: {
+              pubsub: {
+                publish: async (_topic, data) => {
+                  const msg = typeof data === "string" ? data : new TextDecoder().decode(data);
+                  await p2pNode.broadcast(msg);
+                },
+                subscribe: (_topic) => {},
+                addEventListener: (event, cb) => {
+                  if (event === "message") handlers.push((msg) => cb({ detail: { data: new TextEncoder().encode(msg) } }));
+                },
               },
             },
+            getMultiaddrs: () => [],
+            stop: async () => {},
           },
-          getMultiaddrs: () => [],
-          stop: async () => {},
+          bootstrapPeers: peers,
         };
       }
     } catch (wasmErr) {
@@ -210,7 +239,6 @@ export async function createSharedLibp2pStack({
   // ---------------------------------------------------------------------------
   // JS libp2p fallback
   // ---------------------------------------------------------------------------
-  const peers = [...new Set(bootstrapPeers.filter(Boolean))];
   emitLog(onLog, "trace", `bootstrap peers: ${peers.join(" | ") || "none"}`, "checking");
   emitLog(onLog, "info", `bootstrapping with ${peers.length} peer${peers.length === 1 ? "" : "s"}`, "checking");
   emitLog(onLog, "debug", `bootstrap peers configured: ${peers.length}`, "checking");

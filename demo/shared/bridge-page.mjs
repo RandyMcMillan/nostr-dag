@@ -979,7 +979,10 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     }
 
     async function publishToLibp2p(event, direction) {
-      if (!node) return;
+      if (!node) {
+        window.__sharedFooter?.log('bridge', `publishToLibp2p: node not ready, dropping ${direction} ${event.kind} ${event.id}`, 'warn', 'unavailable');
+        return;
+      }
       const payload = buildBridgeEnvelope(event, direction, currentRelayUrls());
       await node.services.pubsub.publish(topic, encoder.encode(JSON.stringify(payload)));
       metrics.nostrToLibp2p += direction === 'nostr->libp2p' ? 1 : 0;
