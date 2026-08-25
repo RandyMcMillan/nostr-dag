@@ -6,7 +6,10 @@
 
 #[cfg(feature = "wasm")]
 pub mod wasm {
-    use crate::nip34::{git_remote_helper_url, normalize_nostr_clone_url};
+    use crate::nip34::{
+        git_remote_helper_url, git_remote_transport_url, normalize_nostr_clone_url,
+        normalize_p2p_clone_url, nostr_to_p2p_clone_url, p2p_to_nostr_clone_url,
+    };
     use wasm_bindgen::prelude::*;
     use wasm_bindgen_futures::JsFuture;
     use web_sys::{Request, RequestInit, RequestMode, Response};
@@ -48,6 +51,30 @@ pub mod wasm {
     #[wasm_bindgen]
     pub fn git_remote_nostr_helper_url(remote: &str) -> Result<String, JsValue> {
         git_remote_helper_url(remote).map_err(|err| JsValue::from_str(&err.to_string()))
+    }
+
+    /// Normalize a `p2p://` clone URL for consistent cross-runtime use.
+    #[wasm_bindgen]
+    pub fn normalize_p2p_remote(remote: &str) -> Result<String, JsValue> {
+        normalize_p2p_clone_url(remote).map_err(|err| JsValue::from_str(&err.to_string()))
+    }
+
+    /// Convert a `nostr://` clone URL into an equivalent `p2p://` URL.
+    #[wasm_bindgen]
+    pub fn nostr_remote_to_p2p(remote: &str) -> Result<String, JsValue> {
+        nostr_to_p2p_clone_url(remote).map_err(|err| JsValue::from_str(&err.to_string()))
+    }
+
+    /// Convert a `p2p://` clone URL into an equivalent `nostr://` URL.
+    #[wasm_bindgen]
+    pub fn p2p_remote_to_nostr(remote: &str) -> Result<String, JsValue> {
+        p2p_to_nostr_clone_url(remote).map_err(|err| JsValue::from_str(&err.to_string()))
+    }
+
+    /// Return a transport-ready URL for clone/fetch (`nostr::`, `p2p::`, HTTP(S), SSH).
+    #[wasm_bindgen]
+    pub fn git_remote_transport(remote: &str) -> Result<String, JsValue> {
+        git_remote_transport_url(remote).map_err(|err| JsValue::from_str(&err.to_string()))
     }
 
     // ---------------------------------------------------------------------------

@@ -22,6 +22,7 @@ pub enum Nip34Error {
     MissingIdentifier,
     InvalidPathSegments,
     InvalidPercentEncoding,
+    UnsupportedRemoteScheme,
 }
 
 impl std::fmt::Display for Nip34Error {
@@ -32,6 +33,7 @@ impl std::fmt::Display for Nip34Error {
             Self::MissingIdentifier => write!(f, "nostr:// coordinate is missing identifier"),
             Self::InvalidPathSegments => write!(f, "nostr:// URL has invalid path segments"),
             Self::InvalidPercentEncoding => write!(f, "nostr:// URL has invalid percent encoding"),
+            Self::UnsupportedRemoteScheme => write!(f, "unsupported remote URL scheme"),
         }
     }
 }
@@ -39,9 +41,47 @@ impl std::fmt::Display for Nip34Error {
 impl std::error::Error for Nip34Error {}
 
 pub fn parse_nostr_clone_url(input: &str) -> Result<NostrRemote, Nip34Error> {
-    let rest = input
-        .strip_prefix("nostr://")
-        .ok_or(Nip34Error::InvalidScheme)?;
+    parse_clone_url_with_scheme(input, "nostr://")
+}
+
+pub fn parse_p2p_clone_url(input: &str) -> Result<NostrRemote, Nip34Error> {
+    parse_clone_url_with_scheme(input, "p2p://")
+}
+
+pub fn normalize_p2p_clone_url(input: &str) -> Result<String, Nip34Error> {
+    let parsed = parse_p2p_clone_url(input)?;
+    Ok(format_clone_url("p2p://", parsed))
+}
+
+pub fn p2p_to_nostr_clone_url(input: &str) -> Result<String, Nip34Error> {
+    let parsed = parse_p2p_clone_url(input)?;
+    Ok(format_clone_url("nostr://", parsed))
+}
+
+pub fn nostr_to_p2p_clone_url(input: &str) -> Result<String, Nip34Error> {
+    let parsed = parse_nostr_clone_url(input)?;
+    Ok(format_clone_url("p2p://", parsed))
+}
+
+pub fn git_remote_transport_url(input: &str) -> Result<String, Nip34Error> {
+    if input.starts_with("nostr://") {
+        return Ok(format!("nostr::{}", normalize_nostr_clone_url(input)?));
+    }
+    if input.starts_with("p2p://") {
+        return Ok(format!("p2p::{}", normalize_p2p_clone_url(input)?));
+    }
+    if input.starts_with("https://")
+        || input.starts_with("http://")
+        || input.starts_with("ssh://")
+        || input.starts_with("git@")
+    {
+        return Ok(input.to_string());
+    }
+    Err(Nip34Error::UnsupportedRemoteScheme)
+}
+
+fn parse_clone_url_with_scheme(input: &str, scheme: &str) -> Result<NostrRemote, Nip34Error> {
+    let rest = input.strip_prefix(scheme).ok_or(Nip34Error::InvalidScheme)?;
 
     if rest.is_empty() {
         return Err(Nip34Error::EmptyAuthority);
@@ -90,8 +130,17 @@ pub fn parse_nostr_clone_url(input: &str) -> Result<NostrRemote, Nip34Error> {
 
 pub fn normalize_nostr_clone_url(input: &str) -> Result<String, Nip34Error> {
     let parsed = parse_nostr_clone_url(input)?;
-    Ok(match parsed {
-        NostrRemote::Announcement { naddr } => format!("nostr://{naddr}"),
+    Ok(format_clone_url("nostr://", parsed))
+}
+
+pub fn git_remote_helper_url(input: &str) -> Result<String, Nip34Error> {
+    let normalized = normalize_nostr_clone_url(input)?;
+    Ok(format!("nostr::{normalized}"))
+}
+
+fn format_clone_url(scheme: &str, parsed: NostrRemote) -> String {
+    match parsed {
+        NostrRemote::Announcement { naddr } => format!("{scheme}{naddr}"),
         NostrRemote::Coordinate {
             owner,
             relay_hint,
@@ -100,17 +149,12 @@ pub fn normalize_nostr_clone_url(input: &str) -> Result<String, Nip34Error> {
             let identifier_enc = percent_encode(&identifier);
             if let Some(relay_hint) = relay_hint {
                 let relay_enc = percent_encode(&relay_hint);
-                format!("nostr://{owner}/{relay_enc}/{identifier_enc}")
+                format!("{scheme}{owner}/{relay_enc}/{identifier_enc}")
             } else {
-                format!("nostr://{owner}/{identifier_enc}")
+                format!("{scheme}{owner}/{identifier_enc}")
             }
         }
-    })
-}
-
-pub fn git_remote_helper_url(input: &str) -> Result<String, Nip34Error> {
-    let normalized = normalize_nostr_clone_url(input)?;
-    Ok(format!("nostr::{normalized}"))
+    }
 }
 
 fn percent_decode(value: &str) -> Result<String, Nip34Error> {
@@ -209,6 +253,42 @@ mod tests {
         assert!(matches!(
             parse_nostr_clone_url("https://example.com/repo"),
             Err(Nip34Error::InvalidScheme)
+        ));
+    }
+
+    #[test]
+    fn converts_nostr_and_p2p_urls() {
+        let nostr = "nostr://npub1abcd/ws%3A%2F%2Flocalhost%3A7447/repo";
+        let p2p = "p2p://npub1abcd/ws%3A%2F%2Flocalhost%3A7447/repo";
+        assert_eq!(nostr_to_p2p_clone_url(nostr).unwrap(), p2p);
+        assert_eq!(p2p_to_nostr_clone_url(p2p).unwrap(), nostr);
+    }
+
+    #[test]
+    fn supports_transport_url_for_known_schemes() {
+        assert_eq!(
+            git_remote_transport_url("nostr://naddr1qqx8xq").unwrap(),
+            "nostr::nostr://naddr1qqx8xq"
+        );
+        assert_eq!(
+            git_remote_transport_url("p2p://naddr1qqx8xq").unwrap(),
+            "p2p::p2p://naddr1qqx8xq"
+        );
+        assert_eq!(
+            git_remote_transport_url("https://github.com/RandyMcMillan/nostr-dag").unwrap(),
+            "https://github.com/RandyMcMillan/nostr-dag"
+        );
+        assert_eq!(
+            git_remote_transport_url("ssh://git@github.com/RandyMcMillan/nostr-dag.git").unwrap(),
+            "ssh://git@github.com/RandyMcMillan/nostr-dag.git"
+        );
+        assert_eq!(
+            git_remote_transport_url("git@github.com:RandyMcMillan/nostr-dag.git").unwrap(),
+            "git@github.com:RandyMcMillan/nostr-dag.git"
+        );
+        assert!(matches!(
+            git_remote_transport_url("ftp://example.com/repo.git"),
+            Err(Nip34Error::UnsupportedRemoteScheme)
         ));
     }
 }
