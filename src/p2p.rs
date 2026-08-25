@@ -14,6 +14,390 @@
 /// Gossipsub topic used by all nostr-dag peers (native and WASM).
 pub const NOSTR_DAG_TOPIC: &str = "nostr-dag-bridge";
 
+/// Nostr event kind used for transfer manifests.
+pub const TRANSFER_MANIFEST_KIND: nostr::Kind = nostr::Kind::Custom(39078);
+/// Nostr event kind used for transfer slices.
+pub const TRANSFER_SLICE_KIND: nostr::Kind = nostr::Kind::Custom(39079);
+
+const TRANSFER_PROTOCOL: &str = "nostr-dag-transfer";
+const TRANSFER_VERSION: u64 = 1;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransferManifest {
+    pub root_id: String,
+    pub total_bytes: usize,
+    pub total_slices: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransferSlice {
+    pub root_id: String,
+    pub seq: usize,
+    pub total_slices: usize,
+    pub data: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TransferEventPayload {
+    Manifest(TransferManifest),
+    Slice(TransferSlice),
+}
+
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum TransferError {
+    #[error("unsupported transfer event kind: {0}")]
+    UnsupportedKind(String),
+    #[error("invalid transfer payload: {0}")]
+    InvalidPayload(String),
+    #[error("missing transfer field: {0}")]
+    MissingField(&'static str),
+    #[error("invalid bridge envelope: {0}")]
+    InvalidEnvelope(String),
+    #[error("json error: {0}")]
+    Json(String),
+}
+
+fn parse_payload_json(event: &nostr::Event) -> Result<serde_json::Value, TransferError> {
+    serde_json::from_str(&event.content).map_err(|err| TransferError::Json(err.to_string()))
+}
+
+fn read_u64_field(payload: &serde_json::Value, field: &'static str) -> Result<u64, TransferError> {
+    payload
+        .get(field)
+        .and_then(serde_json::Value::as_u64)
+        .ok_or(TransferError::MissingField(field))
+}
+
+fn read_string_field(payload: &serde_json::Value, field: &'static str) -> Result<String, TransferError> {
+    payload
+        .get(field)
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+        .ok_or(TransferError::MissingField(field))
+}
+
+fn validate_protocol(payload: &serde_json::Value) -> Result<(), TransferError> {
+    let protocol = read_string_field(payload, "protocol")?;
+    if protocol != TRANSFER_PROTOCOL {
+        return Err(TransferError::InvalidPayload(format!(
+            "protocol mismatch: expected {TRANSFER_PROTOCOL}, got {protocol}"
+        )));
+    }
+
+    let version = read_u64_field(payload, "version")?;
+    if version != TRANSFER_VERSION {
+        return Err(TransferError::InvalidPayload(format!(
+            "version mismatch: expected {TRANSFER_VERSION}, got {version}"
+        )));
+    }
+    Ok(())
+}
+
+/// Split payload bytes into ordered transfer slices.
+pub fn packetize_payload(root_id: &str, payload: &[u8], max_slice_bytes: usize) -> Vec<TransferSlice> {
+    let chunk_size = max_slice_bytes.max(1);
+    let total_slices = payload.len().div_ceil(chunk_size).max(1);
+
+    if payload.is_empty() {
+        return vec![TransferSlice {
+            root_id: root_id.to_string(),
+            seq: 0,
+            total_slices,
+            data: Vec::new(),
+        }];
+    }
+
+    payload
+        .chunks(chunk_size)
+        .enumerate()
+        .map(|(seq, chunk)| TransferSlice {
+            root_id: root_id.to_string(),
+            seq,
+            total_slices,
+            data: chunk.to_vec(),
+        })
+        .collect()
+}
+
+/// Build a transfer-manifest nostr event.
+pub fn build_transfer_manifest_event(
+    keys: &nostr::Keys,
+    manifest: &TransferManifest,
+) -> Result<nostr::Event, nostr::event::builder::Error> {
+    let content = serde_json::json!({
+        "protocol": TRANSFER_PROTOCOL,
+        "version": TRANSFER_VERSION,
+        "type": "manifest",
+        "root_id": manifest.root_id,
+        "total_bytes": manifest.total_bytes,
+        "total_slices": manifest.total_slices,
+    })
+    .to_string();
+
+    nostr::EventBuilder::new(TRANSFER_MANIFEST_KIND, content).sign_with_keys(keys)
+}
+
+/// Build a transfer-slice nostr event and link it to the manifest via `e` tag.
+pub fn build_transfer_slice_event(
+    keys: &nostr::Keys,
+    slice: &TransferSlice,
+    manifest_id: nostr::EventId,
+) -> Result<nostr::Event, nostr::event::builder::Error> {
+    let content = serde_json::json!({
+        "protocol": TRANSFER_PROTOCOL,
+        "version": TRANSFER_VERSION,
+        "type": "slice",
+        "root_id": slice.root_id,
+        "seq": slice.seq,
+        "total_slices": slice.total_slices,
+        "data": slice.data,
+    })
+    .to_string();
+
+    let tags = [nostr::Tag::event(manifest_id)];
+    nostr::EventBuilder::new(TRANSFER_SLICE_KIND, content)
+        .tags(tags)
+        .sign_with_keys(keys)
+}
+
+/// Parse a manifest or slice transfer event payload.
+pub fn parse_transfer_event(event: &nostr::Event) -> Result<TransferEventPayload, TransferError> {
+    let payload = parse_payload_json(event)?;
+    validate_protocol(&payload)?;
+    let root_id = read_string_field(&payload, "root_id")?;
+
+    if event.kind == TRANSFER_MANIFEST_KIND {
+            let total_bytes = read_u64_field(&payload, "total_bytes")? as usize;
+            let total_slices = read_u64_field(&payload, "total_slices")? as usize;
+            return Ok(TransferEventPayload::Manifest(TransferManifest {
+                root_id,
+                total_bytes,
+                total_slices,
+            }));
+    }
+
+    if event.kind == TRANSFER_SLICE_KIND {
+            let seq = read_u64_field(&payload, "seq")? as usize;
+            let total_slices = read_u64_field(&payload, "total_slices")? as usize;
+            let data = payload
+                .get("data")
+                .and_then(serde_json::Value::as_array)
+                .ok_or(TransferError::MissingField("data"))?
+                .iter()
+                .map(|value| {
+                    let byte = value.as_u64().ok_or_else(|| {
+                        TransferError::InvalidPayload("slice data must be byte array".to_string())
+                    })?;
+                    u8::try_from(byte).map_err(|_| {
+                        TransferError::InvalidPayload("slice data byte out of range".to_string())
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+
+            return Ok(TransferEventPayload::Slice(TransferSlice {
+                root_id,
+                seq,
+                total_slices,
+                data,
+            }));
+    }
+
+    Err(TransferError::UnsupportedKind(format!("{:?}", event.kind)))
+}
+
+/// Reconstruct original payload from validated transfer slices.
+pub fn reconstruct_payload(slices: &[TransferSlice]) -> Result<Vec<u8>, TransferError> {
+    if slices.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let root_id = &slices[0].root_id;
+    let expected_total = slices[0].total_slices;
+    if expected_total != slices.len() {
+        return Err(TransferError::InvalidPayload(format!(
+            "slice count mismatch: expected {expected_total}, got {}",
+            slices.len()
+        )));
+    }
+
+    let mut ordered = slices.to_vec();
+    ordered.sort_by_key(|slice| slice.seq);
+
+    for (index, slice) in ordered.iter().enumerate() {
+        if &slice.root_id != root_id {
+            return Err(TransferError::InvalidPayload(
+                "mixed root_id values in transfer slices".to_string(),
+            ));
+        }
+        if slice.total_slices != expected_total {
+            return Err(TransferError::InvalidPayload(
+                "mixed total_slices values in transfer slices".to_string(),
+            ));
+        }
+        if slice.seq != index {
+            return Err(TransferError::InvalidPayload(format!(
+                "missing slice sequence {index}, got {}",
+                slice.seq
+            )));
+        }
+    }
+
+    Ok(ordered.into_iter().flat_map(|slice| slice.data).collect())
+}
+
+/// Encode a nostr event as a p2p bridge envelope.
+pub fn encode_bridge_message(
+    event: &nostr::Event,
+    direction: &str,
+    relay_hints: &[String],
+) -> Result<String, TransferError> {
+    serde_json::to_string(&serde_json::json!({
+        "protocol": NOSTR_DAG_TOPIC,
+        "version": "1",
+        "direction": direction,
+        "event": event,
+        "relay_hints": relay_hints,
+    }))
+    .map_err(|err| TransferError::Json(err.to_string()))
+}
+
+/// Decode and validate a p2p bridge envelope into a nostr event.
+pub fn decode_bridge_message(message: &str) -> Result<nostr::Event, TransferError> {
+    let payload: serde_json::Value =
+        serde_json::from_str(message).map_err(|err| TransferError::Json(err.to_string()))?;
+    let protocol = payload
+        .get("protocol")
+        .and_then(serde_json::Value::as_str)
+        .ok_or(TransferError::MissingField("protocol"))?;
+    if protocol != NOSTR_DAG_TOPIC {
+        return Err(TransferError::InvalidEnvelope(format!(
+            "protocol mismatch: expected {NOSTR_DAG_TOPIC}, got {protocol}"
+        )));
+    }
+
+    let event_payload = payload
+        .get("event")
+        .ok_or(TransferError::MissingField("event"))?
+        .clone();
+    serde_json::from_value(event_payload).map_err(|err| TransferError::Json(err.to_string()))
+}
+
+#[cfg(test)]
+mod transfer_tests {
+    use super::*;
+
+    #[test]
+    fn packetize_and_reconstruct_payload_roundtrip() {
+        let original = b"nostr dag p2p transfer payload";
+        let slices = packetize_payload("root-1", original, 5);
+        assert!(slices.len() > 1);
+        assert!(slices.iter().all(|slice| slice.total_slices == slices.len()));
+
+        let reconstructed = reconstruct_payload(&slices).unwrap();
+        assert_eq!(reconstructed, original);
+    }
+
+    #[test]
+    fn packetize_empty_payload_emits_single_empty_slice() {
+        let slices = packetize_payload("root-empty", &[], 8);
+        assert_eq!(slices.len(), 1);
+        assert_eq!(slices[0].seq, 0);
+        assert!(slices[0].data.is_empty());
+
+        let reconstructed = reconstruct_payload(&slices).unwrap();
+        assert!(reconstructed.is_empty());
+    }
+
+    #[test]
+    fn reconstruct_rejects_missing_sequence() {
+        let slices = vec![
+            TransferSlice {
+                root_id: "root-1".into(),
+                seq: 0,
+                total_slices: 2,
+                data: vec![1, 2],
+            },
+            TransferSlice {
+                root_id: "root-1".into(),
+                seq: 2,
+                total_slices: 2,
+                data: vec![3],
+            },
+        ];
+
+        let err = reconstruct_payload(&slices).unwrap_err();
+        assert!(matches!(err, TransferError::InvalidPayload(_)));
+    }
+
+    #[test]
+    fn parse_transfer_manifest_and_slice_events() {
+        let keys = nostr::Keys::generate();
+        let payload = b"abcdefgh";
+        let slices = packetize_payload("root-2", payload, 3);
+        let manifest = TransferManifest {
+            root_id: "root-2".to_string(),
+            total_bytes: payload.len(),
+            total_slices: slices.len(),
+        };
+        let manifest_event = build_transfer_manifest_event(&keys, &manifest).unwrap();
+
+        let parsed_manifest = parse_transfer_event(&manifest_event).unwrap();
+        assert_eq!(parsed_manifest, TransferEventPayload::Manifest(manifest.clone()));
+
+        let slice_event = build_transfer_slice_event(&keys, &slices[0], manifest_event.id).unwrap();
+        let parsed_slice = parse_transfer_event(&slice_event).unwrap();
+        assert_eq!(parsed_slice, TransferEventPayload::Slice(slices[0].clone()));
+    }
+
+    #[tokio::test]
+    async fn p2p_bridge_message_roundtrip_for_nostr_transfer_events() {
+        let keys = nostr::Keys::generate();
+        let payload = b"fractal swarm adaptation for nostr dag";
+        let slices = packetize_payload("root-bridge", payload, 7);
+        let manifest = TransferManifest {
+            root_id: "root-bridge".to_string(),
+            total_bytes: payload.len(),
+            total_slices: slices.len(),
+        };
+        let manifest_event = build_transfer_manifest_event(&keys, &manifest).unwrap();
+
+        let mut slice_events = Vec::new();
+        for slice in &slices {
+            slice_events.push(build_transfer_slice_event(&keys, slice, manifest_event.id).unwrap());
+        }
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(64);
+        let relay_hints = vec!["ws://localhost:8080".to_string()];
+
+        tx.send(encode_bridge_message(&manifest_event, "outbound", &relay_hints).unwrap())
+            .await
+            .unwrap();
+        for event in &slice_events {
+            tx.send(encode_bridge_message(event, "outbound", &relay_hints).unwrap())
+                .await
+                .unwrap();
+        }
+        drop(tx);
+
+        let mut received_manifest = None;
+        let mut received_slices = Vec::new();
+
+        while let Some(frame) = rx.recv().await {
+            let event = decode_bridge_message(&frame).unwrap();
+            match parse_transfer_event(&event).unwrap() {
+                TransferEventPayload::Manifest(manifest) => received_manifest = Some(manifest),
+                TransferEventPayload::Slice(slice) => received_slices.push(slice),
+            }
+        }
+
+        assert_eq!(received_manifest, Some(manifest));
+        assert_eq!(received_slices.len(), slices.len());
+
+        let reconstructed = reconstruct_payload(&received_slices).unwrap();
+        assert_eq!(reconstructed, payload);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Native implementation
 // ---------------------------------------------------------------------------
