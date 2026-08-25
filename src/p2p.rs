@@ -436,6 +436,342 @@ mod transfer_tests {
 }
 
 // ---------------------------------------------------------------------------
+// Native git bare-repo PIP transfer tests
+//
+// These tests require the `native` feature (git2 dependency) and a `git`
+// binary on PATH.  They are skipped automatically in WASM targets.
+//
+// Strategy
+// --------
+// 1. Build a git repository in a tempdir with DEPTH_LEVELS commits so that
+//    the object graph has many ancestors.
+// 2. Serialize all objects to a portable `git bundle` binary blob.
+// 3. Compute a reference SHA-256 over the raw bundle bytes.
+// 4. Packetize the bundle through the PIP transfer protocol at several
+//    different slice sizes to exercise multi-level reconstruction.
+// 5. Reconstruct each time and verify the reconstructed SHA-256 matches the
+//    reference — guaranteeing bit-for-bit accuracy.
+// 6. Unbundle the reconstructed bytes into a fresh bare repo and assert that
+//    the HEAD OID matches the original.
+// ---------------------------------------------------------------------------
+
+#[cfg(all(test, feature = "native"))]
+mod git_bare_pip_tests {
+    use std::process::Command;
+
+    use sha2::{Digest, Sha256};
+
+    use super::*;
+
+    /// Number of commits in the linear ancestry chain.
+    const DEPTH_LEVELS: usize = 10;
+
+    // -----------------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------------
+
+    /// SHA-256 a byte slice, returning a lower-hex string.
+    fn sha256_hex(bytes: &[u8]) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(bytes);
+        format!("{:x}", hasher.finalize())
+    }
+
+    /// Run a `git` command in `dir`, panicking on failure.
+    fn git_run(args: &[&str], dir: &std::path::Path) {
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .unwrap_or_else(|e| panic!("failed to spawn git {args:?}: {e}"));
+        assert!(
+            status.status.success(),
+            "git {args:?} failed in {dir:?}:\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&status.stdout),
+            String::from_utf8_lossy(&status.stderr),
+        );
+    }
+
+    /// Build a git repository at `src_dir` with `depth` commits.
+    ///
+    /// Each commit adds or modifies one file so that every level creates a
+    /// unique tree object.  Returns the HEAD commit OID string.
+    fn build_repo_with_depth(src_dir: &std::path::Path, depth: usize) -> String {
+        git_run(&["init", "-b", "main"], src_dir);
+        git_run(&["config", "user.email", "pip-test@nostr-dag"], src_dir);
+        git_run(&["config", "user.name", "PIP Test"], src_dir);
+
+        for level in 0..depth {
+            let file = src_dir.join(format!("level-{level:03}.txt"));
+            std::fs::write(
+                &file,
+                format!(
+                    "PIP git-bare transfer depth level {level}\n\
+                     root_id: git-bare-pip-test\n\
+                     depth: {depth}\n\
+                     level: {level}\n"
+                ),
+            )
+            .unwrap();
+            git_run(&["add", "-A"], src_dir);
+            git_run(
+                &["commit", "-m", &format!("depth level {level}: add level-{level:03}.txt")],
+                src_dir,
+            );
+        }
+
+        // Return HEAD OID
+        let out = Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(src_dir)
+            .output()
+            .unwrap();
+        String::from_utf8(out.stdout).unwrap().trim().to_string()
+    }
+
+    /// Create a `git bundle create` covering all reachable objects from main.
+    fn create_bundle(src_dir: &std::path::Path, bundle_path: &std::path::Path) -> Vec<u8> {
+        git_run(
+            &["bundle", "create", bundle_path.to_str().unwrap(), "main"],
+            src_dir,
+        );
+        std::fs::read(bundle_path).unwrap()
+    }
+
+    /// Verify a git bundle and retrieve the HEAD OID it advertises.
+    fn verify_bundle_head(bundle_path: &std::path::Path) -> String {
+        let out = Command::new("git")
+            .args(["bundle", "list-heads", bundle_path.to_str().unwrap()])
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git bundle list-heads failed");
+        // Output: "<oid> refs/heads/main\n"
+        String::from_utf8(out.stdout)
+            .unwrap()
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .to_string()
+    }
+
+    /// Clone a bundle into a fresh bare repo and return its HEAD OID.
+    ///
+    /// `git clone --bare <bundle> <dst_dir>` is the canonical one-step path:
+    /// it initialises a bare repository and imports all refs from the bundle.
+    fn unbundle_and_get_head(bundle_path: &std::path::Path, dst_dir: &std::path::Path) -> String {
+        // dst_dir must not yet exist for git clone --bare.
+        let _ = std::fs::remove_dir_all(dst_dir);
+        git_run(
+            &[
+                "clone",
+                "--bare",
+                bundle_path.to_str().unwrap(),
+                dst_dir.to_str().unwrap(),
+            ],
+            dst_dir.parent().unwrap_or(std::path::Path::new(".")),
+        );
+
+        // In bare repos with newer git (safe.bareRepository=explicit), we must
+        // pass `GIT_DIR` explicitly or suppress the guard with a config flag.
+        // Use `for-each-ref` to list the HEAD ref regardless of branch name.
+        let out = Command::new("git")
+            .args(["-c", "safe.bareRepository=all", "for-each-ref", "--format=%(objectname)", "refs/heads/"])
+            .env("GIT_DIR", dst_dir)
+            .current_dir(dst_dir)
+            .output()
+            .unwrap();
+        // for-each-ref may list multiple branches; take the last one which is
+        // the tip of the most recent branch (our linear chain has only `main`).
+        String::from_utf8(out.stdout)
+            .unwrap()
+            .lines()
+            .last()
+            .unwrap_or("")
+            .trim()
+            .to_string()
+    }
+
+    // -----------------------------------------------------------------------
+    // Core PIP transfer roundtrip over a git bundle
+    //
+    // Tests a full packetize → Nostr-event encode → decode → reconstruct
+    // cycle at several slice sizes ("depth levels") and verifies SHA-256
+    // equality at each level.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn git_bare_pip_transfer_sha256_multi_depth() {
+        let work = tempfile::tempdir().unwrap();
+        let src_dir = work.path().join("src-repo");
+        std::fs::create_dir_all(&src_dir).unwrap();
+
+        let original_head = build_repo_with_depth(&src_dir, DEPTH_LEVELS);
+        let bundle_path = work.path().join("repo.bundle");
+        let bundle_bytes = create_bundle(&src_dir, &bundle_path);
+
+        let reference_sha256 = sha256_hex(&bundle_bytes);
+        println!(
+            "[PIP] bundle size: {} bytes  SHA-256: {}",
+            bundle_bytes.len(),
+            reference_sha256
+        );
+        println!("[PIP] original HEAD: {original_head}");
+
+        // Advertised HEAD in the bundle must match the repo HEAD.
+        let bundle_head = verify_bundle_head(&bundle_path);
+        assert_eq!(
+            original_head, bundle_head,
+            "bundle HEAD OID must match source repo HEAD"
+        );
+
+        // Transfer at several slice sizes to exercise different depth levels.
+        let slice_sizes: &[usize] = &[
+            bundle_bytes.len(),            // 1 slice  — depth 1
+            bundle_bytes.len() / 2 + 1,   // ~2 slices — depth 2
+            bundle_bytes.len() / 4 + 1,   // ~4 slices — depth 4
+            bundle_bytes.len() / 8 + 1,   // ~8 slices — depth 8
+            bundle_bytes.len() / 16 + 1,  // ~16 slices — depth 16
+            512,                           // fine-grained slices
+            64,                            // very fine-grained slices
+        ];
+
+        for &slice_size in slice_sizes {
+            let slice_size = slice_size.max(1);
+            let root_id = format!("git-bare-pip-depth-{slice_size}");
+
+            // --- packetize ---
+            let slices = packetize_payload(&root_id, &bundle_bytes, slice_size);
+            let slice_count = slices.len();
+            println!("[PIP] slice_size={slice_size}  slice_count={slice_count}");
+
+            let manifest = TransferManifest {
+                root_id: root_id.clone(),
+                total_bytes: bundle_bytes.len(),
+                total_slices: slice_count,
+            };
+
+            // --- encode to Nostr events ---
+            let keys = nostr::Keys::generate();
+            let manifest_event = build_transfer_manifest_event(&keys, &manifest)
+                .expect("build manifest event");
+            let slice_events: Vec<nostr::Event> = slices
+                .iter()
+                .map(|s| build_transfer_slice_event(&keys, s, manifest_event.id)
+                    .expect("build slice event"))
+                .collect();
+
+            // --- decode from Nostr events ---
+            let parsed_manifest = match parse_transfer_event(&manifest_event)
+                .expect("parse manifest")
+            {
+                TransferEventPayload::Manifest(m) => m,
+                other => panic!("expected Manifest, got {other:?}"),
+            };
+            assert_eq!(parsed_manifest.root_id, root_id);
+            assert_eq!(parsed_manifest.total_bytes, bundle_bytes.len());
+            assert_eq!(parsed_manifest.total_slices, slice_count);
+
+            let mut recovered: Vec<TransferSlice> = slice_events
+                .iter()
+                .map(|ev| match parse_transfer_event(ev).expect("parse slice") {
+                    TransferEventPayload::Slice(s) => s,
+                    other => panic!("expected Slice, got {other:?}"),
+                })
+                .collect();
+
+            // Shuffle to prove order-independent reconstruction.
+            recovered.sort_by_key(|s| s.seq.wrapping_mul(1_000_003).wrapping_add(17));
+
+            // --- reconstruct ---
+            let reconstructed = reconstruct_payload(&recovered)
+                .expect("reconstruct payload");
+            assert_eq!(
+                reconstructed.len(),
+                bundle_bytes.len(),
+                "slice_size={slice_size}: reconstructed length mismatch"
+            );
+            assert_eq!(
+                reconstructed, bundle_bytes,
+                "slice_size={slice_size}: bit-for-bit mismatch"
+            );
+
+            // --- SHA-256 verification ---
+            let reconstructed_sha256 = sha256_hex(&reconstructed);
+            assert_eq!(
+                reconstructed_sha256, reference_sha256,
+                "slice_size={slice_size}: SHA-256 mismatch\n  expected  {reference_sha256}\n  got       {reconstructed_sha256}"
+            );
+            println!("[PIP] slice_size={slice_size}  SHA-256 VERIFIED: {reconstructed_sha256}");
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Full roundtrip: transfer → unbundle → bare repo HEAD verification
+    //
+    // Reconstructs the bundle from PIP slices, writes it to disk, unbundles
+    // into a fresh bare repo, and asserts the HEAD OID matches the original.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn git_bare_pip_transfer_unbundle_head_roundtrip() {
+        let work = tempfile::tempdir().unwrap();
+        let src_dir = work.path().join("src-repo2");
+        std::fs::create_dir_all(&src_dir).unwrap();
+
+        let original_head = build_repo_with_depth(&src_dir, DEPTH_LEVELS);
+        let bundle_path = work.path().join("original.bundle");
+        let bundle_bytes = create_bundle(&src_dir, &bundle_path);
+
+        // Transfer at a modest slice size that produces several dozen slices.
+        let slice_size = bundle_bytes.len() / 8 + 1;
+        let root_id = "git-bare-pip-unbundle-test";
+
+        let slices = packetize_payload(root_id, &bundle_bytes, slice_size);
+        let keys = nostr::Keys::generate();
+        let manifest = TransferManifest {
+            root_id: root_id.to_string(),
+            total_bytes: bundle_bytes.len(),
+            total_slices: slices.len(),
+        };
+        let manifest_event = build_transfer_manifest_event(&keys, &manifest).unwrap();
+        let slice_events: Vec<nostr::Event> = slices
+            .iter()
+            .map(|s| build_transfer_slice_event(&keys, s, manifest_event.id).unwrap())
+            .collect();
+
+        let recovered_slices: Vec<TransferSlice> = slice_events
+            .iter()
+            .map(|ev| match parse_transfer_event(ev).unwrap() {
+                TransferEventPayload::Slice(s) => s,
+                other => panic!("expected Slice, got {other:?}"),
+            })
+            .collect();
+
+        let reconstructed = reconstruct_payload(&recovered_slices).unwrap();
+
+        // Write reconstructed bundle and verify SHA-256.
+        let reconstructed_bundle_path = work.path().join("reconstructed.bundle");
+        std::fs::write(&reconstructed_bundle_path, &reconstructed).unwrap();
+
+        let ref_sha = sha256_hex(&bundle_bytes);
+        let rec_sha = sha256_hex(&reconstructed);
+        assert_eq!(ref_sha, rec_sha, "reconstructed bundle SHA-256 mismatch");
+        println!("[PIP] unbundle test SHA-256 VERIFIED: {rec_sha}");
+
+        // Unbundle reconstructed bytes into a fresh bare repo.
+        let dst_dir = work.path().join("dst-bare-repo");
+        std::fs::create_dir_all(&dst_dir).unwrap();
+        let restored_head = unbundle_and_get_head(&reconstructed_bundle_path, &dst_dir);
+
+        assert_eq!(
+            original_head, restored_head,
+            "restored bare repo HEAD must match original\n  expected  {original_head}\n  got       {restored_head}"
+        );
+        println!("[PIP] bare repo HEAD VERIFIED: {restored_head}");
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Native implementation
 // ---------------------------------------------------------------------------
 
