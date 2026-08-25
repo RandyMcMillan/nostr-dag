@@ -34,7 +34,7 @@ git2 = { version = "0.20", optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 libp2p = { version = "0.54", optional = true, features = [
-    "tcp", "noise", "yamux", "mdns", "gossipsub", "identify", "ping",
+    "tcp", "noise", "yamux", "mdns", "gossipsub", "identify", "ping", "tokio", "macros",
 ] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
