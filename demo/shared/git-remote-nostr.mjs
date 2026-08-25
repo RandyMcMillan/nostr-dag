@@ -6,11 +6,19 @@ export class Nip34RemoteError extends Error {
 }
 
 export function parseNostrCloneUrl(input) {
-  if (typeof input !== 'string' || !input.startsWith('nostr://')) {
+  return parseCloneUrlWithScheme(input, 'nostr://');
+}
+
+export function parseP2pCloneUrl(input) {
+  return parseCloneUrlWithScheme(input, 'p2p://');
+}
+
+function parseCloneUrlWithScheme(input, scheme) {
+  if (typeof input !== 'string' || !input.startsWith(scheme)) {
     throw new Nip34RemoteError('expected nostr:// URL');
   }
 
-  const rest = input.slice('nostr://'.length);
+  const rest = input.slice(scheme.length);
   if (!rest) {
     throw new Nip34RemoteError('nostr:// URL is missing authority');
   }
@@ -28,7 +36,7 @@ export function parseNostrCloneUrl(input) {
     return {
       kind: 'announcement',
       naddr: ownerOrNaddr,
-      normalized: `nostr://${ownerOrNaddr}`,
+      normalized: `${scheme}${ownerOrNaddr}`,
     };
   }
 
@@ -43,7 +51,7 @@ export function parseNostrCloneUrl(input) {
       owner: ownerOrNaddr,
       relayHint: null,
       identifier,
-      normalized: `nostr://${ownerOrNaddr}/${percentEncode(identifier)}`,
+      normalized: `${scheme}${ownerOrNaddr}/${percentEncode(identifier)}`,
     };
   }
 
@@ -59,7 +67,7 @@ export function parseNostrCloneUrl(input) {
       owner: ownerOrNaddr,
       relayHint,
       identifier,
-      normalized: `nostr://${ownerOrNaddr}/${percentEncode(relayHint)}/${percentEncode(identifier)}`,
+      normalized: `${scheme}${ownerOrNaddr}/${percentEncode(relayHint)}/${percentEncode(identifier)}`,
     };
   }
 
@@ -70,8 +78,39 @@ export function normalizeNostrCloneUrl(input) {
   return parseNostrCloneUrl(input).normalized;
 }
 
+export function normalizeP2pCloneUrl(input) {
+  return parseP2pCloneUrl(input).normalized;
+}
+
 export function gitRemoteHelperUrl(input) {
   return `nostr::${normalizeNostrCloneUrl(input)}`;
+}
+
+export function nostrToP2pCloneUrl(input) {
+  const parsed = parseNostrCloneUrl(input);
+  return `p2p://${parsed.normalized.slice('nostr://'.length)}`;
+}
+
+export function p2pToNostrCloneUrl(input) {
+  const parsed = parseP2pCloneUrl(input);
+  return `nostr://${parsed.normalized.slice('p2p://'.length)}`;
+}
+
+export function gitRemoteTransportUrl(input) {
+  if (typeof input !== 'string') {
+    throw new Nip34RemoteError('unsupported remote URL scheme');
+  }
+  if (input.startsWith('nostr://')) return `nostr::${normalizeNostrCloneUrl(input)}`;
+  if (input.startsWith('p2p://')) return `p2p::${normalizeP2pCloneUrl(input)}`;
+  if (
+    input.startsWith('https://') ||
+    input.startsWith('http://') ||
+    input.startsWith('ssh://') ||
+    input.startsWith('git@')
+  ) {
+    return input;
+  }
+  throw new Nip34RemoteError('unsupported remote URL scheme');
 }
 
 function percentDecode(value) {

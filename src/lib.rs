@@ -20,7 +20,11 @@ pub use assets::FAVICON_ICO;
 pub use dag::{Dag, InsertResult};
 pub use error::DagError;
 pub use event::{create_ack_event, parents_of, DAG_EVENT_KIND};
-pub use nip34::{git_remote_helper_url, normalize_nostr_clone_url, parse_nostr_clone_url, Nip34Error, NostrRemote};
+pub use nip34::{
+    git_remote_helper_url, git_remote_transport_url, normalize_nostr_clone_url,
+    normalize_p2p_clone_url, nostr_to_p2p_clone_url, p2p_to_nostr_clone_url, parse_nostr_clone_url,
+    parse_p2p_clone_url, Nip34Error, NostrRemote,
+};
 
 #[cfg(feature = "wasm")]
 mod wasm {
