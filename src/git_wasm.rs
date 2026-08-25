@@ -6,6 +6,7 @@
 
 #[cfg(feature = "wasm")]
 pub mod wasm {
+    use crate::nip34::{git_remote_helper_url, normalize_nostr_clone_url};
     use wasm_bindgen::prelude::*;
     use wasm_bindgen_futures::JsFuture;
     use web_sys::{Request, RequestInit, RequestMode, Response};
@@ -35,6 +36,18 @@ pub mod wasm {
             "{base_url}/git/blame?repo={repo}&file={file}&commit={commit_ish}"
         );
         fetch_text(&url).await
+    }
+
+    /// Normalize a NIP-34 `nostr://` clone URL for consistent cross-runtime use.
+    #[wasm_bindgen]
+    pub fn normalize_nostr_remote(remote: &str) -> Result<String, JsValue> {
+        normalize_nostr_clone_url(remote).map_err(|err| JsValue::from_str(&err.to_string()))
+    }
+
+    /// Return a Git remote-helper URL (`nostr::nostr://...`) for native clone handoff.
+    #[wasm_bindgen]
+    pub fn git_remote_nostr_helper_url(remote: &str) -> Result<String, JsValue> {
+        git_remote_helper_url(remote).map_err(|err| JsValue::from_str(&err.to_string()))
     }
 
     // ---------------------------------------------------------------------------
