@@ -287,6 +287,15 @@ button:hover, a.button:hover { background:var(--button-hover); }
   justify-content:center;
 }
 
+.bridge-pill-git {
+  background:rgba(249,115,22,.14);
+  border-color:rgba(249,115,22,.35);
+  color:#fdba74;
+  font-weight:700;
+  min-width:24px;
+  justify-content:center;
+}
+
 .bridge-pill-dot {
   width:8px;
   height:8px;
