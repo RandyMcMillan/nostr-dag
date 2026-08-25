@@ -166,17 +166,17 @@ pub fn parse_transfer_event(event: &nostr::Event) -> Result<TransferEventPayload
     validate_protocol(&payload)?;
     let root_id = read_string_field(&payload, "root_id")?;
 
-    match event.kind {
-        TRANSFER_MANIFEST_KIND => {
+    if event.kind == TRANSFER_MANIFEST_KIND {
             let total_bytes = read_u64_field(&payload, "total_bytes")? as usize;
             let total_slices = read_u64_field(&payload, "total_slices")? as usize;
-            Ok(TransferEventPayload::Manifest(TransferManifest {
+            return Ok(TransferEventPayload::Manifest(TransferManifest {
                 root_id,
                 total_bytes,
                 total_slices,
-            }))
-        }
-        TRANSFER_SLICE_KIND => {
+            }));
+    }
+
+    if event.kind == TRANSFER_SLICE_KIND {
             let seq = read_u64_field(&payload, "seq")? as usize;
             let total_slices = read_u64_field(&payload, "total_slices")? as usize;
             let data = payload
@@ -194,15 +194,15 @@ pub fn parse_transfer_event(event: &nostr::Event) -> Result<TransferEventPayload
                 })
                 .collect::<Result<Vec<_>, _>>()?;
 
-            Ok(TransferEventPayload::Slice(TransferSlice {
+            return Ok(TransferEventPayload::Slice(TransferSlice {
                 root_id,
                 seq,
                 total_slices,
                 data,
-            }))
-        }
-        other => Err(TransferError::UnsupportedKind(format!("{other:?}"))),
+            }));
     }
+
+    Err(TransferError::UnsupportedKind(format!("{:?}", event.kind)))
 }
 
 /// Reconstruct original payload from validated transfer slices.
