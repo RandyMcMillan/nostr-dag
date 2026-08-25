@@ -157,7 +157,59 @@ export async function createSharedLibp2pStack({
   onLog,
   onPeer,
   onStatus,
+  // When the WASM P2pNode is available (loaded via pkg/nostr_dag.js) and
+  // `useWasmP2p` is true (default), use it instead of the JS libp2p stack.
+  // Set to false to force the pure-JS fallback.
+  useWasmP2p = true,
+  wasmModule = null,
 } = {}) {
+  // ---------------------------------------------------------------------------
+  // Try the WASM P2pNode first (src/p2p.rs, p2p-wasm feature)
+  // ---------------------------------------------------------------------------
+  if (useWasmP2p) {
+    try {
+      // `wasmModule` may be passed explicitly in tests; otherwise look for the
+      // P2pNode class on the already-initialised WASM module exposed as
+      // `globalThis.__nostrDagWasm`.
+      const mod = wasmModule || globalThis.__nostrDagWasm;
+      if (mod && typeof mod.P2pNode === "function") {
+        emitLog(onLog, "info", "using WASM P2pNode for libp2p", "checking");
+        const p2pNode = new mod.P2pNode();
+        const handlers = [];
+        p2pNode.on_message((msg) => {
+          for (const h of handlers) h(msg);
+        });
+        await p2pNode.start();
+        emitLog(onLog, "info", "WASM P2pNode started", "available");
+        onStatus?.("available");
+        // Return a minimal adapter that matches the JS node surface used by
+        // callers (publish, subscribe, peerId string, stop).
+        return {
+          _wasmNode: p2pNode,
+          peerId: { toString: () => "wasm-p2p-node" },
+          services: {
+            pubsub: {
+              publish: async (_topic, data) => {
+                const msg = typeof data === "string" ? data : new TextDecoder().decode(data);
+                await p2pNode.broadcast(msg);
+              },
+              subscribe: (_topic) => {},
+              addEventListener: (event, cb) => {
+                if (event === "message") handlers.push((msg) => cb({ detail: { data: new TextEncoder().encode(msg) } }));
+              },
+            },
+          },
+          getMultiaddrs: () => [],
+          stop: async () => {},
+        };
+      }
+    } catch (wasmErr) {
+      emitLog(onLog, "warn", `WASM P2pNode unavailable, falling back to JS stack: ${wasmErr?.message || wasmErr}`, "checking");
+    }
+  }
+  // ---------------------------------------------------------------------------
+  // JS libp2p fallback
+  // ---------------------------------------------------------------------------
   const peers = [...new Set(bootstrapPeers.filter(Boolean))];
   emitLog(onLog, "trace", `bootstrap peers: ${peers.join(" | ") || "none"}`, "checking");
   emitLog(onLog, "info", `bootstrapping with ${peers.length} peer${peers.length === 1 ? "" : "s"}`, "checking");

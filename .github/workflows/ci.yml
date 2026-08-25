@@ -72,3 +72,56 @@ jobs:
         with:
           name: wasm-pkg
           path: pkg/
+
+  p2p:
+    name: Build (p2p native)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install libp2p system deps
+        run: sudo apt-get install -y libssl-dev pkg-config
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-p2p-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build (native + p2p)
+        run: cargo build --features native,p2p
+
+      - name: Test (native + p2p)
+        run: cargo test --features native,p2p
+
+  p2p-wasm:
+    name: Build (p2p-wasm)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-p2p-wasm-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Build wasm package (p2p-wasm)
+        run: wasm-pack build --target web --no-default-features --features wasm,p2p-wasm

@@ -5,6 +5,15 @@ mod assets;
 #[cfg(feature = "native")]
 pub mod store;
 
+#[cfg(feature = "native")]
+pub mod git;
+
+#[cfg(feature = "wasm")]
+pub mod git_wasm;
+
+#[cfg(any(feature = "p2p", feature = "p2p-wasm"))]
+pub mod p2p;
+
 pub use assets::{ICON_CIRCLE_BITCOIN_SVG, ICON_CIRCLE_WHITE_SVG};
 pub use assets::FAVICON_ICO;
 pub use dag::{Dag, InsertResult};

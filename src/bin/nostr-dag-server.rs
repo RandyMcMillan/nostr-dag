@@ -21,6 +21,9 @@ use tracing::{debug, error, info, trace};
 use nostr_dag::FAVICON_ICO;
 use nostr_dag::store::EventStore;
 
+#[cfg(feature = "p2p")]
+use nostr_dag::p2p::native::SwarmHandle;
+
 const DEFAULT_HOST: &str = "127.0.0.1";
 const DEFAULT_PORT: u16 = 3000;
 const DEFAULT_SITE_DIR: &str = "site";
@@ -151,6 +154,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     let http_client = Arc::new(reqwest::Client::builder().user_agent("nostr-dag/0.9.1").build()?);
     let (shutdown_tx, shutdown_rx) = watch::channel(());
+
+    // Optionally start a native libp2p node and forward received messages into
+    // the event store.  Enable with P2P_ENABLE=1.
+    #[cfg(feature = "p2p")]
+    if env::var("P2P_ENABLE").map(|v| v == "1").unwrap_or(false) {
+        let es = Arc::clone(&event_store);
+        tokio::spawn(async move {
+            match SwarmHandle::start().await {
+                Ok((_handle, mut rx)) => {
+                    info!("p2p node started");
+                    while let Some(msg) = rx.recv().await {
+                        // Attempt to parse as a Nostr event and store it.
+                        if let Ok(event) = serde_json::from_str::<nostr::Event>(&msg) {
+                            let mut store = es.inner.lock().unwrap();
+                            if let Err(e) = store.upsert_event(&event) {
+                                tracing::warn!(?e, "p2p: failed to store event");
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(?e, "p2p node failed to start");
+                }
+            }
+        });
+    }
 
     let addr = format!("{host}:{port}");
     let listener = TcpListener::bind(&addr).await?;

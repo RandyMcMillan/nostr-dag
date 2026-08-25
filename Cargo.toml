@@ -28,6 +28,18 @@ getrandom = { version = "0.2", features = ["js"], optional = true }
 serde-wasm-bindgen = { version = "0.6", optional = true }
 serde_json = { version = "1", optional = true }
 rusqlite = { version = "0.40.2", features = ["bundled"], optional = true }
+git2 = { version = "0.20", optional = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+libp2p = { version = "0.54", optional = true, features = [
+    "tcp", "noise", "yamux", "mdns", "gossipsub", "identify", "ping",
+] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+libp2p = { version = "0.54", optional = true, features = [
+    "wasm-bindgen", "websocket-websys", "noise", "yamux", "gossipsub", "identify", "ping",
+] }
+futures = { version = "0.3", optional = true }
 
 [dev-dependencies]
 nostr-relay-builder = "0.44.0"
@@ -53,11 +65,23 @@ name = "nostr-dag-server"
 path = "src/bin/nostr-dag-server.rs"
 required-features = ["native"]
 
+[[bin]]
+name = "git-info"
+path = "src/bin/git-info.rs"
+required-features = ["native"]
+
+[[bin]]
+name = "p2p-node"
+path = "src/bin/p2p-node.rs"
+required-features = ["p2p"]
+
 [features]
 default = []
-native = ["dep:tokio", "dep:tracing-subscriber", "dep:nostr-relay-pool", "dep:serde", "dep:serde_json", "dep:reqwest", "dep:urlencoding", "dep:rusqlite"]
+native = ["dep:tokio", "dep:tracing-subscriber", "dep:nostr-relay-pool", "dep:serde", "dep:serde_json", "dep:reqwest", "dep:urlencoding", "dep:rusqlite", "dep:git2"]
 relay = ["native", "dep:nostr-relay-builder"]
 wasm = ["dep:wasm-bindgen", "dep:getrandom", "dep:serde-wasm-bindgen", "dep:serde_json"]
+p2p = ["native", "dep:libp2p"]
+p2p-wasm = ["wasm", "dep:libp2p", "dep:futures"]
 
 [dependencies.nostr-relay-builder]
 version = "0.44.0"
