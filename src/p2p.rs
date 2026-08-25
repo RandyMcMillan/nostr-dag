@@ -23,6 +23,7 @@ pub mod native {
     use std::time::Duration;
 
     use libp2p::{
+        futures::StreamExt,
         gossipsub::{self, IdentTopic, MessageAuthenticity},
         identity,
         mdns,
@@ -31,7 +32,6 @@ pub mod native {
         tcp,
         yamux,
         Multiaddr,
-        Swarm,
     };
     use tokio::sync::mpsc;
     use tracing::{debug, info, warn};
@@ -54,7 +54,7 @@ pub mod native {
     impl SwarmHandle {
         /// Start a new libp2p node, listen on a random TCP port, and return a
         /// handle plus a receiver for inbound messages.
-        pub async fn start() -> Result<(Self, mpsc::Receiver<String>), Box<dyn std::error::Error>> {
+        pub async fn start() -> Result<(Self, mpsc::Receiver<String>), Box<dyn std::error::Error + Send + Sync>> {
             let local_key = identity::Keypair::generate_ed25519();
 
             let topic = IdentTopic::new(NOSTR_DAG_TOPIC);

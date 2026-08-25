@@ -166,10 +166,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     info!("p2p node started");
                     while let Some(msg) = rx.recv().await {
                         // Attempt to parse as a Nostr event and store it.
-                        if let Ok(event) = serde_json::from_str::<nostr::Event>(&msg) {
-                            let mut store = es.inner.lock().unwrap();
-                            if let Err(e) = store.upsert_event(&event) {
-                                tracing::warn!(?e, "p2p: failed to store event");
+                        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&msg) {
+                            if let (Some(id), Some(pubkey), Some(kind), Some(created)) = (
+                                v["id"].as_str(),
+                                v["pubkey"].as_str(),
+                                v["kind"].as_i64(),
+                                v["created_at"].as_i64(),
+                            ) {
+                                let content = v["content"].as_str().unwrap_or("");
+                                let sig = v["sig"].as_str().unwrap_or("");
+                                let tags: Vec<Vec<String>> = v["tags"]
+                                    .as_array()
+                                    .unwrap_or(&vec![])
+                                    .iter()
+                                    .map(|tag| {
+                                        tag.as_array()
+                                            .unwrap_or(&vec![])
+                                            .iter()
+                                            .map(|f| f.as_str().unwrap_or("").to_string())
+                                            .collect()
+                                    })
+                                    .collect();
+                                let now = now_ms() as i64;
+                                let store = es.inner.lock().unwrap();
+                                if let Err(e) = store.upsert_event(
+                                    id, pubkey, kind, created, content, sig, &msg, &tags, None, now,
+                                ) {
+                                    tracing::warn!(?e, "p2p: failed to store event");
+                                }
                             }
                         }
                     }
