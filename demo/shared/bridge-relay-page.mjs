@@ -170,7 +170,6 @@ function relayHeaderHtml(relay, info, source, loading) {
             ${hasInfo ? `<div class="small muted" style="margin-top:4px;">${escapeHtml(fields.join(' · '))}</div>` : loading ? '<div class="small muted" style="margin-top:4px;">Loading NIP-11…</div>' : ''}
           </div>
           <div class="bridge-relay-meta">
-            ${source ? `<span class="bridge-pill bridge-pill-source">${escapeHtml(source)}</span>` : ''}
             ${info?.error ? `<span class="bridge-pill">NIP-11 unavailable</span>` : hasInfo ? '<span class="bridge-pill bridge-pill-ok" aria-label="NIP-11 loaded"><span class="bridge-pill-dot" aria-hidden="true"></span></span>' : loading ? '<span class="bridge-pill">NIP-11 loading</span>' : ''}
           </div>
         </div>
@@ -217,7 +216,6 @@ function renderRelayDetail(relay, info, source, loading) {
     </div>
     ${relayHeaderHtml(relay, info, source, loading)}
     <div class="bridge-relay-details">
-      ${source && source !== 'default' ? `<div class="bridge-relay-learned small muted">Learned from ${escapeHtml(source)}</div>` : ''}
       ${info?.error ? `<div class="small muted">NIP-11 fetch failed: ${escapeHtml(info.error)}</div>` : ''}
       ${hasInfo ? `
         ${detailSectionHtml('Description', info.description ? `<div class="small muted">${escapeHtml(info.description)}</div>` : '<div class="small muted">No description provided.</div>')}
@@ -226,6 +224,7 @@ function renderRelayDetail(relay, info, source, loading) {
         ${countries ? detailSectionHtml('Relay countries', `<div class="bridge-relay-grid">${countries}</div>`) : ''}
         ${detailSectionHtml('Raw NIP-11', `<pre class="bridge-relay-pre">${rawJson}</pre>`)}
       ` : loading ? `<div class="small muted">Loading NIP-11 metadata…</div>` : `<div class="small muted">NIP-11 metadata not loaded yet.</div>`}
+      ${source && source !== 'default' ? `<div class="bridge-relay-learned small muted">Learned from ${escapeHtml(source)}</div>` : ''}
     </div>
   `;
 }
