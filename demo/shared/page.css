@@ -323,7 +323,8 @@ button:hover, a.button:hover { background:var(--button-hover); }
 }
 
 .bridge-relay-learned {
-  margin-top:6px;
+  padding:6px 12px 8px;
+  border-top:1px solid var(--border);
   overflow-wrap:anywhere;
 }
 

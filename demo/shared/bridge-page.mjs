@@ -421,8 +421,8 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
                 ${info?.error ? `<span class="bridge-pill">NIP-11 unavailable</span>` : hasInfo ? '<span class="bridge-pill bridge-pill-ok" aria-label="NIP-11 loaded"><span class="bridge-pill-dot" aria-hidden="true"></span></span>' : loading ? '<span class="bridge-pill">NIP-11 loading</span>' : ''}
               </div>
             </div>
-            ${learnedFrom}
           </div>
+          ${learnedFrom}
         </a>
       `;
     }
