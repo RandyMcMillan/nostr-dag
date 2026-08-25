@@ -202,7 +202,7 @@ pub mod native {
 
 #[cfg(all(feature = "p2p-wasm", target_arch = "wasm32"))]
 pub mod wasm_node {
-    use js_sys::Function;
+    use futures::StreamExt;
     use libp2p::{
         gossipsub::{self, IdentTopic, MessageAuthenticity},
         identity,
@@ -210,9 +210,11 @@ pub mod wasm_node {
         swarm::{NetworkBehaviour, SwarmEvent},
         websocket_websys,
         yamux,
+        Transport,
     };
     use wasm_bindgen::prelude::*;
     use wasm_bindgen_futures::spawn_local;
+    use web_sys::js_sys::Function;
 
     use super::NOSTR_DAG_TOPIC;
 
@@ -273,8 +275,8 @@ pub mod wasm_node {
             // For the WASM node the publish happens inside the swarm loop.
             // We use a channel stored in thread-local storage.
             OUTBOUND_TX.with(|cell| {
-                let borrow = cell.borrow();
-                if let Some(tx) = borrow.as_ref() {
+                let mut borrow = cell.borrow_mut();
+                if let Some(tx) = borrow.as_mut() {
                     let _ = tx.try_send(msg);
                 }
             });
@@ -321,9 +323,10 @@ pub mod wasm_node {
             .with_other_transport(|key| {
                 websocket_websys::Transport::default()
                     .upgrade(libp2p::core::upgrade::Version::V1)
-                    .authenticate(noise::Config::new(key).map_err(|e| {
-                        std::io::Error::new(std::io::ErrorKind::Other, e.to_string())
-                    })?)
+                    .authenticate(
+                        noise::Config::new(key)
+                            .expect("libp2p noise config should initialize for wasm transport"),
+                    )
                     .multiplex(yamux::Config::default())
                     .boxed()
             })
