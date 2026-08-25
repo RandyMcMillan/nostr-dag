@@ -1,4 +1,4 @@
-//! Dual-target libp2p node.
+//! Dual-target libp2p node and Perfect IP (PIP) reference implementation.
 //!
 //! * `#[cfg(feature = "p2p")]`       — native Tokio-based `SwarmHandle`
 //! * `#[cfg(feature = "p2p-wasm")]`  — WASM `P2pNode` (`#[wasm_bindgen]`)
@@ -6,20 +6,33 @@
 //! Both expose the same logical interface:
 //! * `broadcast(msg)` — publish a UTF-8 message on the nostr-dag gossipsub topic
 //! * subscribe / `on_message(cb)` — receive messages from peers
+//!
+//! This module also defines the wire format for the repository's data transfer protocol,
+//! **Perfect IP (PIP)** / **NIP-PIP**:
+//!
+//! * bridge envelopes on the `nostr-dag-bridge` topic
+//! * transfer manifest events (`kind:39078`)
+//! * transfer slice events (`kind:39079`)
+//! * payload packetization and reconstruction rules
+//!
+//! The repository-level specification lives in `PIP.md`.  The constants and helpers in this
+//! module are the normative implementation used by both native and browser peers.
 
 // ---------------------------------------------------------------------------
 // Shared constant
 // ---------------------------------------------------------------------------
 
-/// Gossipsub topic used by all nostr-dag peers (native and WASM).
+/// Gossipsub topic and bridge protocol identifier used by all PIP peers (native and WASM).
 pub const NOSTR_DAG_TOPIC: &str = "nostr-dag-bridge";
 
-/// Nostr event kind used for transfer manifests.
+/// PIP Nostr event kind used for transfer manifests.
 pub const TRANSFER_MANIFEST_KIND: nostr::Kind = nostr::Kind::Custom(39078);
-/// Nostr event kind used for transfer slices.
+/// PIP Nostr event kind used for transfer slices.
 pub const TRANSFER_SLICE_KIND: nostr::Kind = nostr::Kind::Custom(39079);
 
+/// PIP protocol name carried in transfer manifest and slice event payloads.
 const TRANSFER_PROTOCOL: &str = "nostr-dag-transfer";
+/// PIP transfer payload version.
 const TRANSFER_VERSION: u64 = 1;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -93,7 +106,12 @@ fn validate_protocol(payload: &serde_json::Value) -> Result<(), TransferError> {
     Ok(())
 }
 
-/// Split payload bytes into ordered transfer slices.
+/// Split payload bytes into ordered PIP transfer slices.
+///
+/// The output is suitable for a PIP manifest/slice sequence:
+/// - all slices share the same `root_id`
+/// - `seq` values are zero-based and contiguous
+/// - empty payloads still emit a single empty slice so reconstruction remains well-defined
 pub fn packetize_payload(root_id: &str, payload: &[u8], max_slice_bytes: usize) -> Vec<TransferSlice> {
     let chunk_size = max_slice_bytes.max(1);
     let total_slices = payload.len().div_ceil(chunk_size).max(1);
@@ -119,7 +137,10 @@ pub fn packetize_payload(root_id: &str, payload: &[u8], max_slice_bytes: usize) 
         .collect()
 }
 
-/// Build a transfer-manifest nostr event.
+/// Build a PIP transfer-manifest Nostr event.
+///
+/// The event content follows the `PIP.md` manifest schema and advertises the total payload size
+/// plus the total number of slices expected for the shared `root_id`.
 pub fn build_transfer_manifest_event(
     keys: &nostr::Keys,
     manifest: &TransferManifest,
@@ -137,7 +158,10 @@ pub fn build_transfer_manifest_event(
     nostr::EventBuilder::new(TRANSFER_MANIFEST_KIND, content).sign_with_keys(keys)
 }
 
-/// Build a transfer-slice nostr event and link it to the manifest via `e` tag.
+/// Build a PIP transfer-slice Nostr event and link it to the manifest via `e` tag.
+///
+/// Each slice repeats the `root_id`, exposes its zero-based sequence number, and carries raw bytes
+/// as a JSON array so the payload can be reconstructed deterministically by receivers.
 pub fn build_transfer_slice_event(
     keys: &nostr::Keys,
     slice: &TransferSlice,
@@ -160,7 +184,10 @@ pub fn build_transfer_slice_event(
         .sign_with_keys(keys)
 }
 
-/// Parse a manifest or slice transfer event payload.
+/// Parse a PIP manifest or slice transfer event payload.
+///
+/// Validation enforces the normative transfer protocol string and version before decoding the
+/// event-specific fields.
 pub fn parse_transfer_event(event: &nostr::Event) -> Result<TransferEventPayload, TransferError> {
     let payload = parse_payload_json(event)?;
     validate_protocol(&payload)?;
@@ -205,7 +232,10 @@ pub fn parse_transfer_event(event: &nostr::Event) -> Result<TransferEventPayload
     Err(TransferError::UnsupportedKind(format!("{:?}", event.kind)))
 }
 
-/// Reconstruct original payload from validated transfer slices.
+/// Reconstruct the original payload from validated PIP transfer slices.
+///
+/// Reconstruction requires a complete set of slices sharing one `root_id` and one
+/// `total_slices` value.  Missing sequence numbers or mixed metadata are rejected.
 pub fn reconstruct_payload(slices: &[TransferSlice]) -> Result<Vec<u8>, TransferError> {
     if slices.is_empty() {
         return Ok(Vec::new());
@@ -245,7 +275,11 @@ pub fn reconstruct_payload(slices: &[TransferSlice]) -> Result<Vec<u8>, Transfer
     Ok(ordered.into_iter().flat_map(|slice| slice.data).collect())
 }
 
-/// Encode a nostr event as a p2p bridge envelope.
+/// Encode a Nostr event as a PIP bridge envelope.
+///
+/// The resulting JSON object is the canonical bridge message published on the
+/// `nostr-dag-bridge` topic.  The embedded `event` remains a standard Nostr event, while
+/// `direction` and `relay_hints` carry transport metadata defined by `PIP.md`.
 pub fn encode_bridge_message(
     event: &nostr::Event,
     direction: &str,
@@ -261,7 +295,10 @@ pub fn encode_bridge_message(
     .map_err(|err| TransferError::Json(err.to_string()))
 }
 
-/// Decode and validate a p2p bridge envelope into a nostr event.
+/// Decode and validate a PIP bridge envelope into a Nostr event.
+///
+/// Consumers reject mismatched bridge protocol identifiers and then deserialize the embedded
+/// standard Nostr event payload.
 pub fn decode_bridge_message(message: &str) -> Result<nostr::Event, TransferError> {
     let payload: serde_json::Value =
         serde_json::from_str(message).map_err(|err| TransferError::Json(err.to_string()))?;

@@ -26,6 +26,18 @@ sketch into a multi-layer system:
 - **Local server** (`src/bin/nostr-dag-server.rs`) — serves `site/` with correct MIME types (`.mjs` → `text/javascript`)
   and exposes `/events`, `/peers`, and static asset routes.
 
+## Perfect IP (PIP) / NIP-PIP
+
+The project’s data transfer protocol is formalized as **Perfect IP (PIP)**, also referred to here as
+**NIP-PIP**.  PIP specifies the wire format for:
+
+- libp2p ↔ Nostr bridge envelopes on the `nostr-dag-bridge` topic
+- transfer manifest events (`kind:39078`)
+- transfer slice events (`kind:39079`)
+- validation and reconstruction rules for multi-slice payloads
+
+See [`./PIP.md`](./PIP.md) for the full specification.
+
 ## Project layout
 
 ```

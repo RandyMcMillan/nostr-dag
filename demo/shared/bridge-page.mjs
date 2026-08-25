@@ -202,8 +202,11 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       return found;
     }
 
-    // libp2p publishes a bridge envelope, not a bare Nostr event.
-    // The `event` field is the standard Nostr event; the rest is bridge metadata.
+    // Perfect IP (PIP) bridge envelope:
+    // - `protocol` and `version` identify the wire format
+    // - `event` remains a standard Nostr event
+    // - `relay_hints` carries deduplicated relay URLs for the Nostr publish path
+    // See `/PIP.md` for the repository-level specification.
     function buildBridgeEnvelope(event, direction, relayHints = []) {
       return {
         protocol: BRIDGE_PROTOCOL,
@@ -246,8 +249,8 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       }, signer.secretKey);
     }
 
-    // Accept either a bridge envelope or a raw Nostr event for compatibility.
-    // When relay hints are present, they are forwarded to the Nostr publish path.
+    // PIP decoders accept either a full bridge envelope or a raw Nostr event for compatibility.
+    // When relay hints are present, they are normalized and forwarded to the Nostr publish path.
     function unwrapBridgeEnvelope(message) {
       if (!message || typeof message !== 'object') return null;
       if (isNostrEvent(message)) {
