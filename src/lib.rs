@@ -2,6 +2,8 @@ mod dag;
 mod error;
 mod event;
 mod assets;
+#[cfg(feature = "native")]
+pub mod store;
 
 pub use assets::{ICON_CIRCLE_BITCOIN_SVG, ICON_CIRCLE_WHITE_SVG};
 pub use assets::FAVICON_ICO;

@@ -27,6 +27,7 @@ wasm-bindgen = { version = "0.2", optional = true }
 getrandom = { version = "0.2", features = ["js"], optional = true }
 serde-wasm-bindgen = { version = "0.6", optional = true }
 serde_json = { version = "1", optional = true }
+rusqlite = { version = "0.40.2", features = ["bundled"], optional = true }
 
 [dev-dependencies]
 nostr-relay-builder = "0.44.0"
@@ -54,7 +55,7 @@ required-features = ["native"]
 
 [features]
 default = []
-native = ["dep:tokio", "dep:tracing-subscriber", "dep:nostr-relay-pool", "dep:serde", "dep:serde_json", "dep:reqwest", "dep:urlencoding"]
+native = ["dep:tokio", "dep:tracing-subscriber", "dep:nostr-relay-pool", "dep:serde", "dep:serde_json", "dep:reqwest", "dep:urlencoding", "dep:rusqlite"]
 relay = ["native", "dep:nostr-relay-builder"]
 wasm = ["dep:wasm-bindgen", "dep:getrandom", "dep:serde-wasm-bindgen", "dep:serde_json"]
 

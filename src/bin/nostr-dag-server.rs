@@ -19,6 +19,7 @@ use tokio::task::JoinSet;
 use tracing::{debug, error, info, trace};
 
 use nostr_dag::FAVICON_ICO;
+use nostr_dag::store::EventStore;
 
 const DEFAULT_HOST: &str = "127.0.0.1";
 const DEFAULT_PORT: u16 = 3000;
@@ -28,6 +29,10 @@ const LOGGER_MAX_ENTRIES: usize = 10_000;
 const PEERS_ROUTE_PREFIX: &str = "/peers";
 const NIP11_ROUTE_PREFIX: &str = "/nip11";
 const NIP11_MAX_CONCURRENT: usize = 8;
+/// Route prefix for the event store REST API.
+const EVENTS_ROUTE_PREFIX: &str = "/events";
+/// Default SQLite database file placed next to the server working directory.
+const DEFAULT_DB_PATH: &str = "nostr-dag.db";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct LoggerEntry {
@@ -63,6 +68,18 @@ static NIP11_SEMAPHORE: OnceLock<Semaphore> = OnceLock::new();
 
 fn nip11_semaphore() -> &'static Semaphore {
     NIP11_SEMAPHORE.get_or_init(|| Semaphore::new(NIP11_MAX_CONCURRENT))
+}
+
+/// Thread-safe wrapper around the SQLite [`EventStore`].
+struct EventStoreState {
+    inner: Mutex<EventStore>,
+}
+
+impl EventStoreState {
+    fn new(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let store = EventStore::open(path)?;
+        Ok(Self { inner: Mutex::new(store) })
+    }
 }
 
 impl LoggerStore {
@@ -123,8 +140,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .and_then(|value| value.parse().ok())
         .unwrap_or(DEFAULT_PORT);
     let site_dir = env::var("SITE_DIR").unwrap_or_else(|_| DEFAULT_SITE_DIR.to_string());
+    let db_path = env::var("DB_PATH").unwrap_or_else(|_| DEFAULT_DB_PATH.to_string());
     let logger_store = Arc::new(LoggerStore::default());
     let peer_store = Arc::new(PeerStore::default());
+    let event_store = Arc::new(
+        EventStoreState::new(&db_path).unwrap_or_else(|err| {
+            error!(?err, %db_path, "failed to open event store, using in-memory fallback");
+            EventStoreState::new(":memory:").expect("in-memory event store")
+        }),
+    );
     let http_client = Arc::new(reqwest::Client::builder().user_agent("nostr-dag/0.9.1").build()?);
     let (shutdown_tx, shutdown_rx) = watch::channel(());
 
@@ -132,7 +156,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listener = TcpListener::bind(&addr).await?;
     let mut connections = JoinSet::new();
 
-    info!(%addr, site_dir = %site_dir, "nostr-dag server listening");
+    info!(%addr, site_dir = %site_dir, %db_path, "nostr-dag server listening");
     println!("SERVER_URL=http://{addr}");
 
     loop {
@@ -142,10 +166,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let site_dir = site_dir.clone();
                 let logger_store = Arc::clone(&logger_store);
                 let peer_store = Arc::clone(&peer_store);
+                let event_store = Arc::clone(&event_store);
                 let http_client = Arc::clone(&http_client);
                 let connection_shutdown = shutdown_rx.clone();
                 connections.spawn(async move {
-                    if let Err(err) = handle_connection(stream, &site_dir, logger_store, peer_store, http_client, connection_shutdown).await {
+                    if let Err(err) = handle_connection(stream, &site_dir, logger_store, peer_store, event_store, http_client, connection_shutdown).await {
                         if is_disconnect_error(&err) || err.kind() == io::ErrorKind::Interrupted {
                             trace!(%peer, ?err, "client disconnected");
                         } else {
@@ -178,6 +203,7 @@ async fn handle_connection(
     site_dir: &str,
     logger_store: Arc<LoggerStore>,
     peer_store: Arc<PeerStore>,
+    event_store: Arc<EventStoreState>,
     http_client: Arc<reqwest::Client>,
     mut shutdown_rx: watch::Receiver<()>,
 ) -> io::Result<()> {
@@ -231,6 +257,14 @@ async fn handle_connection(
                 return Err(io::Error::new(io::ErrorKind::Interrupted, "shutdown requested"));
             }
         }
+    } else if method == "POST" && (path == EVENTS_ROUTE_PREFIX || path.starts_with("/events/")) {
+        match handle_events_post(body, &event_store) {
+            Ok(()) => response_bytes(204, "No Content", Vec::new(), "text/plain; charset=utf-8", true),
+            Err(err) => {
+                error!(?err, "event ingest failed");
+                response_text(400, "Bad Request", "Bad Request", "text/plain; charset=utf-8")
+            }
+        }
     } else if method != "GET" && method != "HEAD" {
         info!(%method, %path, "rejecting unsupported method");
         response_text(405, "Method Not Allowed", "Method Not Allowed", "text/plain; charset=utf-8")
@@ -259,6 +293,20 @@ async fn handle_connection(
             }
             Err(RouteError::Io(err)) => {
                 error!(?err, path = %path, "failed to serve peer payload");
+                response_text(500, "Internal Server Error", "Internal Server Error", "text/plain; charset=utf-8")
+            }
+        }
+    } else if path == EVENTS_ROUTE_PREFIX || path.starts_with("/events/") {
+        match handle_events_get(path, &request, &event_store) {
+            Ok((body, content_type)) => response_bytes(200, "OK", body, content_type, head_only),
+            Err(RouteError::BadRequest) => {
+                response_text(400, "Bad Request", "Bad Request", "text/plain; charset=utf-8")
+            }
+            Err(RouteError::NotFound) => {
+                response_text(404, "Not Found", "Not Found", "text/plain; charset=utf-8")
+            }
+            Err(RouteError::Io(err)) => {
+                error!(?err, path = %path, "failed to serve events payload");
                 response_text(500, "Internal Server Error", "Internal Server Error", "text/plain; charset=utf-8")
             }
         }
@@ -388,6 +436,123 @@ fn handle_peer_get(path: &str, peer_store: &Arc<PeerStore>) -> Result<(Vec<u8>, 
     serde_json::to_vec(&payload)
         .map(|body| (body, "application/json; charset=utf-8"))
         .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))
+}
+
+// ---------------------------------------------------------------------------
+// Event store handlers
+// ---------------------------------------------------------------------------
+
+/// POST /events — ingest a raw Nostr event JSON object.
+///
+/// The body must be a JSON object with at minimum `id`, `pubkey`, `kind`,
+/// `created_at`, `content`, `sig`, and `tags`.  An optional
+/// `source_relay` top-level string field may be included by the client.
+fn handle_events_post(body: &str, state: &Arc<EventStoreState>) -> Result<(), RouteError> {
+    let v: serde_json::Value =
+        serde_json::from_str(body).map_err(|_| RouteError::BadRequest)?;
+
+    let id       = v["id"].as_str().ok_or(RouteError::BadRequest)?;
+    let pubkey   = v["pubkey"].as_str().ok_or(RouteError::BadRequest)?;
+    let kind     = v["kind"].as_i64().ok_or(RouteError::BadRequest)?;
+    let created  = v["created_at"].as_i64().ok_or(RouteError::BadRequest)?;
+    let content  = v["content"].as_str().unwrap_or("");
+    let sig      = v["sig"].as_str().unwrap_or("");
+    let source   = v["source_relay"].as_str();
+
+    // Normalise the tags array into Vec<Vec<String>>.
+    let tags: Vec<Vec<String>> = v["tags"]
+        .as_array()
+        .unwrap_or(&vec![])
+        .iter()
+        .map(|tag| {
+            tag.as_array()
+                .unwrap_or(&vec![])
+                .iter()
+                .map(|f| f.as_str().unwrap_or("").to_string())
+                .collect()
+        })
+        .collect();
+
+    let now = now_ms() as i64;
+    let store = state.inner.lock().expect("event store poisoned");
+    store
+        .upsert_event(id, pubkey, kind, created, content, sig, body, &tags, source, now)
+        .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))
+}
+
+/// GET /events                  — stats (counts)
+/// GET /events/kind/{n}         — latest events of kind n (up to 100)
+/// GET /events/pubkey/{hex}     — latest events from pubkey (up to 100)
+/// GET /events/relay/{url}      — latest events seen on relay (up to 100)
+/// GET /events/id/{hex}         — raw JSON for a single event id
+fn handle_events_get(
+    path: &str,
+    request: &str,
+    state: &Arc<EventStoreState>,
+) -> Result<(Vec<u8>, &'static str), RouteError> {
+    let suffix = path.trim_start_matches("/events").trim_start_matches('/');
+    let limit = query_param(request, "limit")
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(100)
+        .min(1000);
+
+    let store = state.inner.lock().expect("event store poisoned");
+
+    let body: Vec<u8> = if suffix.is_empty() || suffix == "stats" {
+        // Return summary counts.
+        let counts = serde_json::json!({
+            "events": store.event_count().unwrap_or(0),
+            "relays": store.relay_count().unwrap_or(0),
+            "users":  store.user_count().unwrap_or(0),
+        });
+        serde_json::to_vec(&counts)
+            .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))?
+    } else if let Some(rest) = suffix.strip_prefix("kind/") {
+        let kind: i64 = rest.parse().map_err(|_| RouteError::BadRequest)?;
+        let events = store
+            .events_by_kind(kind, limit)
+            .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))?;
+        let parsed: Vec<serde_json::Value> = events
+            .iter()
+            .filter_map(|s| serde_json::from_str(s).ok())
+            .collect();
+        serde_json::to_vec(&parsed)
+            .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))?
+    } else if let Some(rest) = suffix.strip_prefix("pubkey/") {
+        let events = store
+            .events_by_pubkey(rest, limit)
+            .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))?;
+        let parsed: Vec<serde_json::Value> = events
+            .iter()
+            .filter_map(|s| serde_json::from_str(s).ok())
+            .collect();
+        serde_json::to_vec(&parsed)
+            .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))?
+    } else if let Some(rest) = suffix.strip_prefix("relay/") {
+        let relay_url = urlencoding::decode(rest)
+            .map_err(|_| RouteError::BadRequest)?;
+        let events = store
+            .events_for_relay(&relay_url, limit)
+            .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))?;
+        let parsed: Vec<serde_json::Value> = events
+            .iter()
+            .filter_map(|s| serde_json::from_str(s).ok())
+            .collect();
+        serde_json::to_vec(&parsed)
+            .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))?
+    } else if let Some(rest) = suffix.strip_prefix("id/") {
+        match store
+            .get_event_json(rest)
+            .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))?
+        {
+            Some(json) => json.into_bytes(),
+            None => return Err(RouteError::NotFound),
+        }
+    } else {
+        return Err(RouteError::NotFound);
+    };
+
+    Ok((body, "application/json; charset=utf-8"))
 }
 
 async fn handle_nip11_get(
