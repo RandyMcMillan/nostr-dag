@@ -47,7 +47,6 @@
 
   <script type="module">
     import { createLoggerFooter } from '../shared/logger.js';
-    import { createSharedLibp2pStack } from '../shared/libp2p-stack.mjs';
     import { remoteTagNames } from '../shared/git-refs.mjs';
     import { createGitProgressReporter } from '../shared/git-progress.mjs';
     import { initSharedNetworkTime } from '../shared/network-time.mjs';
@@ -129,8 +128,18 @@
     footer.setLevel('none');
     const refreshBtn = document.getElementById('refreshBtn');
 
+    function isSafariMobile() {
+      const ua = globalThis.navigator?.userAgent || '';
+      return /iPhone|iPad|iPod/i.test(ua) && /Safari/i.test(ua) && !/CriOS|FxiOS|EdgiOS/i.test(ua);
+    }
+
     async function initGitP2P() {
       try {
+        if (isSafariMobile()) {
+          footer.log('libp2p', 'skipping libp2p bootstrap on Safari mobile', 'info', 'idle');
+          return;
+        }
+        const { createSharedLibp2pStack } = await import('../shared/libp2p-stack.mjs');
         const { node } = await createSharedLibp2pStack({
           onLog(level, text, state) {
             footer.log('libp2p', text, level, state);
@@ -258,11 +267,11 @@
 
     function escapeHtml(value) {
       return String(value)
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#39;');
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
     }
 
     function renderLatestSummary(text) {
