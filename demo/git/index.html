@@ -49,6 +49,7 @@
     import { createLoggerFooter } from '../shared/logger.js';
     import { remoteTagNames } from '../shared/git-refs.mjs';
     import { createGitProgressReporter } from '../shared/git-progress.mjs';
+    import { cloneWithSingleBranchFallback } from '../shared/git-clone.mjs';
     import { initSharedNetworkTime } from '../shared/network-time.mjs';
     import { resolveHref } from '../shared/page-path.js';
     import git from 'https://cdn.jsdelivr.net/npm/isomorphic-git@1.25.0/+esm';
@@ -747,7 +748,7 @@
           setRepoStatus(repo.name, 'cloning...');
           footer.log('git', `${repo.name} cloning${route ? ` (${progressContextLabel(route)})` : ''}`, 'debug');
           await ensureDir(dir);
-          await git.clone({
+          const cloneOptions = {
             fs,
             http,
             dir,
@@ -761,7 +762,15 @@
                 footer.log('git', message, 'trace');
               }
             },
-          });
+          };
+          await cloneWithSingleBranchFallback(
+            (options) => git.clone(options),
+            cloneOptions,
+            (error) => {
+              footer.log('git', `${repo.name} clone failed with singleBranch=true: ${error.message}`, 'warn');
+              footer.log('git', `${repo.name} retrying clone with singleBranch=false`, 'warn');
+            },
+          );
         } else {
           setRepoStatus(repo.name, 'reusing cached clone...');
           footer.log('git', `${repo.name} reusing cached clone`, 'info');
