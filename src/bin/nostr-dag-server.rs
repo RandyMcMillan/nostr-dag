@@ -296,7 +296,11 @@ async fn handle_connection(
     let body = request_body(&request);
 
     let head_only = method == "HEAD";
-    let response = if method == "POST" && (path == LOGGER_ROUTE_PREFIX || path.starts_with("/logger/")) {
+    // Redirect bare root to /git, which is the default landing page.
+    let response = if (method == "GET" || method == "HEAD") && path == "/" {
+        trace!("redirecting / to /git");
+        response_redirect("/git")
+    } else if method == "POST" && (path == LOGGER_ROUTE_PREFIX || path.starts_with("/logger/")) {
         match handle_logger_post(body, &logger_store) {
             Ok(()) => response_bytes(204, "No Content", Vec::new(), "text/plain; charset=utf-8", true),
             Err(err) => {
@@ -812,6 +816,13 @@ fn content_type_for_path(path: &Path) -> &'static str {
 
 fn response_text(status: u16, reason: &str, body: &str, content_type: &'static str) -> Vec<u8> {
     response_bytes(status, reason, body.as_bytes().to_vec(), content_type, false)
+}
+
+fn response_redirect(location: &str) -> Vec<u8> {
+    format!(
+        "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    )
+    .into_bytes()
 }
 
 fn response_bytes(

@@ -45,6 +45,8 @@ site: wasm
     mkdir -p site/git
     cp demo/git/index.html site/git/index.html
     cp demo/git/blame.html site/git/blame.html
+    mkdir -p site/dag
+    cp demo/index.html site/dag/index.html
     mkdir -p site/bridge
     cp demo/bridge/*.html site/bridge/
 
