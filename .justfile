@@ -36,7 +36,7 @@ wasm: ensure-wasm-target
 
 site: wasm
     mkdir -p site
-    printf '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><meta http-equiv="refresh" content="0; url=./dag/"/><title>nostr-dag</title></head><body><p>Redirecting to <a href="./dag/">dag</a>…</p></body></html>' > site/index.html
+    cp demo/index.html site/index.html
     cp demo/shared/favicon.ico site/favicon.ico
     mkdir -p site/shared
     cp demo/shared/favicon.ico site/shared/favicon.ico
