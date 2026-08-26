@@ -38,6 +38,15 @@ jobs:
       - name: Run tests
         run: cargo test --features native
 
+  js:
+    name: Test (JS / GUI)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run JS tests
+        run: node --test test/*.test.mjs
+
   wasm:
     name: Build (wasm)
     runs-on: ubuntu-latest
