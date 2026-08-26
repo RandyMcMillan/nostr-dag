@@ -296,10 +296,10 @@ async fn handle_connection(
     let body = request_body(&request);
 
     let head_only = method == "HEAD";
-    // Redirect bare root to /git, which is the default landing page.
+    // Redirect bare root to /git/, which is the default landing page.
     let response = if (method == "GET" || method == "HEAD") && path == "/" {
-        trace!("redirecting / to /git");
-        response_redirect("/git")
+        trace!("redirecting / to /git/");
+        response_redirect("/git/")
     } else if method == "POST" && (path == LOGGER_ROUTE_PREFIX || path.starts_with("/logger/")) {
         match handle_logger_post(body, &logger_store) {
             Ok(()) => response_bytes(204, "No Content", Vec::new(), "text/plain; charset=utf-8", true),
@@ -388,6 +388,11 @@ async fn handle_connection(
                 response_text(500, "Internal Server Error", "Internal Server Error", "text/plain; charset=utf-8")
             }
         }
+    } else if (method == "GET" || method == "HEAD") && !path.ends_with('/') && is_site_dir(site_dir, path).await {
+        // Canonicalize directory URLs: /git → /git/, /dag → /dag/, etc.
+        let canonical = format!("{path}/");
+        trace!(%path, %canonical, "redirecting bare directory path to trailing-slash form");
+        response_redirect(&canonical)
     } else {
         match route_path(site_dir, path).await {
             Ok((body, content_type)) => {
@@ -736,6 +741,18 @@ fn is_disconnect_error(err: &io::Error) -> bool {
         err.kind(),
         io::ErrorKind::BrokenPipe | io::ErrorKind::ConnectionReset | io::ErrorKind::UnexpectedEof
     )
+}
+
+async fn is_site_dir(site_dir: &str, path: &str) -> bool {
+    let trimmed = path.trim_start_matches('/');
+    if trimmed.is_empty() {
+        return false; // root is handled separately
+    }
+    let candidate = PathBuf::from(site_dir).join(trimmed);
+    fs::metadata(&candidate)
+        .await
+        .map(|meta| meta.is_dir())
+        .unwrap_or(false)
 }
 
 async fn route_path(site_dir: &str, path: &str) -> Result<(Vec<u8>, &'static str), RouteError> {
