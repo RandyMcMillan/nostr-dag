@@ -24,6 +24,8 @@
 
 /// Gossipsub topic and bridge protocol identifier used by all PIP peers (native and WASM).
 pub const NOSTR_DAG_TOPIC: &str = "nostr-dag-bridge";
+pub const NETWORK_TIME_PROTOCOL: &str = "nostr-dag-network-time";
+pub const NETWORK_TIME_VERSION: u64 = 1;
 
 /// PIP Nostr event kind used for transfer manifests.
 pub const TRANSFER_MANIFEST_KIND: nostr::Kind = nostr::Kind::Custom(39078);
@@ -68,6 +70,91 @@ pub enum TransferError {
     InvalidEnvelope(String),
     #[error("json error: {0}")]
     Json(String),
+}
+
+#[cfg(feature = "p2p")]
+fn native_now_ms() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+#[cfg(all(feature = "p2p-wasm", target_arch = "wasm32"))]
+fn wasm_now_ms() -> i64 {
+    js_sys::Date::now() as i64
+}
+
+#[cfg(feature = "p2p")]
+fn maybe_build_native_time_response(message: &str, local_peer_id: &str) -> Option<String> {
+    let parsed: serde_json::Value = serde_json::from_str(message).ok()?;
+    if parsed.get("protocol")?.as_str()? != NETWORK_TIME_PROTOCOL
+        || parsed.get("version")?.as_u64()? != NETWORK_TIME_VERSION
+        || parsed.get("type")?.as_str()? != "query"
+    {
+        return None;
+    }
+    let request_id = parsed.get("request_id")?.as_str()?.trim().to_string();
+    if request_id.is_empty() {
+        return None;
+    }
+    let requester_peer_id = parsed
+        .get("requester_peer_id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    if !requester_peer_id.trim().is_empty() && requester_peer_id == local_peer_id {
+        return None;
+    }
+    let sent_at_ms = parsed.get("sent_at_ms")?.as_i64()?;
+    serde_json::to_string(&serde_json::json!({
+        "protocol": NETWORK_TIME_PROTOCOL,
+        "version": NETWORK_TIME_VERSION,
+        "type": "response",
+        "request_id": request_id,
+        "requester_peer_id": requester_peer_id,
+        "responder_peer_id": local_peer_id,
+        "sent_at_ms": sent_at_ms,
+        "server_time_ms": native_now_ms(),
+    }))
+    .ok()
+}
+
+#[cfg(all(feature = "p2p-wasm", target_arch = "wasm32"))]
+fn maybe_build_wasm_time_response(message: &str, local_peer_id: &str) -> Option<String> {
+    let parsed: serde_json::Value = serde_json::from_str(message).ok()?;
+    if parsed.get("protocol")?.as_str()? != NETWORK_TIME_PROTOCOL
+        || parsed.get("version")?.as_u64()? != NETWORK_TIME_VERSION
+        || parsed.get("type")?.as_str()? != "query"
+    {
+        return None;
+    }
+    let request_id = parsed.get("request_id")?.as_str()?.trim().to_string();
+    if request_id.is_empty() {
+        return None;
+    }
+    let requester_peer_id = parsed
+        .get("requester_peer_id")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    if !requester_peer_id.trim().is_empty() && requester_peer_id == local_peer_id {
+        return None;
+    }
+    let sent_at_ms = parsed.get("sent_at_ms")?.as_i64()?;
+    serde_json::to_string(&serde_json::json!({
+        "protocol": NETWORK_TIME_PROTOCOL,
+        "version": NETWORK_TIME_VERSION,
+        "type": "response",
+        "request_id": request_id,
+        "requester_peer_id": requester_peer_id,
+        "responder_peer_id": local_peer_id,
+        "sent_at_ms": sent_at_ms,
+        "server_time_ms": wasm_now_ms(),
+    }))
+    .ok()
 }
 
 fn parse_payload_json(event: &nostr::Event) -> Result<serde_json::Value, TransferError> {
@@ -793,7 +880,7 @@ pub mod native {
     use tokio::sync::mpsc;
     use tracing::{debug, info, warn};
 
-    use super::NOSTR_DAG_TOPIC;
+    use super::{NOSTR_DAG_TOPIC, maybe_build_native_time_response};
 
     #[derive(NetworkBehaviour)]
     struct Behaviour {
@@ -877,6 +964,15 @@ pub mod native {
                                     gossipsub::Event::Message { message, .. },
                                 )) => {
                                     if let Ok(text) = String::from_utf8(message.data) {
+                                        if let Some(response) = maybe_build_native_time_response(
+                                            &text,
+                                            &swarm.local_peer_id().to_string(),
+                                        ) {
+                                            let _ = swarm.behaviour_mut().gossipsub.publish(
+                                                IdentTopic::new(NOSTR_DAG_TOPIC),
+                                                response.as_bytes(),
+                                            );
+                                        }
                                         debug!(%text, "gossipsub message received");
                                         let _ = event_tx.send(text).await;
                                     }
@@ -973,7 +1069,7 @@ pub mod wasm_node {
     use wasm_bindgen_futures::spawn_local;
     use web_sys::js_sys::Function;
 
-    use super::NOSTR_DAG_TOPIC;
+    use super::{NOSTR_DAG_TOPIC, maybe_build_wasm_time_response};
 
     #[derive(NetworkBehaviour)]
     struct Behaviour {
@@ -1069,6 +1165,7 @@ pub mod wasm_node {
             .map_err(|e| JsValue::from_str(&format!("subscribe: {e}")))?;
 
         let behaviour = Behaviour { gossipsub };
+        let local_peer_id = local_key.public().to_peer_id().to_string();
 
         let (tx, mut cmd_rx) = fmpsc::channel::<String>(64);
         OUTBOUND_TX.with(|cell| {
@@ -1108,6 +1205,14 @@ pub mod wasm_node {
                     )) = event
                     {
                         if let Ok(text) = String::from_utf8(message.data) {
+                            if let Some(response) =
+                                maybe_build_wasm_time_response(&text, &local_peer_id)
+                            {
+                                let _ = swarm.behaviour_mut().gossipsub.publish(
+                                    IdentTopic::new(NOSTR_DAG_TOPIC),
+                                    response.as_bytes(),
+                                );
+                            }
                             if let Some(cb) = &on_message {
                                 let _ = cb.call1(
                                     &JsValue::NULL,

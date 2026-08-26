@@ -28,9 +28,10 @@
 
   <script type="module">
     import { createSharedHeader } from '../shared/page-header.mjs';
+    import { initSharedNetworkTime } from '../shared/network-time.mjs';
     import { resolveHref } from '../shared/page-path.js';
 
-    createSharedHeader(document.getElementById('sharedHeader'), {
+    window.__sharedHeaderApi = createSharedHeader(document.getElementById('sharedHeader'), {
       title: 'nostr-dag',
       logoHref: resolveHref('../', window.location.href),
       iconHref: resolveHref('../shared/favicon.ico', window.location.href),
@@ -41,6 +42,7 @@
         { label: 'Bridge', href: resolveHref('../bridge/', window.location.href) },
       ],
     });
+    initSharedNetworkTime({ headerApi: window.__sharedHeaderApi });
   </script>
 
   <script type="module">
@@ -48,6 +50,7 @@
     import { createSharedLibp2pStack } from '../shared/libp2p-stack.mjs';
     import { remoteTagNames } from '../shared/git-refs.mjs';
     import { createGitProgressReporter } from '../shared/git-progress.mjs';
+    import { initSharedNetworkTime } from '../shared/network-time.mjs';
     import { resolveHref } from '../shared/page-path.js';
     import git from 'https://cdn.jsdelivr.net/npm/isomorphic-git@1.25.0/+esm';
     import http from 'https://cdn.jsdelivr.net/npm/isomorphic-git@1.25.0/http/web/+esm';
@@ -116,6 +119,7 @@
     const statusEl = document.getElementById('status');
     const reposEl = document.getElementById('repos');
     const repoState = new Map();
+    const networkTime = initSharedNetworkTime();
     const footer = createLoggerFooter(document.getElementById('pageFooter'), {
       title: 'Logger',
       initialState: 'idle',
@@ -137,6 +141,7 @@
           },
         });
         window.__gitViewerP2pNode = node;
+        networkTime.attachNode(node);
         footer.log('libp2p', `node ready: ${node.peerId.toString()}`, 'info', 'available');
       } catch (e) {
         footer.log('libp2p', `bootstrap failed: ${e.message}`, 'error', 'unavailable');

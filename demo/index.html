@@ -98,9 +98,10 @@
 
   <script type="module">
     import { createSharedHeader } from './shared/page-header.mjs';
+    import { initSharedNetworkTime } from './shared/network-time.mjs';
     import { resolveHref } from './shared/page-path.js';
 
-    createSharedHeader(document.getElementById('sharedHeader'), {
+    window.__sharedHeaderApi = createSharedHeader(document.getElementById('sharedHeader'), {
       title: 'nostr-dag',
       logoHref: resolveHref('./', window.location.href),
       iconHref: resolveHref('./shared/favicon.ico', window.location.href),
@@ -111,6 +112,7 @@
         { label: 'Bridge', href: resolveHref('./bridge/', window.location.href) },
       ],
     });
+    initSharedNetworkTime({ headerApi: window.__sharedHeaderApi });
   </script>
 
   <script type="module">
@@ -127,6 +129,7 @@
     import { neventEncode, npubEncode } from 'https://esm.sh/nostr-tools@2.10.4/nip19';
     import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     import { createSharedLibp2pStack, DEFAULT_BOOTSTRAP_PEERS } from './shared/libp2p-stack.mjs';
+    import { getNetworkUnixTime, initSharedNetworkTime } from './shared/network-time.mjs';
     import {
       buildAttestDraft,
       buildIssueDraft,
@@ -179,6 +182,7 @@
     let libp2pPeerId = 'starting...';
     let libp2pModuleCounts = { loaded: 0, failed: 0, total: 0 };
     let activeRepoSequence = null;
+    const networkTime = initSharedNetworkTime();
     const sharedFooterLogBuffer = window.__sharedFooterLogBuffer || [];
     window.__sharedFooterLogBuffer = sharedFooterLogBuffer;
     if (!window.__sharedFooter) {
@@ -416,6 +420,7 @@
           },
         });
         window.__sharedFooter?.log('libp2p', `bootstrap peers ready: ${bootstrapPeers.length}`, 'debug', 'available');
+        networkTime.attachNode(node);
         setLibp2pStatus(node.peerId.toString());
         window.__sharedFooter?.log('libp2p', `started ${node.peerId.toString()}`, 'info', 'available');
       } catch (e) {
@@ -835,7 +840,7 @@
 
       return finalizeEvent({
         kind: 0,
-        created_at: Math.floor(Date.now() / 1000),
+        created_at: getNetworkUnixTime(),
         tags: [],
         content: JSON.stringify(profile),
         pubkey: author.pk,
@@ -872,7 +877,7 @@
       const tags = parentIds.map((id) => ['e', id]);
       const event = {
         kind,
-        created_at: Math.floor(Date.now() / 1000),
+        created_at: getNetworkUnixTime(),
         tags,
         content,
         pubkey: author.pk,
@@ -981,7 +986,7 @@
     async function createNip34SequenceEvents() {
       window.__sharedFooter?.log('demo', 'create NIP-34 sequence events', 'debug', 'checking');
       const [maintainer, stateAuthor, issueAuthor, prAuthor] = participants;
-      const createdAt = Math.floor(Date.now() / 1000);
+      const createdAt = getNetworkUnixTime();
       const repoId = 'nostr-dag-demo';
       const repoRootCommit = await deterministicHex(`${repoId}:root`);
       const mainCommit = await deterministicHex(`${repoId}:main`);
@@ -1064,7 +1069,7 @@
       window.__sharedFooter?.log('demo', 'create quorum sequence events', 'debug', 'checking');
       const [repoAnnouncement, repoState, issue, pullRequest] = repoSequence.protocolEvents;
       const manifestAuthor = participants[participants.length - 1];
-      const createdAt = Math.floor(Date.now() / 1000);
+      const createdAt = getNetworkUnixTime();
       const payloadJson = JSON.stringify({
         repository: {
           repo_id: repoSequence.repoId,

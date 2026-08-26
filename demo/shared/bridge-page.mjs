@@ -4,6 +4,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     import { createSharedHeader } from './page-header.mjs';
     import { resolveHref } from './page-path.js';
     import { createSharedLibp2pStack } from './libp2p-stack.mjs';
+    import { getNetworkUnixTime, initSharedNetworkTime } from './network-time.mjs';
     // Persistent IndexedDB store for all Nostr events and relationships
     // seen by the bridge (events, tags, relays, users, DAG edges, peer acks).
     import { getDagDb } from './dag-db.mjs';
@@ -24,7 +25,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     ];
 
     if (!window.__bridgeChromeInitialized) {
-      createSharedHeader(document.getElementById('sharedHeader'), {
+      window.__sharedHeaderApi = createSharedHeader(document.getElementById('sharedHeader'), {
         title: 'nostr-dag',
         logoHref: resolveHref('../', window.location.href),
         iconHref: resolveHref('../shared/favicon.ico', window.location.href),
@@ -37,6 +38,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       });
       window.__bridgeChromeInitialized = true;
     }
+    const networkTime = initSharedNetworkTime();
 
     const pool = new SimplePool();
     const seen = new Set();
@@ -239,7 +241,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       };
       return finalizeEvent({
         kind: 0,
-        created_at: Math.floor(Date.now() / 1000),
+        created_at: getNetworkUnixTime(),
         tags: [
           ['t', 'nostr-dag'],
           ['t', 'bridge'],
@@ -1171,6 +1173,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
               },
             });
             node = stack.node;
+            networkTime.attachNode(node);
             window.__sharedFooter?.log('bridge', `bridge p2p config ok: ${JSON.stringify(config)}`, 'debug', 'available');
             lastError = null;
             break;

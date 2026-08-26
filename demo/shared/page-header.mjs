@@ -15,6 +15,7 @@ export function createSharedHeader(root, options = {}) {
   if (!root) {
     return {
       render() {},
+      setNetworkTime() {},
     };
   }
 
@@ -32,23 +33,42 @@ export function createSharedHeader(root, options = {}) {
           <a href="${escapeHtml(logoHref)}"><img class="brand-icon" src="${escapeHtml(iconHref)}" alt="" aria-hidden="true" /><span class="logo-text">${escapeHtml(title)}</span></a>
           ${subtitleHtml ? `<div class="muted header-subtitle">${subtitleHtml}</div>` : ''}
         </div>
-        ${navItems.length ? `
-          <ul class="nav-links">
-            ${navItems
-              .map((item) => {
-                const label = escapeHtml(item.label || '');
-                const href = escapeHtml(item.href || '#');
-                const current = item.current ? ' aria-current="page"' : '';
-                return `<li><a class="nav-link${item.current ? ' current' : ''}" href="${href}"${current}>${label}</a></li>`;
-              })
-              .join('')}
-          </ul>
-        ` : ''}
+        <div class="header-actions">
+          <div class="header-network-time status-checking" data-network-time role="status" aria-live="polite" title="Network time syncing">
+            <span class="header-network-label">Network time</span>
+            <span class="header-network-value" data-network-time-value>syncing…</span>
+          </div>
+          ${navItems.length ? `
+            <ul class="nav-links">
+              ${navItems
+                .map((item) => {
+                  const label = escapeHtml(item.label || '');
+                  const href = escapeHtml(item.href || '#');
+                  const current = item.current ? ' aria-current="page"' : '';
+                  return `<li><a class="nav-link${item.current ? ' current' : ''}" href="${href}"${current}>${label}</a></li>`;
+                })
+                .join('')}
+            </ul>
+          ` : ''}
+        </div>
       </nav>
     </div>
   `;
 
+  const networkTimeEl = typeof root.querySelector === 'function'
+    ? root.querySelector('[data-network-time]')
+    : null;
+  const networkTimeValueEl = typeof root.querySelector === 'function'
+    ? root.querySelector('[data-network-time-value]')
+    : null;
+
   return {
     render() {},
+    setNetworkTime({ text = 'syncing…', title = 'Network time syncing', state = 'checking' } = {}) {
+      if (!networkTimeEl || !networkTimeValueEl) return;
+      networkTimeEl.className = `header-network-time status-${state}`;
+      networkTimeEl.title = title;
+      networkTimeValueEl.textContent = text;
+    },
   };
 }
