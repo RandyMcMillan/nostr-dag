@@ -265,8 +265,22 @@ function renderLogEntryHtml(entry) {
   `;
 }
 
+// Detect Safari on iOS/iPadOS (Safari mobile). The logger renders large amounts
+// of DOM and uses requestAnimationFrame-based batching that can degrade or crash
+// on low-memory Safari mobile environments, so we disable it entirely there.
+function isSafariMobile() {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  // iOS/iPadOS WebKit: contains "iPhone" or "iPad" (or "iPod"), and "Safari".
+  // Also catches iPadOS in desktop-mode via maxTouchPoints check.
+  const isIOS = /iphone|ipad|ipod/i.test(ua);
+  const isIPadOS = /macintosh/i.test(ua) && navigator.maxTouchPoints > 1;
+  return isIOS || isIPadOS;
+}
+
 export function createLoggerFooter(root, options = {}) {
-  if (!root) {
+  // Disable logger on Safari mobile to avoid memory/rendering issues.
+  if (!root || isSafariMobile()) {
     return {
       log() {},
       setState() {},
