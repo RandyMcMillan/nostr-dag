@@ -147,6 +147,7 @@
       sha256Hex,
       utf8Bytes,
     } from '../shared/nip34-quorum.mjs';
+    import { createDagActionContext, wireButtons } from './dag-actions.mjs';
 
     const wasmModuleUrl = new URL('../pkg/nostr_dag.js', window.location.href).href;
     const wasmBinaryUrl = new URL('../pkg/nostr_dag_bg.wasm', window.location.href).href;
@@ -829,19 +830,34 @@
     }
 
     // Step 19: reset the DAG model and repopulate the local UI state.
+    // Implementation lives in dag-actions.mjs (resetDag); delegated via dagCtx.
+    function getDagCtx() {
+      return createDagActionContext({
+        state: {
+          get dag() { return dag; },
+          set dag(v) { dag = v; },
+          get participants() { return participants; },
+          get events() { return events; },
+          get njumpAvailability() { return njumpAvailability; },
+          get activeRepoSequence() { return activeRepoSequence; },
+          set activeRepoSequence(v) { activeRepoSequence = v; },
+        },
+        WasmDag,
+        ensureDagBootReady,
+        initParticipants,
+        publishProfiles,
+        publishEvents,
+        render,
+        setStatus,
+        createNip34SequenceEvents,
+        createQuorumSequenceEvents,
+        log: window.__sharedFooter,
+      });
+    }
+
     async function resetDag(options = {}) {
-      if (!options.skipReadyCheck) {
-        await ensureDagBootReady();
-      }
-      window.__sharedFooter?.log('demo', 'resetting DAG', 'debug', 'checking');
-      await initParticipants();
-      dag = new WasmDag(JSON.stringify(participants.map((p) => p.pk)));
-      events.clear();
-      njumpAvailability.clear();
-      activeRepoSequence = null;
-      render();
-      setStatus('WASM loaded. DAG reset with 5 participants.', true);
-      await publishProfiles();
+      const { resetDag: _resetDag } = await import('./dag-actions.mjs');
+      return _resetDag(getDagCtx(), options);
     }
 
     function buildMetadataEvent(author, quorumEventId = author.quorumId) {
@@ -1188,36 +1204,13 @@
     }
 
     async function seedGenesis() {
-      try {
-        await ensureDagBootReady();
-        window.__sharedFooter?.log('demo', 'NIP-34 broadcast requested', 'debug', 'checking');
-        activeRepoSequence = await createNip34SequenceEvents();
-        render();
-        await publishEvents(activeRepoSequence.protocolEvents, 'NIP-34 repository sequence');
-      } catch (e) {
-        setStatus(`NIP-34 broadcast failed: ${e.message}`, false);
-      }
+      const { seedGenesis: _seedGenesis } = await import('./dag-actions.mjs');
+      return _seedGenesis(getDagCtx());
     }
 
     async function runAckRound() {
-      try {
-        await ensureDagBootReady();
-        window.__sharedFooter?.log('demo', 'quorum sequence requested', 'debug', 'checking');
-        if (!activeRepoSequence) {
-          activeRepoSequence = await createNip34SequenceEvents();
-          await publishEvents(activeRepoSequence.protocolEvents, 'NIP-34 repository sequence');
-        }
-        const quorumSequence = await createQuorumSequenceEvents(activeRepoSequence);
-        render();
-        await publishEvents([
-          quorumSequence.manifestEvent,
-          ...quorumSequence.sliceEvents,
-          ...quorumSequence.attestationEvents,
-          quorumSequence.sealEvent,
-        ], 'PIP quorum sequence');
-      } catch (e) {
-        setStatus(`Quorum sequence failed: ${e.message}`, false);
-      }
+      const { runAckRound: _runAckRound } = await import('./dag-actions.mjs');
+      return _runAckRound(getDagCtx());
     }
 
     // Step 23: publish the bootstrap quorum metadata and make it canonical.
