@@ -718,12 +718,22 @@ button:hover, a.button:hover { background:var(--button-hover); }
       .grid { grid-template-columns:1fr; }
       .header-container { padding:0.9rem 1rem; }
     }
+    /* .form-row: label + control pair that stacks vertically on mobile */
+    .form-row { display:flex; flex-direction:column; gap:4px; margin-bottom:8px; }
+    .form-row label { font-size:12px; color:var(--muted); font-weight:600; letter-spacing:.04em; text-transform:uppercase; }
+    .form-row input, .form-row select { width:100%; }
     @media (max-width: 640px) {
       .header-container { gap:.75rem; padding:.85rem 1rem; }
       .nav-links { gap:.4rem; width:max-content; flex-wrap:nowrap; flex-shrink:0; white-space:nowrap; }
       .panel { padding:12px; }
       .row { gap:8px; }
       button, input, select { width:100%; }
+      /* New Event form: full-width stacked fields on small screens */
+      #createForm .form-row { margin-bottom:10px; }
+      #createForm button[type="submit"] { width:100%; margin-top:4px; }
+      /* State panel: wrap long hashes and scroll overflow */
+      #stateList { word-break:break-all; overflow-x:hidden; }
+      #events .event { word-break:break-all; overflow-x:hidden; }
     }
     
 /* END extracted from demo/index.html */

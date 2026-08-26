@@ -32,8 +32,9 @@
     <!-- Step 3: create new events and inspect the current DAG state. -->
     <form class="panel" id="createForm">
       <h3>New Event</h3>
-      <div class="row" style="margin-bottom:8px;">
-        <label>Author</label>
+      <!-- form-row: label stacks above its control for mobile legibility -->
+      <div class="form-row">
+        <label for="author">Author</label>
         <select id="author"></select>
       </div>
 
@@ -50,8 +51,9 @@
           <div id="profileModalBody" style="margin-top:12px;"></div>
         </div>
       </div>
-      <div class="row" style="margin-bottom:8px;">
-        <label>Kind</label>
+      <!-- form-row: label stacks above kind selector on mobile -->
+      <div class="form-row">
+        <label for="kind">Kind</label>
         <select id="kind">
           <option value="21000" selected>21000 (ack)</option>
           <option value="0">0 (metadata)</option>
@@ -67,20 +69,24 @@
           <option value="39081">39081 (quorum seal)</option>
         </select>
       </div>
-      <div class="row" style="margin-bottom:8px;">
-        <label>Content</label>
-        <input id="content" placeholder="optional content" style="flex:1;" />
+      <!-- form-row: content field fills width on all breakpoints -->
+      <div class="form-row">
+        <label for="content">Content</label>
+        <input id="content" placeholder="optional content" />
       </div>
-      <div class="row" style="margin-bottom:8px;">
-        <label>Parents</label>
+      <!-- form-row: parents mode selector -->
+      <div class="form-row">
+        <label for="parentsMode">Parents</label>
         <select id="parentsMode">
           <option value="tips">Current tips</option>
           <option value="none">No parents (genesis)</option>
           <option value="custom">Custom IDs</option>
         </select>
       </div>
-      <div class="row">
-        <input id="customParents" class="mono" style="flex:1;" placeholder="comma-separated event IDs" />
+      <!-- form-row: custom parent IDs; full-width mono input -->
+      <div class="form-row">
+        <label for="customParents">Custom Parent IDs</label>
+        <input id="customParents" class="mono" placeholder="comma-separated event IDs" />
       </div>
       <div class="row" style="margin-top:10px;">
         <button id="createBtn" type="submit">Create Event</button>
@@ -89,8 +95,10 @@
 
     <div class="panel">
       <h3>State</h3>
-      <ul id="stateList" class="small muted" style="margin:8px 0; padding-left:18px;"></ul>
-      <div id="events"></div>
+      <!-- stateList: overflow-x hidden + word-break for long event IDs on mobile -->
+      <ul id="stateList" class="small muted" style="margin:8px 0; padding-left:18px; overflow-x:hidden; word-break:break-all;"></ul>
+      <!-- events: constrain width and break long hashes on mobile -->
+      <div id="events" style="overflow-x:hidden;"></div>
     </div>
   </div>
 
