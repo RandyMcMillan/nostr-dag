@@ -31,7 +31,6 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         iconHref: resolveHref('../shared/favicon.ico', window.location.href),
         subtitleHtml: '',
         navItems: [
-          { label: 'Demo', href: resolveHref('../', window.location.href) },
           { label: 'Git viewer', href: resolveHref('../git/', window.location.href) },
           { label: 'Bridge', href: resolveHref('./', window.location.href), current: true },
         ],
