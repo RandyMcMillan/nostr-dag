@@ -281,12 +281,23 @@ function isSafariMobile() {
 export function createLoggerFooter(root, options = {}) {
   // Disable logger on Safari mobile to avoid memory/rendering issues.
   if (!root || isSafariMobile()) {
+    // Keep API parity with the full footer implementation.
+    // Git viewer pages call footer.setLevel('none') unconditionally at startup,
+    // so the Safari/no-root stub must expose setLevel/getLevel to avoid crashes.
+    let level = normalizeLevel(options.initialLevel || 'none');
     return {
       log() {},
       setState() {},
+      setLevel(nextLevel) {
+        level = normalizeLevel(nextLevel);
+      },
+      getLevel() {
+        return level;
+      },
       open() {},
       close() {},
       toggle() {},
+      destroy() {},
       getMetrics() {
         return {
           queueDepth: 0,
