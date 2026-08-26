@@ -65,6 +65,9 @@ jobs:
       - name: Build wasm package
         run: wasm-pack build --target web --no-default-features --features wasm
 
+      - name: Test wasm JS contracts
+        run: node --test test/git-wasm.test.mjs test/p2p-wasm.test.mjs
+
       - name: Copy shared CSS for site assets
         run: |
           mkdir -p site/shared
