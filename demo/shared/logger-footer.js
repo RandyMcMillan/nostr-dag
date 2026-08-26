@@ -22,6 +22,28 @@ const STORAGE_PREFIX = 'nostr-dag.logger-footer';
 const LOGGER_INGEST_PATH = '/logger';
 const FOOTER_SPACER_VAR = '--sticky-footer-space';
 const SCROLLBAR_ACTIVE_CLASS = 'scrollbars-active';
+const LEVEL_PRIORITY = {
+  none: -1,
+  trace: 0,
+  debug: 1,
+  info: 2,
+  warn: 3,
+  error: 4,
+};
+const LEVEL_QUOTA_WEIGHTS = {
+  trace: 0.1,
+  debug: 0.2,
+  info: 0.35,
+  warn: 0.2,
+  error: 0.15,
+};
+const QUEUE_LEVEL_CAP_WEIGHTS = {
+  trace: 0.15,
+  debug: 0.35,
+  info: 0.45,
+  warn: 0.35,
+  error: 0.35,
+};
 
 function normalizeLevel(value) {
   const level = String(value || 'info').toLowerCase();
@@ -154,6 +176,95 @@ function dispatchWindowResize() {
   }
 }
 
+function nowMs() {
+  return globalThis.performance?.now?.() ?? Date.now();
+}
+
+function stringifyLogText(value) {
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function createFormatterWorker() {
+  if (typeof globalThis.Worker !== 'function' || typeof globalThis.Blob !== 'function') return null;
+  if (!globalThis.URL?.createObjectURL) return null;
+
+  const source = `
+self.onmessage = (event) => {
+  const data = event?.data || {};
+  const id = data.id;
+  const records = Array.isArray(data.records) ? data.records : [];
+  const formatted = records.map((record) => {
+    let text = '';
+    try {
+      text = typeof record.text === 'string' ? record.text : JSON.stringify(record.text);
+    } catch {
+      text = String(record.text);
+    }
+    return {
+      timestamp: Number.isFinite(record.timestamp) ? record.timestamp : Date.now(),
+      label: record.label || '',
+      level: record.level || 'info',
+      state: record.state || 'idle',
+      text,
+      repeats: Number.isFinite(record.repeats) && record.repeats > 1 ? record.repeats : 1,
+      source: record.source || 'browser',
+    };
+  });
+  self.postMessage({ id, records: formatted });
+};
+`;
+
+  try {
+    const blob = new Blob([source], { type: 'text/javascript' });
+    const url = globalThis.URL.createObjectURL(blob);
+    const worker = new globalThis.Worker(url);
+    globalThis.URL.revokeObjectURL(url);
+    return worker;
+  } catch {
+    return null;
+  }
+}
+
+function createLevelQuotaMap(maxEntries) {
+  const minPerLevel = Math.min(20, Math.max(2, Math.floor(maxEntries * 0.02)));
+  return {
+    trace: Math.max(minPerLevel, Math.floor(maxEntries * LEVEL_QUOTA_WEIGHTS.trace)),
+    debug: Math.max(minPerLevel, Math.floor(maxEntries * LEVEL_QUOTA_WEIGHTS.debug)),
+    info: Math.max(minPerLevel, Math.floor(maxEntries * LEVEL_QUOTA_WEIGHTS.info)),
+    warn: Math.max(minPerLevel, Math.floor(maxEntries * LEVEL_QUOTA_WEIGHTS.warn)),
+    error: Math.max(minPerLevel, Math.floor(maxEntries * LEVEL_QUOTA_WEIGHTS.error)),
+  };
+}
+
+function createQueueLevelCapMap(queueCapacity) {
+  const minPerLevel = Math.min(8, Math.max(2, Math.floor(queueCapacity * 0.01)));
+  return {
+    trace: Math.max(minPerLevel, Math.floor(queueCapacity * QUEUE_LEVEL_CAP_WEIGHTS.trace)),
+    debug: Math.max(minPerLevel, Math.floor(queueCapacity * QUEUE_LEVEL_CAP_WEIGHTS.debug)),
+    info: Math.max(minPerLevel, Math.floor(queueCapacity * QUEUE_LEVEL_CAP_WEIGHTS.info)),
+    warn: Math.max(minPerLevel, Math.floor(queueCapacity * QUEUE_LEVEL_CAP_WEIGHTS.warn)),
+    error: Math.max(minPerLevel, Math.floor(queueCapacity * QUEUE_LEVEL_CAP_WEIGHTS.error)),
+  };
+}
+
+function levelPriority(level) {
+  return LEVEL_PRIORITY[level] ?? LEVEL_PRIORITY.info;
+}
+
+function renderLogEntryHtml(entry) {
+  return `
+    <div class="footer-log-item">
+      <span class="footer-log-time mono">${escapeHtml(entry.time)}</span>
+      <span>${entry.label ? `${escapeHtml(entry.label)}: ` : ''}${escapeHtml(entry.text)}</span>
+    </div>
+  `;
+}
+
 export function createLoggerFooter(root, options = {}) {
   if (!root) {
     return {
@@ -162,6 +273,19 @@ export function createLoggerFooter(root, options = {}) {
       open() {},
       close() {},
       toggle() {},
+      getMetrics() {
+        return {
+          queueDepth: 0,
+          queuePeakDepth: 0,
+          dropped: 0,
+          droppedByLevel: {},
+          coalesced: 0,
+          rateLimited: 0,
+          flushedEntries: 0,
+          flushCount: 0,
+          avgFlushMs: 0,
+        };
+      },
     };
   }
 
@@ -169,6 +293,30 @@ export function createLoggerFooter(root, options = {}) {
   const initialState = options.initialState || 'idle';
   const initialTitle = options.initialTitle || 'starting...';
   const maxEntries = Number.isFinite(options.maxEntries) && options.maxEntries > 0 ? options.maxEntries : 1000;
+  const maxVisibleEntries = Number.isFinite(options.maxVisibleEntries) && options.maxVisibleEntries > 0
+    ? options.maxVisibleEntries
+    : 300;
+  const queueCapacity = Number.isFinite(options.queueCapacity) && options.queueCapacity > 0
+    ? options.queueCapacity
+    : Math.max(256, maxEntries * 2);
+  const flushBatchLimit = Number.isFinite(options.flushBatchLimit) && options.flushBatchLimit > 0
+    ? options.flushBatchLimit
+    : 64;
+  const flushBudgetMs = Number.isFinite(options.flushBudgetMs) && options.flushBudgetMs > 0
+    ? options.flushBudgetMs
+    : 4;
+  const coalesceWindowMs = Number.isFinite(options.coalesceWindowMs) && options.coalesceWindowMs >= 0
+    ? options.coalesceWindowMs
+    : 180;
+  const rateLimitWindowMs = Number.isFinite(options.rateLimitWindowMs) && options.rateLimitWindowMs > 0
+    ? options.rateLimitWindowMs
+    : 1000;
+  const rateLimitPerKey = Number.isFinite(options.rateLimitPerKey) && options.rateLimitPerKey > 0
+    ? options.rateLimitPerKey
+    : 30;
+
+  const levelQuotas = createLevelQuotaMap(maxEntries);
+  const queueLevelCaps = createQueueLevelCapMap(queueCapacity);
   const storageKey = resolveStorageKey(title, options.storageKey);
   const persisted = loadPersistedFooterState(storageKey);
 
@@ -206,7 +354,41 @@ export function createLoggerFooter(root, options = {}) {
   const copyEl = root.querySelector('[data-footer-copy]');
   const levelEl = root.querySelector('[data-footer-level]');
   const logEl = root.querySelector('[data-footer-log]');
+
   const logs = [];
+  const logLevelCounts = {
+    info: 0,
+    debug: 0,
+    trace: 0,
+    warn: 0,
+    error: 0,
+  };
+  const queue = [];
+  const queueLevelCounts = {
+    info: 0,
+    debug: 0,
+    trace: 0,
+    warn: 0,
+    error: 0,
+  };
+  const droppedByLevel = {
+    info: 0,
+    debug: 0,
+    trace: 0,
+    warn: 0,
+    error: 0,
+  };
+  const metrics = {
+    queuePeakDepth: 0,
+    dropped: 0,
+    coalesced: 0,
+    rateLimited: 0,
+    flushedEntries: 0,
+    flushCount: 0,
+    totalFlushMs: 0,
+  };
+  const rateLimitState = new Map();
+
   let open = persisted?.open ?? false;
   let level = persisted?.level ?? normalizeLevel(options.initialLevel || 'none');
   let autoScroll = true;
@@ -215,6 +397,14 @@ export function createLoggerFooter(root, options = {}) {
   let scrollbarTimer = null;
   let scrollbarListenersBound = false;
   let renderScheduled = false;
+  let flushScheduled = false;
+  let flushing = false;
+  let renderedLevel = null;
+  let renderedItemCount = 0;
+  let placeholderShown = false;
+  let formatterWorker = options.enableWorkerFormatting === false ? null : createFormatterWorker();
+  let formatterWorkerBusy = false;
+  let formatterWorkerJobId = 0;
 
   function persistState() {
     savePersistedFooterState(storageKey, { open, level });
@@ -304,21 +494,161 @@ export function createLoggerFooter(root, options = {}) {
     });
   }
 
+  function computeQueuePressure() {
+    return queueCapacity > 0 ? queue.length / queueCapacity : 0;
+  }
+
+  function getDynamicFlushBudgetMs() {
+    const pressure = computeQueuePressure();
+    if (pressure >= 0.9) return Math.max(1, Math.floor(flushBudgetMs * 0.35));
+    if (pressure >= 0.75) return Math.max(1, Math.floor(flushBudgetMs * 0.5));
+    if (pressure >= 0.5) return Math.max(1, Math.floor(flushBudgetMs * 0.75));
+    return flushBudgetMs;
+  }
+
+  function getDynamicFlushBatchLimit() {
+    const pressure = computeQueuePressure();
+    if (pressure >= 0.9) return Math.max(12, Math.floor(flushBatchLimit * 0.35));
+    if (pressure >= 0.75) return Math.max(16, Math.floor(flushBatchLimit * 0.5));
+    if (pressure >= 0.5) return Math.max(24, Math.floor(flushBatchLimit * 0.75));
+    return flushBatchLimit;
+  }
+
+  function normalizeWorkerOrRawRecord(record) {
+    const repeats = Number.isFinite(record.repeats) && record.repeats > 1 ? record.repeats : 1;
+    const baseText = stringifyLogText(record.text);
+    const text = repeats > 1 ? `${baseText} (x${repeats})` : baseText;
+    return {
+      time: new Date(Number.isFinite(record.timestamp) ? record.timestamp : Date.now()).toLocaleTimeString(),
+      label: record.label || '',
+      text,
+      level: normalizeLevel(record.level),
+      state: normalizeState(record.state || text),
+      source: record.source || 'browser',
+    };
+  }
+
+  function removeOldestLogByLevel(targetLevel) {
+    const index = logs.findIndex((entry) => entry.level === targetLevel);
+    if (index < 0) return false;
+    const [removed] = logs.splice(index, 1);
+    if (removed?.level && logLevelCounts[removed.level] > 0) {
+      logLevelCounts[removed.level] -= 1;
+    }
+    return true;
+  }
+
+  function appendAcceptedLog(entry) {
+    logs.push(entry);
+    if (logLevelCounts[entry.level] !== undefined) {
+      logLevelCounts[entry.level] += 1;
+    }
+
+    while (logs.length > maxEntries) {
+      const removed = logs.shift();
+      if (removed?.level && logLevelCounts[removed.level] > 0) {
+        logLevelCounts[removed.level] -= 1;
+      }
+    }
+
+    const quota = levelQuotas[entry.level] ?? maxEntries;
+    while (logLevelCounts[entry.level] > quota) {
+      if (!removeOldestLogByLevel(entry.level)) break;
+    }
+  }
+
+  function getLogsForLevel(nextLevel, limit = maxVisibleEntries) {
+    if (nextLevel === 'none') return [];
+    const out = [];
+    for (let i = logs.length - 1; i >= 0; i -= 1) {
+      const entry = logs[i];
+      if (entry.level !== nextLevel) continue;
+      out.push(entry);
+      if (out.length >= limit) break;
+    }
+    out.reverse();
+    return out;
+  }
+
+  function renderPlaceholder() {
+    logEl.innerHTML = '<div class="muted">No log entries yet.</div>';
+    placeholderShown = true;
+    renderedItemCount = 0;
+  }
+
+  function rebuildVisibleLogView() {
+    renderedLevel = level;
+    if (!open || level === 'none') {
+      logEl.innerHTML = '';
+      placeholderShown = false;
+      renderedItemCount = 0;
+      return;
+    }
+
+    const visibleLogs = getLogsForLevel(level, maxVisibleEntries);
+    if (!visibleLogs.length) {
+      renderPlaceholder();
+      return;
+    }
+
+    logEl.innerHTML = visibleLogs.map((entry) => renderLogEntryHtml(entry)).join('');
+    placeholderShown = false;
+    renderedItemCount = visibleLogs.length;
+    scheduleScrollBottom();
+  }
+
+  function maybeTrimVisibleHead() {
+    if (renderedItemCount <= maxVisibleEntries) return;
+    let toTrim = renderedItemCount - maxVisibleEntries;
+
+    if (typeof logEl.removeChild === 'function' && logEl.firstElementChild) {
+      while (toTrim > 0 && logEl.firstElementChild) {
+        logEl.removeChild(logEl.firstElementChild);
+        toTrim -= 1;
+        renderedItemCount -= 1;
+      }
+      if (toTrim <= 0) return;
+    }
+
+    rebuildVisibleLogView();
+  }
+
+  function appendEntriesToVisibleLog(entries) {
+    if (!open || level === 'none' || !entries.length) return;
+    if (renderedLevel !== level) {
+      rebuildVisibleLogView();
+      return;
+    }
+
+    const matches = entries.filter((entry) => entry.level === level);
+    if (!matches.length) return;
+
+    if (placeholderShown) {
+      logEl.innerHTML = '';
+      placeholderShown = false;
+      renderedItemCount = 0;
+    }
+
+    const html = matches.map((entry) => renderLogEntryHtml(entry)).join('');
+    if (typeof logEl.insertAdjacentHTML === 'function') {
+      logEl.insertAdjacentHTML('beforeend', html);
+    } else {
+      logEl.innerHTML += html;
+    }
+
+    renderedItemCount += matches.length;
+    maybeTrimVisibleHead();
+    scheduleScrollBottom();
+    syncFooterSpacer();
+    if (open) showScrollbars();
+  }
+
   function render() {
     renderScheduled = false;
     toggleEl.setAttribute('aria-expanded', open ? 'true' : 'false');
     renderLevelPills();
     logEl.hidden = !open;
-    const visibleLogs = level === 'none' ? [] : logs.filter((entry) => entry.level === level);
-    logEl.innerHTML = visibleLogs.length
-      ? visibleLogs.map((entry) => `
-        <div class="footer-log-item">
-          <span class="footer-log-time mono">${escapeHtml(entry.time)}</span>
-          <span>${entry.label ? `${escapeHtml(entry.label)}: ` : ''}${escapeHtml(entry.text)}</span>
-        </div>
-      `).join('')
-      : '<div class="muted">No log entries yet.</div>';
-    scheduleScrollBottom();
+    rebuildVisibleLogView();
     syncFooterSpacer();
     if (open) showScrollbars();
   }
@@ -366,22 +696,215 @@ export function createLoggerFooter(root, options = {}) {
     statusEl.title = text || initialTitle;
   }
 
+  function incrementDropped(levelName) {
+    metrics.dropped += 1;
+    if (droppedByLevel[levelName] !== undefined) {
+      droppedByLevel[levelName] += 1;
+    }
+  }
+
+  function dequeueRecordAt(index) {
+    const [record] = queue.splice(index, 1);
+    if (!record) return null;
+    if (queueLevelCounts[record.level] > 0) queueLevelCounts[record.level] -= 1;
+    return record;
+  }
+
+  function tryEvictForIncoming(incomingLevel) {
+    const incomingPriority = levelPriority(incomingLevel);
+
+    for (let i = 0; i < queue.length; i += 1) {
+      const candidate = queue[i];
+      if (levelPriority(candidate.level) < incomingPriority) {
+        const removed = dequeueRecordAt(i);
+        if (removed) incrementDropped(removed.level);
+        return true;
+      }
+    }
+
+    if (incomingPriority <= LEVEL_PRIORITY.debug) {
+      incrementDropped(incomingLevel);
+      return false;
+    }
+
+    const removed = dequeueRecordAt(0);
+    if (removed) incrementDropped(removed.level);
+    return !!removed;
+  }
+
+  function isRateLimited(raw) {
+    if (raw.level !== 'trace' && raw.level !== 'debug') return false;
+    const key = `${raw.level}:${raw.label}`;
+    const ts = raw.timestamp;
+    const slot = rateLimitState.get(key);
+    if (!slot || (ts - slot.windowStart) >= rateLimitWindowMs) {
+      rateLimitState.set(key, { windowStart: ts, count: 1 });
+      return false;
+    }
+    slot.count += 1;
+    if (slot.count <= rateLimitPerKey) return false;
+    metrics.rateLimited += 1;
+    incrementDropped(raw.level);
+    return true;
+  }
+
+  function enqueueRawRecord(raw) {
+    if (isRateLimited(raw)) return false;
+
+    const capForLevel = queueLevelCaps[raw.level] ?? queueCapacity;
+    if ((queueLevelCounts[raw.level] ?? 0) >= capForLevel) {
+      if (!tryEvictForIncoming(raw.level)) return false;
+    }
+
+    while (queue.length >= queueCapacity) {
+      if (!tryEvictForIncoming(raw.level)) return false;
+    }
+
+    const last = queue[queue.length - 1];
+    if (
+      last &&
+      last.level === raw.level &&
+      last.label === raw.label &&
+      last.text === raw.text &&
+      (raw.timestamp - last.timestamp) <= coalesceWindowMs
+    ) {
+      last.repeats += 1;
+      last.timestamp = raw.timestamp;
+      metrics.coalesced += 1;
+      return true;
+    }
+
+    queue.push(raw);
+    queueLevelCounts[raw.level] += 1;
+    if (queue.length > metrics.queuePeakDepth) {
+      metrics.queuePeakDepth = queue.length;
+    }
+    return true;
+  }
+
+  function takeBatch(limit) {
+    const batch = [];
+    while (batch.length < limit && queue.length > 0) {
+      const record = dequeueRecordAt(0);
+      if (record) batch.push(record);
+    }
+    return batch;
+  }
+
+  function commitBatch(entries) {
+    if (!entries.length) return;
+
+    let lastState = null;
+    let lastTitle = null;
+
+    for (const entry of entries) {
+      appendAcceptedLog(entry);
+      mirrorLogEntry(entry);
+      lastState = entry.state;
+      lastTitle = entry.label ? `${entry.label}: ${entry.text}` : String(entry.text);
+    }
+
+    metrics.flushedEntries += entries.length;
+    if (lastState !== null) {
+      setState(lastState, lastTitle);
+    }
+
+    appendEntriesToVisibleLog(entries);
+  }
+
+  function handleWorkerMessage(event) {
+    const data = event?.data || {};
+    if (data.id !== formatterWorkerJobId) return;
+    formatterWorkerBusy = false;
+
+    const records = Array.isArray(data.records)
+      ? data.records.map((record) => normalizeWorkerOrRawRecord(record))
+      : [];
+
+    const start = nowMs();
+    commitBatch(records);
+    const elapsed = Math.max(0, nowMs() - start);
+    metrics.flushCount += 1;
+    metrics.totalFlushMs += elapsed;
+
+    if (queue.length > 0) scheduleFlush();
+  }
+
+  function handleWorkerError() {
+    formatterWorkerBusy = false;
+    formatterWorker?.terminate?.();
+    formatterWorker = null;
+    if (queue.length > 0) scheduleFlush();
+  }
+
+  if (formatterWorker) {
+    formatterWorker.addEventListener('message', handleWorkerMessage);
+    formatterWorker.addEventListener('error', handleWorkerError);
+  }
+
+  function flushQueue() {
+    flushScheduled = false;
+    if (flushing || formatterWorkerBusy) return;
+    flushing = true;
+
+    const start = nowMs();
+    const budgetMs = getDynamicFlushBudgetMs();
+    const batchLimit = getDynamicFlushBatchLimit();
+
+    if (formatterWorker && queue.length >= Math.max(24, batchLimit) && !formatterWorkerBusy) {
+      const batch = takeBatch(Math.min(Math.max(batchLimit, 24), 256));
+      formatterWorkerBusy = true;
+      formatterWorkerJobId += 1;
+      formatterWorker.postMessage({ id: formatterWorkerJobId, records: batch });
+      flushing = false;
+      return;
+    }
+
+    const staged = [];
+    while (queue.length > 0 && staged.length < batchLimit) {
+      if ((nowMs() - start) >= budgetMs) break;
+      const raw = dequeueRecordAt(0);
+      if (!raw) continue;
+      staged.push(normalizeWorkerOrRawRecord(raw));
+    }
+
+    commitBatch(staged);
+
+    const elapsed = Math.max(0, nowMs() - start);
+    metrics.flushCount += 1;
+    metrics.totalFlushMs += elapsed;
+
+    flushing = false;
+    if (queue.length > 0) scheduleFlush();
+  }
+
+  function scheduleFlush() {
+    if (flushScheduled || formatterWorkerBusy) return;
+    flushScheduled = true;
+    const run = () => flushQueue();
+    if (typeof globalThis.requestAnimationFrame === 'function') {
+      globalThis.requestAnimationFrame(run);
+    } else {
+      setTimeout(run, 0);
+    }
+  }
+
   function log(label, text, levelOrState = 'info', maybeState = null) {
     const { level: providedLevel, state } = parseLogArgs(levelOrState, maybeState);
     const nextLevel = providedLevel || deriveLevelFromState(state);
-    const entry = {
-      time: new Date().toLocaleTimeString(),
+    const stateValue = normalizeState(state || text);
+
+    const accepted = enqueueRawRecord({
+      timestamp: Date.now(),
       label: label || '',
-      text: String(text),
+      text,
       level: nextLevel,
-      state: normalizeState(state || text),
+      state: stateValue,
       source: 'browser',
-    };
-    logs.push(entry);
-    while (logs.length > maxEntries) logs.shift();
-    setState(entry.state, label ? `${label}: ${text}` : String(text));
-    mirrorLogEntry(entry);
-    scheduleRender();
+      repeats: 1,
+    });
+
+    if (accepted) scheduleFlush();
   }
 
   toggleEl.addEventListener('click', () => {
@@ -407,13 +930,25 @@ export function createLoggerFooter(root, options = {}) {
     setState,
     setLevel(nextLevel) {
       level = normalizeLevel(nextLevel);
-      // Show the log panel as soon as the user picks a real level; hide it again for `none`.
       open = level !== 'none';
       persistState();
       render();
     },
     getLevel() {
       return level;
+    },
+    getMetrics() {
+      return {
+        queueDepth: queue.length,
+        queuePeakDepth: metrics.queuePeakDepth,
+        dropped: metrics.dropped,
+        droppedByLevel: { ...droppedByLevel },
+        coalesced: metrics.coalesced,
+        rateLimited: metrics.rateLimited,
+        flushedEntries: metrics.flushedEntries,
+        flushCount: metrics.flushCount,
+        avgFlushMs: metrics.flushCount > 0 ? (metrics.totalFlushMs / metrics.flushCount) : 0,
+      };
     },
     open() {
       open = true;
@@ -435,6 +970,8 @@ export function createLoggerFooter(root, options = {}) {
       footerObserver = null;
       if (scrollbarTimer) clearTimeout(scrollbarTimer);
       scrollbarTimer = null;
+      formatterWorker?.terminate?.();
+      formatterWorker = null;
       setScrollbarsActive(false);
     },
   };
