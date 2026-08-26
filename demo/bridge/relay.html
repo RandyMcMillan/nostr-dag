@@ -20,11 +20,11 @@
       window.__bridgeChromeInitialized = true;
       window.__sharedHeaderApi = createSharedHeader(document.getElementById('sharedHeader'), {
         title: 'nostr-dag',
-        logoHref: resolveHref('../', window.location.href),
+        logoHref: resolveHref('../git/', window.location.href),
         iconHref: resolveHref('../shared/favicon.ico', window.location.href),
         subtitleHtml: '',
         navItems: [
-          { label: 'dag', href: resolveHref('../', window.location.href) },
+          { label: 'dag', href: resolveHref('../dag/', window.location.href) },
           { label: 'Bridge', href: resolveHref('./', window.location.href), current: true },
         ],
       });
