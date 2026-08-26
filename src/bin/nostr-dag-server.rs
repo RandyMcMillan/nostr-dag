@@ -291,15 +291,31 @@ async fn handle_connection(
     let request_line = lines.next().unwrap_or_default();
     let mut parts = request_line.split_whitespace();
     let method = parts.next().unwrap_or_default();
-    let path = strip_query(parts.next().unwrap_or("/"));
+    let request_target = parts.next().unwrap_or("/");
+    let path = strip_query(request_target);
     debug!(%method, %path, "request received");
     let body = request_body(&request);
 
     let head_only = method == "HEAD";
+    let directory_redirect = if (method == "GET" || method == "HEAD")
+        && path != "/"
+        && !path.ends_with('/')
+        && !path.starts_with(LOGGER_ROUTE_PREFIX)
+        && !path.starts_with(PEERS_ROUTE_PREFIX)
+        && !path.starts_with(NIP11_ROUTE_PREFIX)
+        && !path.starts_with(EVENTS_ROUTE_PREFIX)
+    {
+        canonical_directory_redirect(site_dir, path, request_target).await
+    } else {
+        None
+    };
     // Redirect bare root to /git, which is the default landing page.
     let response = if (method == "GET" || method == "HEAD") && path == "/" {
         trace!("redirecting / to /git");
         response_redirect("/git")
+    } else if let Some(location) = directory_redirect {
+        trace!(from = %path, to = %location, "redirecting directory path to trailing slash");
+        response_redirect(&location)
     } else if method == "POST" && (path == LOGGER_ROUTE_PREFIX || path.starts_with("/logger/")) {
         match handle_logger_post(body, &logger_store) {
             Ok(()) => response_bytes(204, "No Content", Vec::new(), "text/plain; charset=utf-8", true),
@@ -775,6 +791,20 @@ async fn route_path(site_dir: &str, path: &str) -> Result<(Vec<u8>, &'static str
     Ok((body, content_type))
 }
 
+async fn canonical_directory_redirect(site_dir: &str, path: &str, request_target: &str) -> Option<String> {
+    let normalized = normalize_path(path).ok()?;
+    if normalized.as_os_str().is_empty() {
+        return None;
+    }
+    let candidate = PathBuf::from(site_dir).join(normalized);
+    let is_dir = fs::metadata(&candidate).await.map(|meta| meta.is_dir()).unwrap_or(false);
+    if !is_dir {
+        return None;
+    }
+    let suffix = query_suffix(request_target);
+    Some(format!("{path}/{suffix}"))
+}
+
 fn normalize_path(path: &str) -> Result<PathBuf, RouteError> {
     let trimmed = path.trim_start_matches('/');
     if trimmed.is_empty() {
@@ -794,6 +824,13 @@ fn normalize_path(path: &str) -> Result<PathBuf, RouteError> {
 
 fn strip_query(path: &str) -> &str {
     path.split_once(['?', '#']).map(|(head, _)| head).unwrap_or(path)
+}
+
+fn query_suffix(path: &str) -> &str {
+    match path.find(['?', '#']) {
+        Some(index) => &path[index..],
+        None => "",
+    }
 }
 
 fn content_type_for_path(path: &Path) -> &'static str {
@@ -851,8 +888,10 @@ enum RouteError {
 
 #[cfg(test)]
 mod tests {
-    use super::content_type_for_path;
+    use super::{canonical_directory_redirect, content_type_for_path, query_suffix};
+    use std::fs;
     use std::path::Path;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn serves_mjs_as_javascript() {
@@ -860,5 +899,37 @@ mod tests {
             content_type_for_path(Path::new("site/shared/git-progress.mjs")),
             "text/javascript; charset=utf-8"
         );
+    }
+
+    #[test]
+    fn query_suffix_extracts_query_and_fragment() {
+        assert_eq!(query_suffix("/git?repo=nostr-dag"), "?repo=nostr-dag");
+        assert_eq!(query_suffix("/git#hash"), "#hash");
+    }
+
+    #[test]
+    fn query_suffix_is_empty_when_absent() {
+        assert_eq!(query_suffix("/git/"), "");
+    }
+
+    #[tokio::test]
+    async fn canonical_directory_redirect_redirects_directories() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos();
+        let site_dir = std::env::temp_dir().join(format!("nostr-dag-server-test-{unique}"));
+        let git_dir = site_dir.join("git");
+        fs::create_dir_all(&git_dir).expect("create git dir");
+
+        let redirect = canonical_directory_redirect(
+            site_dir.to_str().expect("temp dir utf-8"),
+            "/git",
+            "/git?repo=nostr-dag",
+        )
+        .await;
+        assert_eq!(redirect, Some("/git/?repo=nostr-dag".to_string()));
+
+        fs::remove_dir_all(&site_dir).expect("cleanup temp dir");
     }
 }
