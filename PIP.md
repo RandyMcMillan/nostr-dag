@@ -172,3 +172,95 @@ The repository’s current reference implementation lives in:
 - `demo/shared/bridge-page.mjs`
 
 Any future protocol change should update both the implementation and this document together.
+
+## 12. Quorum attestation of PIP blobs
+
+This section defines the three event kinds and lifecycle used when a DAG quorum collectively
+verifies and signs a PIP blob.
+
+### 12.1 Overview
+
+The quorum attestation flow has three phases:
+
+1. **Attest** — each participant independently reconstructs the blob from its manifest and
+   slice events, verifies the SHA-256 digest, and publishes an *attestation event*.
+2. **Seal** — once attestations from more than 4/5 of the current participant set have been
+   collected, any participant publishes a *seal event* referencing all attestation event ids.
+3. **Join** — new participants may join an already-sealed quorum by publishing a *join event*
+   that references the seal and proves they verified the same blob.  Membership grows and the
+   4/5 threshold is recalculated accordingly.
+
+### 12.2 New event kinds
+
+| Kind  | Name                   | Constant           |
+|-------|------------------------|--------------------|
+| 39080 | PIP Blob Attestation   | `PIP_ATTEST_KIND`  |
+| 39081 | PIP Quorum Seal        | `PIP_SEAL_KIND`    |
+| 39082 | PIP Quorum Membership  | `PIP_JOIN_KIND`    |
+
+### 12.3 Attestation event (kind 39080)
+
+```json
+{
+  "protocol": "nostr-dag-transfer",
+  "version": 1,
+  "type": "attest",
+  "root_id": "<manifest root_id>",
+  "sha256": "<lowercase hex sha256 of reconstructed blob>",
+  "manifest_id": "<hex event id of the manifest event>"
+}
+```
+
+The event MUST carry `e` tags referencing the manifest event id and every slice event id.
+
+### 12.4 Seal event (kind 39081)
+
+```json
+{
+  "protocol": "nostr-dag-transfer",
+  "version": 1,
+  "type": "seal",
+  "root_id": "<manifest root_id>",
+  "sha256": "<lowercase hex sha256>",
+  "attest_ids": ["<hex attestation event id>", ...]
+}
+```
+
+`attest_ids` MUST list exactly the attestation event ids that contributed to reaching
+the threshold.
+
+### 12.5 Membership (join) event (kind 39082)
+
+```json
+{
+  "protocol": "nostr-dag-transfer",
+  "version": 1,
+  "type": "join",
+  "root_id": "<manifest root_id>",
+  "sha256": "<lowercase hex sha256>",
+  "seal_id": "<hex event id of the quorum seal>"
+}
+```
+
+The event MUST carry an `e` tag referencing the seal event id.  A join event MUST be
+rejected if no seal event exists yet or if `seal_id` does not match the sealed event.
+
+### 12.6 Threshold rule
+
+Given N total participants the threshold T is computed as:
+
+```
+T = ceil(N × 4 / 5) − 1
+```
+
+A quorum is reached when the number of accepted attestations is strictly greater than T
+(i.e., at least `ceil(N × 4 / 5)` attestations).  T is recalculated whenever new members
+join via kind 39082.
+
+### 12.7 Reference implementation
+
+The Rust implementation lives in:
+
+- `src/quorum.rs` — `BlobQuorum` struct
+- `src/event.rs` — `create_attest_event`, `create_seal_event`, `create_join_event`
+- `src/dag.rs` — `Dag::add_participant`

@@ -3,6 +3,7 @@ mod error;
 mod event;
 mod assets;
 pub mod nip34;
+pub mod quorum;
 #[cfg(feature = "native")]
 pub mod store;
 
@@ -19,7 +20,11 @@ pub use assets::{ICON_CIRCLE_BITCOIN_SVG, ICON_CIRCLE_WHITE_SVG};
 pub use assets::FAVICON_ICO;
 pub use dag::{Dag, InsertResult};
 pub use error::DagError;
-pub use event::{create_ack_event, parents_of, DAG_EVENT_KIND};
+pub use event::{
+    create_ack_event, create_attest_event, create_join_event, create_seal_event, parents_of,
+    DAG_EVENT_KIND, PIP_ATTEST_KIND, PIP_JOIN_KIND, PIP_SEAL_KIND,
+};
+pub use quorum::{AttestResult, BlobQuorum, JoinResult};
 pub use nip34::{
     git_remote_helper_url, git_remote_transport_url, normalize_nostr_clone_url,
     normalize_p2p_clone_url, nostr_to_p2p_clone_url, p2p_to_nostr_clone_url, parse_nostr_clone_url,

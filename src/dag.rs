@@ -277,6 +277,24 @@ impl Dag {
         trace!("iterating missing parents");
         self.waiting_for.keys().copied()
     }
+
+    /// Add a new participant to the quorum and recalculate the canonical threshold.
+    ///
+    /// Events that were previously non-canonical may become canonical after this call
+    /// if the new threshold is lower.
+    pub fn add_participant(&mut self, key: PublicKey) {
+        if self.participants.insert(key) {
+            self.threshold = Self::quorum_threshold(self.participants.len());
+            info!(
+                participant = %key,
+                participant_count = self.participants.len(),
+                threshold = self.threshold,
+                "added participant, threshold updated"
+            );
+        } else {
+            debug!(participant = %key, "add_participant: already a participant");
+        }
+    }
 }
 
 #[cfg(test)]
