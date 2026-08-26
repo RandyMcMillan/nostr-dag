@@ -8,7 +8,7 @@ function escapeHtml(value) {
 }
 
 /**
- * Render the shared page header and navigation bar used by the demo and Git viewer.
+ * Render the shared page header and navigation bar used by nostr-dag and git viewer.
  * Keep the page-specific content below this shared chrome so both entry points stay aligned.
  */
 export function createSharedHeader(root, options = {}) {
