@@ -17,8 +17,8 @@
     <!-- Step 1: load the app and keep the DAG controls visible up front. -->
     <div class="row">
       <button id="resetBtn">Reset DAG</button>
-      <button id="seedBtn">Create Genesis (all participants)</button>
-      <button id="ackRoundBtn">Run Ack Round</button>
+      <button id="seedBtn">Broadcast NIP-34 Sequence</button>
+      <button id="ackRoundBtn">Run Quorum Sequence</button>
       <span id="status" class="status">Loading WASM...</span>
     </div>
   </div>
@@ -57,6 +57,14 @@
           <option value="0">0 (metadata)</option>
           <option value="1">1 (text note)</option>
           <option value="42">42 (message)</option>
+          <option value="30617">30617 (repo announcement)</option>
+          <option value="30618">30618 (repo state)</option>
+          <option value="1618">1618 (pull request)</option>
+          <option value="1621">1621 (issue)</option>
+          <option value="39078">39078 (transfer manifest)</option>
+          <option value="39079">39079 (transfer slice)</option>
+          <option value="39080">39080 (quorum attest)</option>
+          <option value="39081">39081 (quorum seal)</option>
         </select>
       </div>
       <div class="row" style="margin-bottom:8px;">
@@ -119,6 +127,20 @@
     import { neventEncode, npubEncode } from 'https://esm.sh/nostr-tools@2.10.4/nip19';
     import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     import { createSharedLibp2pStack, DEFAULT_BOOTSTRAP_PEERS } from './shared/libp2p-stack.mjs';
+    import {
+      buildAttestDraft,
+      buildIssueDraft,
+      buildPullRequestDraft,
+      buildRepositoryAnnouncementDraft,
+      buildRepositoryStateDraft,
+      buildSealDraft,
+      buildTransferManifestDraft,
+      buildTransferSliceDraft,
+      packetizePayload,
+      repositoryAddress,
+      sha256Hex,
+      utf8Bytes,
+    } from './shared/nip34-quorum.mjs';
 
     // Step 5: define the relay set and durable browser cache keys.
     const RELAYS = [
@@ -156,6 +178,7 @@
     let relayDiscoveryStarted = false;
     let libp2pPeerId = 'starting...';
     let libp2pModuleCounts = { loaded: 0, failed: 0, total: 0 };
+    let activeRepoSequence = null;
     const sharedFooterLogBuffer = window.__sharedFooterLogBuffer || [];
     window.__sharedFooterLogBuffer = sharedFooterLogBuffer;
     if (!window.__sharedFooter) {
@@ -201,6 +224,15 @@
       const encoded = new TextEncoder().encode(value);
       const digest = await crypto.subtle.digest('SHA-256', encoded);
       return new Uint8Array(digest);
+    }
+
+    // Step 7b: derive deterministic git-like commit ids for the real NIP-34 demo flow.
+    async function deterministicHex(value, bytes = 20) {
+      const digest = await sha256Bytes(value);
+      return [...digest]
+        .slice(0, bytes)
+        .map((byte) => byte.toString(16).padStart(2, '0'))
+        .join('');
     }
 
     // Step 8: normalize profile metadata into the shape the UI and relay
@@ -781,6 +813,7 @@
       dag = new WasmDag(JSON.stringify(participants.map((p) => p.pk)));
       events.clear();
       njumpAvailability.clear();
+      activeRepoSequence = null;
       render();
       setStatus('WASM loaded. DAG reset with 5 participants.', true);
       await publishProfiles();
@@ -805,23 +838,6 @@
         created_at: Math.floor(Date.now() / 1000),
         tags: [],
         content: JSON.stringify(profile),
-        pubkey: author.pk,
-      }, author.sk);
-    }
-
-    function buildQuorumGroupEvent(author, participantPubkeys) {
-      const tags = [
-        ...participantPubkeys.map((pk) => ['p', pk]),
-        ['d', QUORUM_ID],
-        ['t', 'nostr-dag'],
-        ['t', 'quorum'],
-      ];
-
-      return finalizeEvent({
-        kind: 1,
-        created_at: Math.floor(Date.now() / 1000),
-        tags,
-        content: `Quorum member note for ${participants.length} participants.`,
         pubkey: author.pk,
       }, author.sk);
     }
@@ -862,6 +878,14 @@
         pubkey: author.pk,
       };
       return finalizeEvent(event, author.sk);
+    }
+
+    // Step 20b: sign protocol-specific event drafts so the demo can emit real NIP-34 and PIP events.
+    function signDraftEvent(author, draft) {
+      return finalizeEvent({
+        ...draft,
+        pubkey: author.pk,
+      }, author.sk);
     }
 
     // Step 21: insert events into the WASM DAG and mirror them into UI state.
@@ -953,33 +977,169 @@
       return queueBroadcast(eventsToPublish, successLabel);
     }
 
-    // Step 19b: generate acknowledgement events without monopolizing the main thread.
-    async function createAckRoundEvents() {
-      window.__sharedFooter?.log('demo', 'create ack round events', 'debug', 'checking');
-      const tips = currentTips();
-      const acks = [];
-      for (let i = 0; i < participants.length; i += 1) {
-        const author = participants[i];
-        const event = buildEvent(author, 21000, '', tips);
-        insertEvent(event);
-        acks.push(event);
-        if (i % 2 === 1) await yieldToMainThread();
-      }
-      return acks;
+    // Step 19b: broadcast a real repository announcement/state/issue/PR chain instead of fake genesis notes.
+    async function createNip34SequenceEvents() {
+      window.__sharedFooter?.log('demo', 'create NIP-34 sequence events', 'debug', 'checking');
+      const [maintainer, stateAuthor, issueAuthor, prAuthor] = participants;
+      const createdAt = Math.floor(Date.now() / 1000);
+      const repoId = 'nostr-dag-demo';
+      const repoRootCommit = await deterministicHex(`${repoId}:root`);
+      const mainCommit = await deterministicHex(`${repoId}:main`);
+      const featureCommit = await deterministicHex(`${repoId}:feature`);
+      const repoCloneUrl = `nostr://${npubEncode(maintainer.pk)}/${encodeURIComponent(repoId)}`;
+      const repoAddressTag = repositoryAddress(maintainer.pk, repoId);
+
+      const repoAnnouncement = signDraftEvent(maintainer, buildRepositoryAnnouncementDraft({
+        pubkey: maintainer.pk,
+        createdAt,
+        repoId,
+        name: 'nostr-dag demo repository',
+        description: 'Real NIP-34 repository announcement broadcast by the DAG demo.',
+        web: ['https://github.com/RandyMcMillan/nostr-dag'],
+        clone: [repoCloneUrl, 'https://github.com/RandyMcMillan/nostr-dag.git'],
+        relays: [...RELAYS],
+        earliestUniqueCommit: repoRootCommit,
+        maintainers: participants.map((participant) => participant.pk),
+        hashtags: ['nostr-dag', 'nip34', 'quorum'],
+      }));
+      insertEvent(repoAnnouncement);
+      await yieldToMainThread();
+
+      const repoState = signDraftEvent(stateAuthor, buildRepositoryStateDraft({
+        pubkey: stateAuthor.pk,
+        createdAt: createdAt + 1,
+        repoId,
+        refs: [
+          ['heads/main', mainCommit],
+          ['heads/quorum-demo', featureCommit],
+          ['tags/demo-v1', mainCommit],
+        ],
+        head: 'refs/heads/main',
+        parents: [repoAnnouncement.id],
+      }));
+      insertEvent(repoState);
+      await yieldToMainThread();
+
+      const issue = signDraftEvent(issueAuthor, buildIssueDraft({
+        pubkey: issueAuthor.pk,
+        createdAt: createdAt + 2,
+        repoAddress: repoAddressTag,
+        repositoryOwner: maintainer.pk,
+        subject: 'Broadcast quorum-attested NIP-34 events',
+        labels: ['demo', 'quorum'],
+        content: 'Replace fake demo events with a real NIP-34 repository sequence and quorum attestations.',
+        parents: [repoState.id],
+      }));
+      insertEvent(issue);
+      await yieldToMainThread();
+
+      const pullRequest = signDraftEvent(prAuthor, buildPullRequestDraft({
+        pubkey: prAuthor.pk,
+        createdAt: createdAt + 3,
+        repoAddress: repoAddressTag,
+        repositoryOwner: maintainer.pk,
+        repoRootCommit,
+        subject: 'Wire the demo to real NIP-34 quorum events',
+        labels: ['demo', 'quorum', 'nip34'],
+        headCommit: featureCommit,
+        clone: [repoCloneUrl],
+        branchName: 'quorum-demo',
+        mergeBase: mainCommit,
+        content: 'This PR event advertises the demo branch carrying the quorum-attested NIP-34 flow.',
+        parents: [issue.id],
+      }));
+      insertEvent(pullRequest);
+
+      const protocolEvents = [repoAnnouncement, repoState, issue, pullRequest];
+      return {
+        repoId,
+        repoCloneUrl,
+        repoRootCommit,
+        protocolEvents,
+      };
     }
 
-    // Step 19c: generate genesis events in async chunks so startup can paint.
-    async function createGenesisEvents() {
-      window.__sharedFooter?.log('demo', 'create genesis events', 'debug', 'checking');
-      const seeded = [];
-      for (let i = 0; i < participants.length; i += 1) {
-        const author = participants[i];
-        const event = buildEvent(author, 21000, 'genesis', []);
-        insertEvent(event);
-        seeded.push(event);
+    // Step 19c: run the real manifest → slice → attest → seal sequence over the latest NIP-34 payload.
+    async function createQuorumSequenceEvents(repoSequence) {
+      window.__sharedFooter?.log('demo', 'create quorum sequence events', 'debug', 'checking');
+      const [repoAnnouncement, repoState, issue, pullRequest] = repoSequence.protocolEvents;
+      const manifestAuthor = participants[participants.length - 1];
+      const createdAt = Math.floor(Date.now() / 1000);
+      const payloadJson = JSON.stringify({
+        repository: {
+          repo_id: repoSequence.repoId,
+          clone_url: repoSequence.repoCloneUrl,
+          earliest_unique_commit: repoSequence.repoRootCommit,
+        },
+        events: [repoAnnouncement, repoState, issue, pullRequest],
+      });
+      const payloadBytes = utf8Bytes(payloadJson);
+      const rootId = `nip34-quorum-${repoAnnouncement.id}`;
+      const digest = await sha256Hex(payloadBytes);
+      const sliceSize = Math.max(96, Math.ceil(payloadBytes.length / 3));
+      const slices = packetizePayload(rootId, payloadBytes, sliceSize);
+
+      const manifestEvent = signDraftEvent(manifestAuthor, buildTransferManifestDraft({
+        pubkey: manifestAuthor.pk,
+        createdAt,
+        rootId,
+        totalBytes: payloadBytes.length,
+        totalSlices: slices.length,
+        parents: [pullRequest.id],
+      }));
+      insertEvent(manifestEvent);
+      await yieldToMainThread();
+
+      const sliceEvents = [];
+      for (let i = 0; i < slices.length; i += 1) {
+        const sliceEvent = signDraftEvent(manifestAuthor, buildTransferSliceDraft({
+          pubkey: manifestAuthor.pk,
+          createdAt: createdAt + 1 + i,
+          manifestId: manifestEvent.id,
+          rootId,
+          seq: slices[i].seq,
+          totalSlices: slices[i].totalSlices,
+          data: slices[i].data,
+          parents: i === 0 ? [] : [sliceEvents[i - 1].id],
+        }));
+        sliceEvents.push(sliceEvent);
+        insertEvent(sliceEvent);
         if (i % 2 === 1) await yieldToMainThread();
       }
-      return seeded;
+
+      const attesters = participants.slice(0, 4);
+      const attestationEvents = [];
+      for (let i = 0; i < attesters.length; i += 1) {
+        const attestation = signDraftEvent(attesters[i], buildAttestDraft({
+          pubkey: attesters[i].pk,
+          createdAt: createdAt + slices.length + 1 + i,
+          rootId,
+          sha256: digest,
+          manifestId: manifestEvent.id,
+          sliceIds: sliceEvents.map((event) => event.id),
+          parents: [],
+        }));
+        attestationEvents.push(attestation);
+        insertEvent(attestation);
+        if (i % 2 === 1) await yieldToMainThread();
+      }
+
+      const sealEvent = signDraftEvent(manifestAuthor, buildSealDraft({
+        pubkey: manifestAuthor.pk,
+        createdAt: createdAt + slices.length + attestationEvents.length + 2,
+        rootId,
+        sha256: digest,
+        attestIds: attestationEvents.map((event) => event.id),
+        parents: [],
+      }));
+      insertEvent(sealEvent);
+
+      return {
+        manifestEvent,
+        sliceEvents,
+        attestationEvents,
+        sealEvent,
+      };
     }
 
     async function createEvent() {
@@ -1003,73 +1163,43 @@
 
     async function seedGenesis() {
       try {
-        window.__sharedFooter?.log('demo', 'seed genesis requested', 'debug', 'checking');
-        const seeded = await createGenesisEvents();
+        window.__sharedFooter?.log('demo', 'NIP-34 broadcast requested', 'debug', 'checking');
+        activeRepoSequence = await createNip34SequenceEvents();
         render();
-        await publishEvents(seeded, 'Genesis quorum');
+        await publishEvents(activeRepoSequence.protocolEvents, 'NIP-34 repository sequence');
       } catch (e) {
-        setStatus(`Seed failed: ${e.message}`, false);
+        setStatus(`NIP-34 broadcast failed: ${e.message}`, false);
       }
     }
 
     async function runAckRound() {
       try {
-        window.__sharedFooter?.log('demo', 'ack round requested', 'debug', 'checking');
-        const acks = await createAckRoundEvents();
+        window.__sharedFooter?.log('demo', 'quorum sequence requested', 'debug', 'checking');
+        if (!activeRepoSequence) {
+          activeRepoSequence = await createNip34SequenceEvents();
+          await publishEvents(activeRepoSequence.protocolEvents, 'NIP-34 repository sequence');
+        }
+        const quorumSequence = await createQuorumSequenceEvents(activeRepoSequence);
         render();
-        await publishEvents(acks, 'Ack round');
+        await publishEvents([
+          quorumSequence.manifestEvent,
+          ...quorumSequence.sliceEvents,
+          ...quorumSequence.attestationEvents,
+          quorumSequence.sealEvent,
+        ], 'PIP quorum sequence');
       } catch (e) {
-        setStatus(`Ack round failed: ${e.message}`, false);
-      }
-    }
-
-    async function autoAckUntilCanonical(targetId, maxRounds = 5) {
-      window.__sharedFooter?.log('demo', `auto ack until canonical ${targetId}`, 'trace', 'checking');
-      for (let round = 1; round <= maxRounds; round++) {
-        if (isCanonical(targetId)) return;
-
-        const acks = await createAckRoundEvents();
-        render();
-        await publishEvents(acks, `Auto ack round ${round}`);
-
-        if (isCanonical(targetId)) return;
-        await new Promise((resolve) => window.setTimeout(resolve, 500));
-      }
-    }
-
-    async function bootstrapCanonicality(targetIds, maxRounds = 5) {
-      window.__sharedFooter?.log('demo', `bootstrap canonicality for ${targetIds.length} events`, 'trace', 'checking');
-      for (let round = 1; round <= maxRounds; round++) {
-        if (targetIds.every((id) => isCanonical(id))) return;
-
-        const acks = await createAckRoundEvents();
-        render();
-        await publishEvents(acks, `Bootstrap ack round ${round}`);
-
-        if (targetIds.every((id) => isCanonical(id))) return;
-        await sleep(250);
+        setStatus(`Quorum sequence failed: ${e.message}`, false);
       }
     }
 
     // Step 23: publish the bootstrap quorum metadata and make it canonical.
-    // Step 23: publish the bootstrap quorum metadata in yielding batches.
+    // Step 23: publish only the participant metadata so the real NIP-34 flow starts from clean state.
     async function publishProfiles() {
       window.__sharedFooter?.log('demo', 'publish quorum profiles', 'debug', 'checking');
-      const seeded = await createGenesisEvents();
-      const participantPubkeys = participants.map((participant) => participant.pk);
-      const quorumEvent = buildQuorumGroupEvent(participants[participants.length - 1], participantPubkeys);
-      insertEvent(quorumEvent);
-      render();
-      await yieldToMainThread();
-      await publishEvents(seeded, 'Genesis quorum');
-      render();
-      await yieldToMainThread();
-      await publishEvents([quorumEvent], 'Quorum note');
-
       const profileEvents = [];
       for (let i = 0; i < participants.length; i += 1) {
         const author = participants[i];
-        const event = buildMetadataEvent(author, quorumEvent.id);
+        const event = buildMetadataEvent(author);
         profileEvents.push(event);
         insertEvent(event);
         if (i % 2 === 1) await yieldToMainThread();
@@ -1077,11 +1207,6 @@
       render();
       await yieldToMainThread();
       await publishEvents(profileEvents, 'Quorum metadata');
-      await bootstrapCanonicality([
-        ...seeded.map((event) => event.id),
-        quorumEvent.id,
-        ...profileEvents.map((event) => event.id),
-      ]);
     }
 
     // Step 24: render the entire dashboard from the current in-memory state.
