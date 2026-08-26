@@ -20,6 +20,10 @@ const state = globalThis.__nostrDagNetworkTimeState || {
   tickTimer: null,
   pendingRequests: new Map(),
   requestCounter: 0,
+  // Tracks whether we have already attached the visibility listener so that
+  // re-calling initSharedNetworkTime() (e.g. hot-module reload) does not
+  // register a second handler.
+  visibilityListenerAttached: false,
 };
 
 globalThis.__nostrDagNetworkTimeState = state;
@@ -89,7 +93,13 @@ function updateHeader() {
 
 function ensureTickTimer() {
   if (state.tickTimer) return;
+  // Safari iOS can suspend setInterval when the tab is backgrounded or the
+  // screen dims.  We track the last-tick wall-clock so that when the page
+  // becomes visible again we can detect the gap and immediately refresh the
+  // displayed time rather than waiting up to one second.
+  state._lastTickAt = Date.now();
   state.tickTimer = globalThis.setInterval(() => {
+    state._lastTickAt = Date.now();
     updateHeader();
   }, 1000);
 }
@@ -269,6 +279,30 @@ export function initSharedNetworkTime({ headerApi = null } = {}) {
   }
   ensureTickTimer();
   updateHeader();
+
+  // Safari iOS (and other mobile browsers) aggressively throttle or suspend
+  // setInterval/setTimeout when the tab is backgrounded or the screen locks.
+  // When the page becomes visible again the sync loop may have stopped running.
+  // We listen for `visibilitychange` to restart the tick display immediately
+  // and re-sync network time so the clock never shows a stale value.
+  if (!state.visibilityListenerAttached && typeof globalThis.document !== 'undefined') {
+    state.visibilityListenerAttached = true;
+    globalThis.document.addEventListener('visibilitychange', () => {
+      if (globalThis.document.visibilityState !== 'visible') return;
+      // Immediately refresh the header so the user does not see a frozen clock.
+      updateHeader();
+      // Restart the tick timer in case iOS killed it while backgrounded.
+      if (state.tickTimer) {
+        globalThis.clearInterval(state.tickTimer);
+        state.tickTimer = null;
+      }
+      ensureTickTimer();
+      // Re-schedule the sync loop and trigger an immediate sync to recalibrate
+      // the offset after any suspend-induced drift.
+      scheduleSyncLoop();
+      void syncNetworkTime();
+    });
+  }
 
   return {
     attachNode(node) {
