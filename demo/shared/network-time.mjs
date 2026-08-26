@@ -172,6 +172,8 @@ function noteConsensusResponses(responses) {
   state.lastSampleCount = responses.length;
   state.lastAccuracyMs = median(responses.map((response) => response.rttMs / 2));
   state.status = 'available';
+  // Log the integer delta (ms) between network time and local UTC time.
+  console.error(`[network-time] delta network-utc: ${Math.round(state.offsetMs)} ms`);
   persistState();
   updateHeader();
 }
