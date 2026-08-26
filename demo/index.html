@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<!-- Root redirect: navigating to / automatically forwards the browser to /git. -->
+<!-- This page is intentionally minimal — all content lives under /git, /dag, and /bridge. -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>nostr-dag</title>
+  <!-- Canonical redirect: prefer the meta-refresh as the primary mechanism for
+       environments that do not execute JavaScript (e.g. static GitHub Pages). -->
+  <meta http-equiv="refresh" content="0; url=./git/" />
+  <link rel="canonical" href="./git/" />
+</head>
+<body>
+  <!-- JavaScript redirect fires immediately after page load.  Falls back to the
+       meta-refresh above if scripting is disabled. -->
+  <script>
+    // Redirect root / → ./git/ using replaceState so the browser back-button
+    // does not loop back to this redirect page.
+    window.location.replace('./git/');
+  </script>
+  <!-- Accessible fallback link for screen readers and no-JS environments. -->
+  <p>Redirecting to <a href="./git/">nostr-dag git viewer</a>…</p>
+</body>
+</html>
