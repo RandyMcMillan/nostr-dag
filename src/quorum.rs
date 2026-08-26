@@ -475,18 +475,20 @@ mod tests {
         let repo = Repository::open(repo_path)
             .expect("failed to open git repository at CARGO_MANIFEST_DIR");
 
-        // Resolve HEAD and its first parent (HEAD~1).
+        // Resolve HEAD and (if present) its first parent (HEAD~1).
         let head = repo.head().expect("no HEAD").peel_to_commit().expect("HEAD is not a commit");
-        let parent = head
-            .parent(0)
-            .expect("HEAD has no parent — need at least two commits for HEAD~1");
-
-        // Build the diff between HEAD~1 tree and HEAD tree.
-        let old_tree = parent.tree().expect("HEAD~1 has no tree");
         let new_tree = head.tree().expect("HEAD has no tree");
-        let diff = repo
-            .diff_tree_to_tree(Some(&old_tree), Some(&new_tree), None)
-            .expect("diff_tree_to_tree failed");
+        let diff = if let Ok(parent) = head.parent(0) {
+            // Build the diff between HEAD~1 tree and HEAD tree.
+            let old_tree = parent.tree().expect("HEAD~1 has no tree");
+            repo.diff_tree_to_tree(Some(&old_tree), Some(&new_tree), None)
+                .expect("diff_tree_to_tree failed for HEAD~1..HEAD")
+        } else {
+            // Shallow CI checkouts can contain only one commit; fall back to
+            // diffing against the empty tree in that case.
+            repo.diff_tree_to_tree(None, Some(&new_tree), None)
+                .expect("diff_tree_to_tree failed for empty..HEAD")
+        };
 
         // Collect raw unified diff bytes.
         let mut diff_bytes: Vec<u8> = Vec::new();
