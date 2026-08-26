@@ -4,8 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <meta name="color-scheme" content="light dark" />
-<link rel="icon" href="./shared/favicon.ico" />
-<link rel="stylesheet" href="./shared/page.css" />
+<link rel="icon" href="../shared/favicon.ico" />
+<link rel="stylesheet" href="../shared/page.css" />
 <title>nostr-dag Demo</title>
 
   </head>
@@ -105,18 +105,18 @@
   </main>
 
   <script type="module">
-    import { createSharedHeader } from './shared/page-header.mjs';
-    import { initSharedNetworkTime } from './shared/network-time.mjs';
-    import { resolveHref } from './shared/page-path.js';
+    import { createSharedHeader } from '../shared/page-header.mjs';
+    import { initSharedNetworkTime } from '../shared/network-time.mjs';
+    import { resolveHref } from '../shared/page-path.js';
 
     window.__sharedHeaderApi = createSharedHeader(document.getElementById('sharedHeader'), {
       title: 'nostr-dag',
-      logoHref: resolveHref('./git/', window.location.href),
-      iconHref: resolveHref('./shared/favicon.ico', window.location.href),
+      logoHref: resolveHref('../git/', window.location.href),
+      iconHref: resolveHref('../shared/favicon.ico', window.location.href),
       subtitleHtml: '',
       navItems: [
         { label: 'dag', href: resolveHref('./', window.location.href), current: true },
-        { label: 'Bridge', href: resolveHref('./bridge/', window.location.href) },
+        { label: 'Bridge', href: resolveHref('../bridge/', window.location.href) },
       ],
     });
     initSharedNetworkTime({ headerApi: window.__sharedHeaderApi });
@@ -127,16 +127,16 @@
     // Use new URL() to produce a full absolute URL (with origin) so that
     // dynamic import() and wasm-bindgen's fetch() resolve correctly on
     // GitHub Pages, where the site is served under a sub-path prefix.
-    const wasmModuleUrl = new URL('./pkg/nostr_dag.js', window.location.href).href;
-    const wasmBinaryUrl = new URL('./pkg/nostr_dag_bg.wasm', window.location.href).href;
+    const wasmModuleUrl = new URL('../pkg/nostr_dag.js', window.location.href).href;
+    const wasmBinaryUrl = new URL('../pkg/nostr_dag_bg.wasm', window.location.href).href;
     const wasmPkg = await import(wasmModuleUrl);
     const init = wasmPkg.default;
     const { WasmDag } = wasmPkg;
     import { finalizeEvent, getPublicKey } from 'https://esm.sh/nostr-tools@2.10.4/pure';
     import { neventEncode, npubEncode } from 'https://esm.sh/nostr-tools@2.10.4/nip19';
     import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
-    import { createSharedLibp2pStack, DEFAULT_BOOTSTRAP_PEERS } from './shared/libp2p-stack.mjs';
-    import { getNetworkUnixTime, initSharedNetworkTime } from './shared/network-time.mjs';
+    import { createSharedLibp2pStack, DEFAULT_BOOTSTRAP_PEERS } from '../shared/libp2p-stack.mjs';
+    import { getNetworkUnixTime, initSharedNetworkTime } from '../shared/network-time.mjs';
     import {
       buildAttestDraft,
       buildIssueDraft,
@@ -150,7 +150,7 @@
       repositoryAddress,
       sha256Hex,
       utf8Bytes,
-    } from './shared/nip34-quorum.mjs';
+    } from '../shared/nip34-quorum.mjs';
 
     // Step 5: define the relay set and durable browser cache keys.
     const RELAYS = [
@@ -1370,7 +1370,7 @@
   <footer id="sharedFooter"></footer>
   <script type="module">
     // Step 25: preload libp2p modules so the footer can report availability.
-    import { createLoggerFooter } from './shared/logger.js';
+    import { createLoggerFooter } from '../shared/logger.js';
     const modules = [
       ['libp2p', 'https://esm.sh/libp2p'],
       ['@libp2p/interface', 'https://esm.sh/@libp2p/interface'],
