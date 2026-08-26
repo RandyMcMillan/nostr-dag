@@ -566,8 +566,12 @@
     }
 
     function fetchSelectionOptions(route) {
+      // Do not pass singleBranch: true here. Combining singleBranch with all: true
+      // causes isomorphic-git to skip tag fetching, which empties the tag dropdown
+      // when a branch is selected. Omitting singleBranch lets all: true + tags: true
+      // fetch all branches and tags as expected.
       if (route?.branch) {
-        return { ref: route.branch, singleBranch: true };
+        return { ref: route.branch };
       }
       return {};
     }
@@ -865,7 +869,15 @@
       const branchForSelection = route?.tag
         ? await branchForCommit(repo.dir, branches, latestCommit?.oid || '')
         : '';
-      const files = await git.listFiles({ fs, dir: repo.dir, ref: snapshotRef }).catch(() => []);
+      // Prefer the concrete commit OID for listFiles so that remote-tracking
+      // ref strings like 'origin/branch' cannot cause silent resolution failures.
+      const filesRef = (route?.commit ? null : latestCommit?.oid) || snapshotRef;
+      const files = await git.listFiles({ fs, dir: repo.dir, ref: filesRef }).catch(async () => {
+        if (filesRef !== snapshotRef) {
+          return git.listFiles({ fs, dir: repo.dir, ref: snapshotRef }).catch(() => []);
+        }
+        return [];
+      });
       const commitLimit = estimateRecentCommitLimit(files.length);
       const decoratedCommits = await collectCommitDecorations(repo, localBranches, remoteBranches, route, commits.slice(0, commitLimit).map(createCommitSummary));
       return {
