@@ -105,6 +105,8 @@
   <script type="module">
     import { scheduleAfterPaint } from '../shared/async-lifecycle.mjs';
 
+    // Defer module boot until after first paint to avoid UI regressions where
+    // synchronous startup work delays rendering of page chrome.
     scheduleAfterPaint(() => {
       void import('../shared/bridge-page.mjs');
     });
