@@ -1,6 +1,7 @@
 // Bridge page logic extracted from demo/bridge/index.html.
 import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     import { finalizeEvent, generateSecretKey, getPublicKey, verifyEvent } from 'https://esm.sh/nostr-tools@2.10.4/pure';
+    import { scheduleAfterPaint, yieldToBrowser } from './async-lifecycle.mjs';
     import { createSharedHeader } from './page-header.mjs';
     import { resolveHref } from './page-path.js';
     import { createSharedLibp2pStack } from './libp2p-stack.mjs';
@@ -403,7 +404,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
             window.__sharedFooter?.log('bridge', `verify failed ${event.id} from ${relay}: ${error?.message || error}`, 'warn', 'unavailable');
           }
 
-          await Promise.resolve();
+          await yieldToBrowser();
         }
       } finally {
         bridgeVerificationRunning = false;
@@ -654,7 +655,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
           await fetchRelayInfo(url);
           scheduleDefaultRelayRender();
           scheduleRelayRender();
-          await Promise.resolve();
+          await yieldToBrowser();
         }
       })();
     }
@@ -840,7 +841,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
             oneose() {},
           });
 
-          await Promise.resolve();
+          await yieldToBrowser();
         }
       } finally {
         relayDiscoveryRunning = false;
@@ -1229,7 +1230,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       }
     }
 
-    const bootBridge = () => {
+    const bootBridge = async () => {
       restoreBridgeCache();
       scheduleRelayDiscovery(DEFAULT_RELAYS);
       scheduleRelayDiscovery(relays);
@@ -1240,13 +1241,10 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       void refreshRelayInfo(currentRelayUrls());
       scheduleRelayDiscovery(currentRelayUrls());
       scheduleBridgePresenceBroadcast(currentRelayUrls());
-      window.setTimeout(() => {
-        void startBridge();
-      }, 0);
+      await yieldToBrowser();
+      void startBridge();
     };
 
-    if (typeof window.requestAnimationFrame === 'function') {
-      window.requestAnimationFrame(() => window.setTimeout(bootBridge, 0));
-    } else {
-      window.setTimeout(bootBridge, 0);
-    }
+    scheduleAfterPaint(() => {
+      void bootBridge();
+    });

@@ -127,14 +127,10 @@
     // Use new URL() to produce a full absolute URL (with origin) so that
     // dynamic import() and wasm-bindgen's fetch() resolve correctly on
     // GitHub Pages, where the site is served under a sub-path prefix.
-    const wasmModuleUrl = new URL('../pkg/nostr_dag.js', window.location.href).href;
-    const wasmBinaryUrl = new URL('../pkg/nostr_dag_bg.wasm', window.location.href).href;
-    const wasmPkg = await import(wasmModuleUrl);
-    const init = wasmPkg.default;
-    const { WasmDag } = wasmPkg;
     import { finalizeEvent, getPublicKey } from 'https://esm.sh/nostr-tools@2.10.4/pure';
     import { neventEncode, npubEncode } from 'https://esm.sh/nostr-tools@2.10.4/nip19';
     import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
+    import { scheduleAfterPaint, yieldToBrowser } from '../shared/async-lifecycle.mjs';
     import { createSharedLibp2pStack, DEFAULT_BOOTSTRAP_PEERS } from '../shared/libp2p-stack.mjs';
     import { getNetworkUnixTime, initSharedNetworkTime } from '../shared/network-time.mjs';
     import {
@@ -152,6 +148,8 @@
       utf8Bytes,
     } from '../shared/nip34-quorum.mjs';
 
+    const wasmModuleUrl = new URL('../pkg/nostr_dag.js', window.location.href).href;
+    const wasmBinaryUrl = new URL('../pkg/nostr_dag_bg.wasm', window.location.href).href;
     // Step 5: define the relay set and durable browser cache keys.
     const RELAYS = [
       'wss://relay.damus.io',
@@ -168,6 +166,8 @@
     const PARTICIPANT_DISPLAY_NAMES = ['Alice', 'Bob', 'Carol', 'Dave', 'Eve'];
 
     const FED_COUNT = 5;
+    let initWasm = null;
+    let WasmDag = null;
     let dag = null;
     let participants = [];
     const discoveredParticipants = new Map();
@@ -451,7 +451,17 @@
 
     // Yield a turn so Safari can paint between bursts of synchronous DAG work.
     async function yieldToMainThread() {
-      await sleep(0);
+      await yieldToBrowser();
+    }
+
+    async function ensureDagBootReady() {
+      if (!dagBootPromise) {
+        throw new Error('DAG boot has not started yet.');
+      }
+      await dagBootPromise;
+      if (!dag || !WasmDag || typeof initWasm !== 'function') {
+        throw new Error('DAG boot did not complete.');
+      }
     }
 
     function scheduleCachePersist() {
@@ -819,7 +829,10 @@
     }
 
     // Step 19: reset the DAG model and repopulate the local UI state.
-    async function resetDag() {
+    async function resetDag(options = {}) {
+      if (!options.skipReadyCheck) {
+        await ensureDagBootReady();
+      }
       window.__sharedFooter?.log('demo', 'resetting DAG', 'debug', 'checking');
       await initParticipants();
       dag = new WasmDag(JSON.stringify(participants.map((p) => p.pk)));
@@ -1156,6 +1169,7 @@
 
     async function createEvent() {
       try {
+        await ensureDagBootReady();
         window.__sharedFooter?.log('demo', 'create custom event requested', 'debug', 'checking');
         const author = participants[Number(authorEl.value)];
         const kind = Number(kindEl.value);
@@ -1175,6 +1189,7 @@
 
     async function seedGenesis() {
       try {
+        await ensureDagBootReady();
         window.__sharedFooter?.log('demo', 'NIP-34 broadcast requested', 'debug', 'checking');
         activeRepoSequence = await createNip34SequenceEvents();
         render();
@@ -1186,6 +1201,7 @@
 
     async function runAckRound() {
       try {
+        await ensureDagBootReady();
         window.__sharedFooter?.log('demo', 'quorum sequence requested', 'debug', 'checking');
         if (!activeRepoSequence) {
           activeRepoSequence = await createNip34SequenceEvents();
@@ -1347,10 +1363,13 @@
     setControlsEnabled(true);
     updateLibp2pFooter();
 
-    try {
+    async function bootDag() {
       window.__sharedFooter?.log('demo', 'boot sequence starting', 'debug', 'checking');
       setControlsEnabled(true);
-      await init(wasmBinaryUrl);
+      const wasmPkg = await import(wasmModuleUrl);
+      initWasm = wasmPkg.default;
+      ({ WasmDag } = wasmPkg);
+      await initWasm(wasmBinaryUrl);
       await initParticipants();
       dag = new WasmDag(JSON.stringify(participants.map((p) => p.pk)));
       startRelayDiscovery();
@@ -1360,12 +1379,29 @@
         setStatus('Restored cached demo state.', true);
         await publishProfiles();
       } else {
-        await resetDag();
+        await resetDag({ skipReadyCheck: true });
       }
-    } catch (e) {
-      setStatus(`WASM load failed: ${e.message}`, false);
-      setControlsEnabled(true);
     }
+
+    let resolveDagBoot = null;
+    let rejectDagBoot = null;
+    const dagBootPromise = new Promise((resolve, reject) => {
+      resolveDagBoot = resolve;
+      rejectDagBoot = reject;
+    });
+    void dagBootPromise.catch(() => {});
+    scheduleAfterPaint(() => {
+      void (async () => {
+        try {
+          await bootDag();
+          resolveDagBoot?.();
+        } catch (e) {
+          setStatus(`WASM load failed: ${e.message}`, false);
+          setControlsEnabled(true);
+          rejectDagBoot?.(e);
+        }
+      })();
+    });
   </script>
   <footer id="sharedFooter"></footer>
   <script type="module">

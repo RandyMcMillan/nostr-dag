@@ -103,7 +103,11 @@
   <footer id="sharedFooter"></footer>
 
   <script type="module">
-    import '../shared/bridge-page.mjs';
+    import { scheduleAfterPaint } from '../shared/async-lifecycle.mjs';
+
+    scheduleAfterPaint(() => {
+      void import('../shared/bridge-page.mjs');
+    });
   </script>
 </body>
 </html>
