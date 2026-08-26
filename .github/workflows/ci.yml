@@ -69,7 +69,7 @@ jobs:
           key: ${{ runner.os }}-cargo-wasm-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+        run: cargo install wasm-pack --locked
 
       - name: Build wasm package
         run: wasm-pack build --target web --no-default-features --features wasm
@@ -139,7 +139,7 @@ jobs:
           key: ${{ runner.os }}-cargo-p2p-wasm-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+        run: cargo install wasm-pack --locked
 
       - name: Build wasm package (p2p-wasm)
         run: wasm-pack build --target web --no-default-features --features wasm,p2p-wasm
