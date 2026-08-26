@@ -147,6 +147,50 @@ button:hover, a.button:hover { background:var(--button-hover); }
   font-family:ui-monospace, SFMono-Regular, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace;
   font-size:12px;
 }
+/* Network time sub-header: slim bar below the main nav, revealed asynchronously */
+.header-subbar {
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:.75rem;
+  padding:3px 1.5rem;
+  font-size:11px;
+  font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace;
+  background:rgba(255,255,255,.015);
+  border-top:1px solid var(--border);
+  color:var(--muted);
+  white-space:nowrap;
+  overflow:hidden;
+  transition:opacity .4s ease, max-height .4s ease;
+  max-height:2rem;
+  opacity:1;
+}
+.header-subbar--hidden {
+  opacity:0;
+  max-height:2rem;
+}
+.header-subbar.status-checking {
+  color:var(--status-checking);
+}
+.header-subbar.status-available {
+  color:var(--status-available);
+  opacity:1;
+}
+.header-subbar.status-unavailable {
+  color:var(--muted);
+}
+.header-subbar-label {
+  color:var(--muted);
+  letter-spacing:.04em;
+  text-transform:uppercase;
+}
+.header-subbar-value {
+  color:var(--fg);
+}
+.header-subbar-status {
+  font-size:10px;
+  opacity:.7;
+}
 .nav-links {
   display:flex;
   gap:.5rem;
