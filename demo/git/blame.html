@@ -37,8 +37,8 @@
     import LightningFS from 'https://cdn.jsdelivr.net/npm/@isomorphic-git/lightning-fs@4.6.0/+esm';
 
     const fs = new LightningFS('git-viewer');
-    const footer = createLoggerFooter(document.getElementById('pageFooter'), { title: 'Logger', initialState: 'idle', initialTitle: 'starting...', initialLevel: 'trace' });
-    footer.setLevel('trace');
+    const footer = createLoggerFooter(document.getElementById('pageFooter'), { title: 'Logger', initialState: 'idle', initialTitle: 'starting...', initialLevel: 'none' });
+    footer.setLevel('none');
     const statusEl = document.getElementById('status');
     const viewEl = document.getElementById('view');
     const repos = [
