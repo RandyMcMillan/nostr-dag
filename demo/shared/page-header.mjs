@@ -1,3 +1,5 @@
+import { scheduleAfterPaint } from './async-lifecycle.mjs';
+
 function escapeHtml(value) {
   return String(value)
     .replaceAll('&', '&amp;')
@@ -79,11 +81,7 @@ export function createSharedHeader(root, options = {}) {
         networkTimeValueEl.textContent = text;
         if (networkTimeStatusEl) networkTimeStatusEl.textContent = state === 'checking' ? '⟳' : state === 'available' ? '✓' : '✗';
       };
-      if (typeof requestAnimationFrame === 'function') {
-        requestAnimationFrame(update);
-      } else {
-        update();
-      }
+      scheduleAfterPaint(update);
     },
   };
 }

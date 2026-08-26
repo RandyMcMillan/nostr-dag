@@ -28,6 +28,7 @@
 
   <script type="module">
     import { createSharedHeader } from '../shared/page-header.mjs';
+    import { scheduleAfterPaint } from '../shared/async-lifecycle.mjs';
     import { initSharedNetworkTime } from '../shared/network-time.mjs';
     import { resolveHref } from '../shared/page-path.js';
 
@@ -155,7 +156,9 @@
         footer.log('libp2p', `bootstrap failed: ${e.message}`, 'error', 'unavailable');
       }
     }
-    void initGitP2P();
+    scheduleAfterPaint(() => {
+      void initGitP2P();
+    });
 
     function setStatus(text, state = 'idle') {
       statusEl.className = `status status-${state}`;
