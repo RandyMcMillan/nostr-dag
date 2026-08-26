@@ -38,6 +38,15 @@ jobs:
       - name: Run tests
         run: cargo test --features native
 
+  js:
+    name: Test (JS / GUI)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run JS tests
+        run: node --test test/*.test.mjs
+
   wasm:
     name: Build (wasm)
     runs-on: ubuntu-latest
@@ -66,7 +75,7 @@ jobs:
         run: wasm-pack build --target web --no-default-features --features wasm
 
       - name: Test wasm JS contracts
-        run: node --test test/git-wasm.test.mjs test/p2p-wasm.test.mjs
+        run: node --test test/*-wasm.test.mjs
 
       - name: Copy shared CSS for site assets
         run: |
