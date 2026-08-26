@@ -51,13 +51,10 @@ ensure-wasm-target:
 wasm: ensure-wasm-target
 	rm -rf ./site
 	@if ! command -v $(WASM_PACK) >/dev/null 2>&1; then \
-		curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh; \
+		cargo install wasm-pack --locked; \
 	fi
 	@set -e; \
-	if [ "$$(uname -s)" = Darwin ] && command -v brew >/dev/null 2>&1; then \
-		if ! brew --prefix llvm >/dev/null 2>&1 || [ ! -x "$$(brew --prefix llvm)/bin/clang" ] || [ ! -x "$$(brew --prefix llvm)/bin/llvm-ar" ]; then \
-			brew install llvm; \
-		fi; \
+	if [ "$$(uname -s)" = Darwin ] && command -v brew >/dev/null 2>&1 && brew --prefix llvm >/dev/null 2>&1 && [ -x "$$(brew --prefix llvm)/bin/clang" ] && [ -x "$$(brew --prefix llvm)/bin/llvm-ar" ]; then \
 		LLVM_PATH="$$(brew --prefix llvm)"; \
 		CC="$$LLVM_PATH/bin/clang"; \
 		AR="$$LLVM_PATH/bin/llvm-ar"; \
