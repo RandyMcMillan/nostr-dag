@@ -742,13 +742,15 @@
           setRepoStatus(repo.name, 'cloning...');
           footer.log('git', `${repo.name} cloning${route ? ` (${progressContextLabel(route)})` : ''}`, 'debug');
           await ensureDir(dir);
-          await git.clone({
+          // Attempt a fast shallow single-branch clone first.  If that fails
+          // (e.g. the CORS proxy rejects the ref negotiation), retry without
+          // singleBranch so that all branches and tags are fetched.
+          const cloneOpts = {
             fs,
             http,
             dir,
             corsProxy: 'https://cors.isomorphic-git.org',
             url,
-            singleBranch: true,
             depth: route ? GIT_HISTORY_DEPTH : 1,
             onProgress: (progress) => {
               const message = getGitProgressReporter(repo, 'clone')(progress);
@@ -756,7 +758,16 @@
                 footer.log('git', message, 'trace');
               }
             },
-          });
+          };
+          try {
+            await git.clone({ ...cloneOpts, singleBranch: true });
+          } catch (cloneErr) {
+            footer.log('git', `${repo.name} singleBranch clone failed (${cloneErr.message}), retrying without singleBranch`, 'warn');
+            // Remove any partial clone artefacts before retrying.
+            try { await fs.promises.rm(dir, { recursive: true }); } catch { /* ignore */ }
+            await ensureDir(dir);
+            await git.clone({ ...cloneOpts, singleBranch: false });
+          }
         } else {
           setRepoStatus(repo.name, 'reusing cached clone...');
           footer.log('git', `${repo.name} reusing cached clone`, 'info');
@@ -774,7 +785,9 @@
         if (message) {
           footer.log('git', message, 'trace');
         }
-      }).catch(() => {});
+      }).catch((fetchErr) => {
+        footer.log('git', `${repo.name} tag fetch failed: ${fetchErr.message}`, 'warn');
+      });
       setRepoStatus(repo.name, 'ready');
       footer.log('git', `${repo.name} ready`, 'info', 'available');
     }
