@@ -245,6 +245,7 @@
         defaultRef: 'n/a',
         selectedRef: 'n/a',
         commits: [],
+        commitDiff: [],
       };
     }
 
@@ -935,13 +936,14 @@
       const healthClass = repoHealthClass(healthState);
       const selectedCommit = findCommitSummary(data, route) || data.selectedCommit || data.latestCommit;
       const selectedSha = selectedCommit?.oid || route.commit || data.resolvedRef || data.selectedRef || data.ref || 'n/a';
+      const commitDiff = Array.isArray(data.commitDiff) ? data.commitDiff : [];
       const listRoute = {
         branch: route.branch || '',
         tag: route.tag || '',
       };
       const parentList = (selectedCommit?.parents || []).map((parent) => `<span class="pill mono">${escapeHtml(parent.slice(0, 12))}</span>`).join(' ') || '<span class="muted">No parent data</span>';
-      const diffList = data.commitDiff.length
-        ? data.commitDiff.map((entry) => `
+      const diffList = commitDiff.length
+        ? commitDiff.map((entry) => `
           <details class="repo-diff-file">
             <summary style="cursor:pointer;">
               <span class="repo-commit-top">
@@ -1000,7 +1002,7 @@
               <div class="repo-sidebar-card" style="margin-top:14px;">
                 <div class="row" style="justify-content:space-between; align-items:center;">
                   <h3 style="margin:0;">Commit diff</h3>
-                  <span class="muted small">${data.commitDiff.length} changed</span>
+                  <span class="muted small">${commitDiff.length} changed</span>
                 </div>
                 <div style="margin-top:10px;">${diffList}</div>
               </div>
