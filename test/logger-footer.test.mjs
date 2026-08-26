@@ -60,3 +60,30 @@ test('logger footer stays closed at none and opens for visible levels', async ()
   assert.equal(root.nodes.logEl.hidden, true);
   assert.equal(root.nodes.toggleEl.attrs['aria-expanded'], 'false');
 });
+
+test('logger footer Safari stub keeps level API parity', async () => {
+  const source = await readFile(new URL('../demo/shared/logger-footer.js', import.meta.url), 'utf8');
+  const { createLoggerFooter } = await import(`data:text/javascript;charset=utf-8,${encodeURIComponent(source)}`);
+  const root = createFakeRoot();
+  const originalNavigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  Object.defineProperty(globalThis, 'navigator', {
+    value: { userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) Safari/605.1.15', maxTouchPoints: 0 },
+    configurable: true,
+    writable: true,
+  });
+
+  try {
+    const footer = createLoggerFooter(root, { initialLevel: 'none' });
+    assert.equal(typeof footer.setLevel, 'function');
+    assert.equal(typeof footer.getLevel, 'function');
+    assert.equal(footer.getLevel(), 'none');
+    footer.setLevel('info');
+    assert.equal(footer.getLevel(), 'info');
+  } finally {
+    if (originalNavigatorDescriptor) {
+      Object.defineProperty(globalThis, 'navigator', originalNavigatorDescriptor);
+    } else {
+      delete globalThis.navigator;
+    }
+  }
+});

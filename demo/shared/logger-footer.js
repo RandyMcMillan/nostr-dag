@@ -281,12 +281,20 @@ function isSafariMobile() {
 export function createLoggerFooter(root, options = {}) {
   // Disable logger on Safari mobile to avoid memory/rendering issues.
   if (!root || isSafariMobile()) {
+    let level = normalizeLevel(options.initialLevel || 'none');
     return {
       log() {},
       setState() {},
+      setLevel(nextLevel) {
+        level = normalizeLevel(nextLevel);
+      },
+      getLevel() {
+        return level;
+      },
       open() {},
       close() {},
       toggle() {},
+      destroy() {},
       getMetrics() {
         return {
           queueDepth: 0,
