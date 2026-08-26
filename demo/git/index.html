@@ -28,7 +28,6 @@
 
   <script type="module">
     import { createSharedHeader } from '../shared/page-header.mjs';
-    import { scheduleAfterPaint } from '../shared/async-lifecycle.mjs';
     import { initSharedNetworkTime } from '../shared/network-time.mjs';
     import { resolveHref } from '../shared/page-path.js';
 
@@ -47,6 +46,7 @@
 
   <script type="module">
     import { createLoggerFooter } from '../shared/logger.js';
+    import { scheduleAfterPaint } from '../shared/async-lifecycle.mjs';
     import { remoteTagNames } from '../shared/git-refs.mjs';
     import { createGitProgressReporter } from '../shared/git-progress.mjs';
     import { cloneWithSingleBranchFallback } from '../shared/git-clone.mjs';
