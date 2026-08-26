@@ -1109,17 +1109,21 @@ pub mod wasm_node {
             self.on_message = Some(cb);
         }
 
-        /// Start the swarm event loop (non-blocking; runs in a WASM future).
-        pub fn start(&self) -> Result<(), JsValue> {
+        /// Start the swarm event loop and resolve when initialization completes.
+        pub async fn start(&self) -> Result<(), JsValue> {
             let local_key = self.local_key.clone();
             let on_message = self.on_message.clone();
+            let (ready_tx, ready_rx) = oneshot::channel::<()>();
 
             spawn_local(async move {
-                if let Err(e) = run_swarm(local_key, on_message).await {
+                if let Err(e) = run_swarm(local_key, on_message, Some(ready_tx)).await {
                     web_sys::console::error_1(&e);
                 }
             });
-            Ok(())
+
+            ready_rx
+                .await
+                .map_err(|_| JsValue::from_str("p2p node failed before initialization"))
         }
 
         /// Publish a message on the nostr-dag gossipsub topic.
@@ -1140,7 +1144,7 @@ pub mod wasm_node {
     // Thread-local channel used to hand messages from `broadcast` into the
     // swarm event loop.
     use std::cell::RefCell;
-    use futures::channel::mpsc as fmpsc;
+    use futures::channel::{mpsc as fmpsc, oneshot};
 
     thread_local! {
         static OUTBOUND_TX: RefCell<Option<fmpsc::Sender<String>>> = RefCell::new(None);
@@ -1149,6 +1153,7 @@ pub mod wasm_node {
     async fn run_swarm(
         local_key: identity::Keypair,
         on_message: Option<Function>,
+        ready_tx: Option<oneshot::Sender<()>>,
     ) -> Result<(), JsValue> {
         let topic = IdentTopic::new(NOSTR_DAG_TOPIC);
 
@@ -1188,6 +1193,10 @@ pub mod wasm_node {
             .with_behaviour(|_| behaviour)
             .map_err(|e| JsValue::from_str(&format!("behaviour: {e}")))?
             .build();
+
+        if let Some(tx) = ready_tx {
+            let _ = tx.send(());
+        }
 
         loop {
             futures::select! {

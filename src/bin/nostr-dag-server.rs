@@ -188,11 +188,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     })
                                     .collect();
                                 let now = now_ms() as i64;
-                                let store = es.inner.lock().unwrap();
-                                if let Err(e) = store.upsert_event(
-                                    id, pubkey, kind, created, content, sig, &msg, &tags, None, now,
-                                ) {
-                                    tracing::warn!(?e, "p2p: failed to store event");
+                                let es_for_store = Arc::clone(&es);
+                                let id = id.to_string();
+                                let pubkey = pubkey.to_string();
+                                let content = content.to_string();
+                                let sig = sig.to_string();
+                                let raw = msg.clone();
+                                let store_result = tokio::task::spawn_blocking(move || {
+                                    let store = es_for_store.inner.lock().expect("event store poisoned");
+                                    store.upsert_event(
+                                        &id,
+                                        &pubkey,
+                                        kind,
+                                        created,
+                                        &content,
+                                        &sig,
+                                        &raw,
+                                        &tags,
+                                        None,
+                                        now,
+                                    )
+                                })
+                                .await;
+                                match store_result {
+                                    Ok(Ok(())) => {}
+                                    Ok(Err(e)) => tracing::warn!(?e, "p2p: failed to store event"),
+                                    Err(e) => tracing::warn!(?e, "p2p: storage task failed"),
                                 }
                             }
                         }
@@ -311,7 +332,7 @@ async fn handle_connection(
             }
         }
     } else if method == "POST" && (path == EVENTS_ROUTE_PREFIX || path.starts_with("/events/")) {
-        match handle_events_post(body, &event_store) {
+        match handle_events_post(body, &event_store).await {
             Ok(()) => response_bytes(204, "No Content", Vec::new(), "text/plain; charset=utf-8", true),
             Err(err) => {
                 error!(?err, "event ingest failed");
@@ -350,7 +371,7 @@ async fn handle_connection(
             }
         }
     } else if path == EVENTS_ROUTE_PREFIX || path.starts_with("/events/") {
-        match handle_events_get(path, &request, &event_store) {
+        match handle_events_get(path, &request, &event_store).await {
             Ok((body, content_type)) => response_bytes(200, "OK", body, content_type, head_only),
             Err(RouteError::BadRequest) => {
                 response_text(400, "Bad Request", "Bad Request", "text/plain; charset=utf-8")
@@ -500,17 +521,17 @@ fn handle_peer_get(path: &str, peer_store: &Arc<PeerStore>) -> Result<(Vec<u8>, 
 /// The body must be a JSON object with at minimum `id`, `pubkey`, `kind`,
 /// `created_at`, `content`, `sig`, and `tags`.  An optional
 /// `source_relay` top-level string field may be included by the client.
-fn handle_events_post(body: &str, state: &Arc<EventStoreState>) -> Result<(), RouteError> {
+async fn handle_events_post(body: &str, state: &Arc<EventStoreState>) -> Result<(), RouteError> {
     let v: serde_json::Value =
         serde_json::from_str(body).map_err(|_| RouteError::BadRequest)?;
 
-    let id       = v["id"].as_str().ok_or(RouteError::BadRequest)?;
-    let pubkey   = v["pubkey"].as_str().ok_or(RouteError::BadRequest)?;
-    let kind     = v["kind"].as_i64().ok_or(RouteError::BadRequest)?;
-    let created  = v["created_at"].as_i64().ok_or(RouteError::BadRequest)?;
-    let content  = v["content"].as_str().unwrap_or("");
-    let sig      = v["sig"].as_str().unwrap_or("");
-    let source   = v["source_relay"].as_str();
+    let id = v["id"].as_str().ok_or(RouteError::BadRequest)?.to_string();
+    let pubkey = v["pubkey"].as_str().ok_or(RouteError::BadRequest)?.to_string();
+    let kind = v["kind"].as_i64().ok_or(RouteError::BadRequest)?;
+    let created = v["created_at"].as_i64().ok_or(RouteError::BadRequest)?;
+    let content = v["content"].as_str().unwrap_or("").to_string();
+    let sig = v["sig"].as_str().unwrap_or("").to_string();
+    let source = v["source_relay"].as_str().map(str::to_string);
 
     // Normalise the tags array into Vec<Vec<String>>.
     let tags: Vec<Vec<String>> = v["tags"]
@@ -527,10 +548,27 @@ fn handle_events_post(body: &str, state: &Arc<EventStoreState>) -> Result<(), Ro
         .collect();
 
     let now = now_ms() as i64;
-    let store = state.inner.lock().expect("event store poisoned");
-    store
-        .upsert_event(id, pubkey, kind, created, content, sig, body, &tags, source, now)
-        .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))
+    let raw = body.to_string();
+    let state = Arc::clone(state);
+    tokio::task::spawn_blocking(move || {
+        let store = state.inner.lock().expect("event store poisoned");
+        store
+            .upsert_event(
+                &id,
+                &pubkey,
+                kind,
+                created,
+                &content,
+                &sig,
+                &raw,
+                &tags,
+                source.as_deref(),
+                now,
+            )
+            .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))
+    })
+    .await
+    .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))?
 }
 
 /// GET /events                  — stats (counts)
@@ -538,72 +576,75 @@ fn handle_events_post(body: &str, state: &Arc<EventStoreState>) -> Result<(), Ro
 /// GET /events/pubkey/{hex}     — latest events from pubkey (up to 100)
 /// GET /events/relay/{url}      — latest events seen on relay (up to 100)
 /// GET /events/id/{hex}         — raw JSON for a single event id
-fn handle_events_get(
+async fn handle_events_get(
     path: &str,
     request: &str,
     state: &Arc<EventStoreState>,
 ) -> Result<(Vec<u8>, &'static str), RouteError> {
-    let suffix = path.trim_start_matches("/events").trim_start_matches('/');
+    let suffix = path.trim_start_matches("/events").trim_start_matches('/').to_string();
     let limit = query_param(request, "limit")
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(100)
         .min(1000);
+    let state = Arc::clone(state);
 
-    let store = state.inner.lock().expect("event store poisoned");
-
-    let body: Vec<u8> = if suffix.is_empty() || suffix == "stats" {
-        // Return summary counts.
-        let counts = serde_json::json!({
-            "events": store.event_count().unwrap_or(0),
-            "relays": store.relay_count().unwrap_or(0),
-            "users":  store.user_count().unwrap_or(0),
-        });
-        serde_json::to_vec(&counts)
-            .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))?
-    } else if let Some(rest) = suffix.strip_prefix("kind/") {
-        let kind: i64 = rest.parse().map_err(|_| RouteError::BadRequest)?;
-        let events = store
-            .events_by_kind(kind, limit)
-            .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))?;
-        let parsed: Vec<serde_json::Value> = events
-            .iter()
-            .filter_map(|s| serde_json::from_str(s).ok())
-            .collect();
-        serde_json::to_vec(&parsed)
-            .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))?
-    } else if let Some(rest) = suffix.strip_prefix("pubkey/") {
-        let events = store
-            .events_by_pubkey(rest, limit)
-            .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))?;
-        let parsed: Vec<serde_json::Value> = events
-            .iter()
-            .filter_map(|s| serde_json::from_str(s).ok())
-            .collect();
-        serde_json::to_vec(&parsed)
-            .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))?
-    } else if let Some(rest) = suffix.strip_prefix("relay/") {
-        let relay_url = urlencoding::decode(rest)
-            .map_err(|_| RouteError::BadRequest)?;
-        let events = store
-            .events_for_relay(&relay_url, limit)
-            .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))?;
-        let parsed: Vec<serde_json::Value> = events
-            .iter()
-            .filter_map(|s| serde_json::from_str(s).ok())
-            .collect();
-        serde_json::to_vec(&parsed)
-            .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))?
-    } else if let Some(rest) = suffix.strip_prefix("id/") {
-        match store
-            .get_event_json(rest)
-            .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))?
-        {
-            Some(json) => json.into_bytes(),
-            None => return Err(RouteError::NotFound),
+    let body = tokio::task::spawn_blocking(move || {
+        let store = state.inner.lock().expect("event store poisoned");
+        if suffix.is_empty() || suffix == "stats" {
+            // Return summary counts.
+            let counts = serde_json::json!({
+                "events": store.event_count().unwrap_or(0),
+                "relays": store.relay_count().unwrap_or(0),
+                "users":  store.user_count().unwrap_or(0),
+            });
+            serde_json::to_vec(&counts)
+                .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))
+        } else if let Some(rest) = suffix.strip_prefix("kind/") {
+            let kind: i64 = rest.parse().map_err(|_| RouteError::BadRequest)?;
+            let events = store
+                .events_by_kind(kind, limit)
+                .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))?;
+            let parsed: Vec<serde_json::Value> = events
+                .iter()
+                .filter_map(|s| serde_json::from_str(s).ok())
+                .collect();
+            serde_json::to_vec(&parsed)
+                .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))
+        } else if let Some(rest) = suffix.strip_prefix("pubkey/") {
+            let events = store
+                .events_by_pubkey(rest, limit)
+                .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))?;
+            let parsed: Vec<serde_json::Value> = events
+                .iter()
+                .filter_map(|s| serde_json::from_str(s).ok())
+                .collect();
+            serde_json::to_vec(&parsed)
+                .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))
+        } else if let Some(rest) = suffix.strip_prefix("relay/") {
+            let relay_url = urlencoding::decode(rest).map_err(|_| RouteError::BadRequest)?;
+            let events = store
+                .events_for_relay(&relay_url, limit)
+                .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))?;
+            let parsed: Vec<serde_json::Value> = events
+                .iter()
+                .filter_map(|s| serde_json::from_str(s).ok())
+                .collect();
+            serde_json::to_vec(&parsed)
+                .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))
+        } else if let Some(rest) = suffix.strip_prefix("id/") {
+            match store
+                .get_event_json(rest)
+                .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))?
+            {
+                Some(json) => Ok(json.into_bytes()),
+                None => Err(RouteError::NotFound),
+            }
+        } else {
+            Err(RouteError::NotFound)
         }
-    } else {
-        return Err(RouteError::NotFound);
-    };
+    })
+    .await
+    .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))??;
 
     Ok((body, "application/json; charset=utf-8"))
 }
