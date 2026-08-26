@@ -309,10 +309,10 @@ async fn handle_connection(
     } else {
         None
     };
-    // Redirect bare root to /git, which is the default landing page.
+    // Redirect bare root to /git/, which is the default landing page.
     let response = if (method == "GET" || method == "HEAD") && path == "/" {
-        trace!("redirecting / to /git");
-        response_redirect("/git")
+        trace!("redirecting / to /git/");
+        response_redirect("/git/")
     } else if let Some(location) = directory_redirect {
         trace!(from = %path, to = %location, "redirecting directory path to trailing slash");
         response_redirect(&location)
