@@ -1390,6 +1390,8 @@
       rejectDagBoot = reject;
     });
     void dagBootPromise.catch(() => {});
+    // Keep initial paint responsive: defer full DAG/WASM boot until after the
+    // first frame so regressions do not block header/status rendering.
     scheduleAfterPaint(() => {
       void (async () => {
         try {

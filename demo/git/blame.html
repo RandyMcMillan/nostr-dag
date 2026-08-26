@@ -92,6 +92,8 @@
         footer.log('libp2p', `bootstrap failed: ${e.message}`, 'error', 'unavailable');
       }
     }
+    // Delay libp2p bootstrap until after first paint to prevent cold-start
+    // regressions from blocking the blame UI and shared header render.
     scheduleAfterPaint(() => {
       void initGitP2P();
     });

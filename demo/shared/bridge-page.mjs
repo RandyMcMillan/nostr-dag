@@ -1241,10 +1241,14 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       void refreshRelayInfo(currentRelayUrls());
       scheduleRelayDiscovery(currentRelayUrls());
       scheduleBridgePresenceBroadcast(currentRelayUrls());
+      // Yield once before network startup so cached relay data can paint first
+      // and regressions in bridge boot are easier to detect.
       await yieldToBrowser();
       void startBridge();
     };
 
+    // Keep page-interactive rendering ahead of bridge startup by waiting until
+    // after first paint before running bootBridge().
     scheduleAfterPaint(() => {
       void bootBridge();
     });

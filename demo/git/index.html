@@ -156,6 +156,8 @@
         footer.log('libp2p', `bootstrap failed: ${e.message}`, 'error', 'unavailable');
       }
     }
+    // Delay libp2p bootstrap until after the first frame so initial layout and
+    // header controls stay responsive even on slower/mobile browsers.
     scheduleAfterPaint(() => {
       void initGitP2P();
     });
