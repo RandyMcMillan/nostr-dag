@@ -111,11 +111,11 @@
 
     window.__sharedHeaderApi = createSharedHeader(document.getElementById('sharedHeader'), {
       title: 'nostr-dag',
-      logoHref: resolveHref('./', window.location.href),
+      logoHref: resolveHref('./git/', window.location.href),
       iconHref: resolveHref('./shared/favicon.ico', window.location.href),
       subtitleHtml: '',
       navItems: [
-        { label: 'dag', href: resolveHref('./git/', window.location.href) },
+        { label: 'dag', href: resolveHref('./', window.location.href), current: true },
         { label: 'Bridge', href: resolveHref('./bridge/', window.location.href) },
       ],
     });
