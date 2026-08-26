@@ -460,6 +460,84 @@ mod tests {
         assert!(matches!(r, JoinResult::Rejected(_)), "{r:?}");
     }
 
+    /// Compute `git diff HEAD~1` bytes using git2, SHA-256 them, then drive a
+    /// 5-member DAG quorum to full attestation and seal over that digest.
+    ///
+    /// Gated on the `native` feature because it requires git2.
+    #[cfg(feature = "native")]
+    #[test]
+    fn quorum_signs_git_diff_head() {
+        use git2::Repository;
+        use sha2::{Digest, Sha256};
+
+        // Open the repository that contains this source file.
+        let repo_path = env!("CARGO_MANIFEST_DIR");
+        let repo = Repository::open(repo_path)
+            .expect("failed to open git repository at CARGO_MANIFEST_DIR");
+
+        // Resolve HEAD and its first parent (HEAD~1).
+        let head = repo.head().expect("no HEAD").peel_to_commit().expect("HEAD is not a commit");
+        let parent = head
+            .parent(0)
+            .expect("HEAD has no parent — need at least two commits for HEAD~1");
+
+        // Build the diff between HEAD~1 tree and HEAD tree.
+        let old_tree = parent.tree().expect("HEAD~1 has no tree");
+        let new_tree = head.tree().expect("HEAD has no tree");
+        let diff = repo
+            .diff_tree_to_tree(Some(&old_tree), Some(&new_tree), None)
+            .expect("diff_tree_to_tree failed");
+
+        // Collect raw unified diff bytes.
+        let mut diff_bytes: Vec<u8> = Vec::new();
+        diff.print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
+            diff_bytes.extend_from_slice(line.content());
+            true
+        })
+        .expect("diff print failed");
+
+        // SHA-256 the diff bytes.
+        let digest = Sha256::digest(&diff_bytes);
+        let sha256_hex = format!("{digest:x}");
+
+        let root_id = format!("git-diff-HEAD~1-{}", &head.id().to_string()[..16]);
+
+        // Stand up a 5-member quorum over the diff digest.
+        let keys = make_keys(5);
+        let seal_keys = Keys::generate();
+        let mut q = BlobQuorum::new(keys.iter().map(|k| k.public_key()), &root_id, &sha256_hex);
+
+        // 4 attestations → threshold reached (threshold(5) == 3, so count > 3 seals).
+        let mut last = None;
+        for k in &keys[..4] {
+            let ev = create_attest_event(k, &root_id, &sha256_hex, EventId::all_zeros(), &[])
+                .expect("create_attest_event failed");
+            last = Some(q.attest(ev, &seal_keys));
+        }
+
+        let result = last.unwrap();
+        assert!(
+            matches!(result, AttestResult::ThresholdReached { .. }),
+            "expected ThresholdReached, got {result:?}"
+        );
+        assert!(q.is_sealed(), "quorum should be sealed after 4/5 attestations");
+
+        let seal = q.seal_event().unwrap();
+        assert_eq!(seal.kind, PIP_SEAL_KIND, "seal must have PIP_SEAL_KIND");
+
+        // The seal content must reference the same root_id and sha256.
+        assert!(
+            seal.content.contains(&root_id),
+            "seal content missing root_id: {}",
+            seal.content
+        );
+        assert!(
+            seal.content.contains(&sha256_hex),
+            "seal content missing sha256: {}",
+            seal.content
+        );
+    }
+
     #[test]
     fn add_participant_recalculates_threshold() {
         // 5 → 8 participants; verify threshold at each step.
