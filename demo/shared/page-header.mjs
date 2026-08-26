@@ -34,10 +34,6 @@ export function createSharedHeader(root, options = {}) {
           ${subtitleHtml ? `<div class="muted header-subtitle">${subtitleHtml}</div>` : ''}
         </div>
         <div class="header-actions">
-          <div class="header-network-time status-checking" data-network-time role="status" aria-live="polite" title="Network time syncing">
-            <span class="header-network-label">Network time</span>
-            <span class="header-network-value" data-network-time-value>syncing…</span>
-          </div>
           ${navItems.length ? `
             <ul class="nav-links">
               ${navItems
@@ -53,6 +49,12 @@ export function createSharedHeader(root, options = {}) {
         </div>
       </nav>
     </div>
+    <!-- Network time sub-header: rendered asynchronously, initially hidden until first update -->
+    <div class="header-subbar header-subbar--hidden" data-network-time role="status" aria-live="polite" title="Network time syncing">
+      <span class="header-subbar-label">network time</span>
+      <span class="header-subbar-value" data-network-time-value>syncing…</span>
+      <span class="header-subbar-status" data-network-time-status></span>
+    </div>
   `;
 
   const networkTimeEl = typeof root.querySelector === 'function'
@@ -61,14 +63,27 @@ export function createSharedHeader(root, options = {}) {
   const networkTimeValueEl = typeof root.querySelector === 'function'
     ? root.querySelector('[data-network-time-value]')
     : null;
+  const networkTimeStatusEl = typeof root.querySelector === 'function'
+    ? root.querySelector('[data-network-time-status]')
+    : null;
 
   return {
     render() {},
     setNetworkTime({ text = 'syncing…', title = 'Network time syncing', state = 'checking' } = {}) {
       if (!networkTimeEl || !networkTimeValueEl) return;
-      networkTimeEl.className = `header-network-time status-${state}`;
-      networkTimeEl.title = title;
-      networkTimeValueEl.textContent = text;
+      // Async non-blocking reveal: schedule via requestAnimationFrame so the
+      // main nav paints first, then the sub-header fades in on first real update.
+      const update = () => {
+        networkTimeEl.className = `header-subbar status-${state}`;
+        networkTimeEl.title = title;
+        networkTimeValueEl.textContent = text;
+        if (networkTimeStatusEl) networkTimeStatusEl.textContent = state === 'checking' ? '⟳' : state === 'available' ? '✓' : '✗';
+      };
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(update);
+      } else {
+        update();
+      }
     },
   };
 }
