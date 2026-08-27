@@ -105,21 +105,11 @@
   </main>
 
   <script type="module">
-    import { bootstrapDemoPageChrome } from '../shared/page-shell.mjs';
-    import { resolveHref } from '../shared/page-path.js';
+    import { bootstrapDagChrome } from '../shared/dag-page.mjs';
 
-    bootstrapDemoPageChrome({
+    window.__dagChrome = bootstrapDagChrome({
       headerRoot: document.getElementById('sharedHeader'),
-      headerOptions: {
-        title: 'nostr-dag',
-        logoHref: resolveHref('../git/', window.location.href),
-        iconHref: resolveHref('../shared/favicon.ico', window.location.href),
-        subtitleHtml: '',
-        navItems: [
-          { label: 'dag', href: resolveHref('./', window.location.href), current: true },
-          { label: 'Bridge', href: resolveHref('../bridge/', window.location.href) },
-        ],
-      },
+      footerRoot: document.getElementById('sharedFooter'),
     });
   </script>
 
@@ -133,7 +123,7 @@
     import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     import { scheduleAfterPaint, yieldToBrowser } from '../shared/async-lifecycle.mjs';
     import { createSharedLibp2pStack, DEFAULT_BOOTSTRAP_PEERS } from '../shared/libp2p-stack.mjs';
-    import { getNetworkUnixTime, initSharedNetworkTime } from '../shared/network-time.mjs';
+    import { getNetworkUnixTime } from '../shared/network-time.mjs';
     import {
       buildAttestDraft,
       buildIssueDraft,
@@ -150,24 +140,19 @@
     } from '../shared/nip34-quorum.mjs';
     import { createDagActionContext, wireButtons } from './dag-actions.mjs';
 
+    import {
+      DAG_CACHE_KEY as CACHE_KEY,
+      DAG_FED_COUNT as FED_COUNT,
+      DAG_PARTICIPANT_DISPLAY_NAMES,
+      DAG_PARTICIPANT_NAMES,
+      DAG_QUORUM_ID as QUORUM_ID,
+      DAG_RELAYS as RELAYS,
+      DAG_SITE_URL as SITE_URL,
+    } from '../shared/dag-page.mjs';
+
     const wasmModuleUrl = new URL('../pkg/nostr_dag.js', window.location.href).href;
     const wasmBinaryUrl = new URL('../pkg/nostr_dag_bg.wasm', window.location.href).href;
-    // Step 5: define the relay set and durable browser cache keys.
-    const RELAYS = [
-      'wss://relay.damus.io',
-      'wss://nos.lol',
-      'wss://relay.nostr.com',
-      'wss://relay.nostr.band',
-      'wss://relay.primal.net',
-      'wss://nostr.wine',
-    ];
-    const CACHE_KEY = 'nostr-dag-demo-cache-v1';
-    const SITE_URL = 'https://randymcmillan.github.io/nostr-dag';
-    const QUORUM_ID = 'nostr-dag-quorum-5';
-    const PARTICIPANT_NAMES = ['alice', 'bob', 'carol', 'dave', 'eve'];
-    const PARTICIPANT_DISPLAY_NAMES = ['Alice', 'Bob', 'Carol', 'Dave', 'Eve'];
-
-    const FED_COUNT = 5;
+    const networkTime = window.__dagChrome.networkTime;
     let initWasm = null;
     let WasmDag = null;
     let dag = null;
@@ -191,17 +176,6 @@
     let libp2pPeerId = 'starting...';
     let libp2pModuleCounts = { loaded: 0, failed: 0, total: 0 };
     let activeRepoSequence = null;
-    const networkTime = initSharedNetworkTime();
-    const sharedFooterLogBuffer = window.__sharedFooterLogBuffer || [];
-    window.__sharedFooterLogBuffer = sharedFooterLogBuffer;
-    if (!window.__sharedFooter) {
-      window.__sharedFooter = {
-        log(...args) {
-          sharedFooterLogBuffer.push(args);
-        },
-        setState() {},
-      };
-    }
 
     // Step 6: bind the DOM nodes used by render() and the action handlers.
     const statusEl = document.getElementById('status');
@@ -1402,7 +1376,6 @@
   <footer id="sharedFooter"></footer>
   <script type="module">
     // Step 25: preload libp2p modules so the footer can report availability.
-    import { createLoggerFooter } from '../shared/logger.js';
     const modules = [
       ['libp2p', 'https://esm.sh/libp2p'],
       ['@libp2p/interface', 'https://esm.sh/@libp2p/interface'],
@@ -1451,17 +1424,7 @@
       }
     }
 
-    window.__sharedFooter = createLoggerFooter(document.getElementById('sharedFooter'), {
-      title: 'Logger',
-      initialState: 'idle',
-      initialTitle: 'starting...',
-      initialLevel: 'none',
-    });
     window.__sharedFooter.setLevel('none');
-    while (sharedFooterLogBuffer.length) {
-      const [label, text, levelOrState, maybeState] = sharedFooterLogBuffer.shift();
-      window.__sharedFooter.log(label, text, levelOrState, maybeState);
-    }
     window.__libp2pModuleRegistry = registry;
     window.__setLibp2pModuleCounts?.({ loaded, failed, total: modules.length });
   </script>
