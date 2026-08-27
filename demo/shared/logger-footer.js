@@ -417,6 +417,9 @@ export function createLoggerFooter(root, options = {}) {
   let open = persisted?.open ?? false;
   let level = persisted?.level ?? normalizeLevel(options.initialLevel || 'none');
   let autoScroll = true;
+  let hoverPaused = false;
+  let interactionPaused = false;
+  let interactionResumeTimer = null;
   let scrollListenerBound = false;
   let footerObserver = null;
   let scrollbarTimer = null;
@@ -439,6 +442,56 @@ export function createLoggerFooter(root, options = {}) {
     return (logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight) < 24;
   }
 
+  function setAutoScroll(nextValue) {
+    autoScroll = !!nextValue;
+  }
+
+  function clearInteractionResumeTimer() {
+    if (interactionResumeTimer) {
+      clearTimeout(interactionResumeTimer);
+      interactionResumeTimer = null;
+    }
+  }
+
+  function updateAutoScrollFromInteraction() {
+    setAutoScroll(!(hoverPaused || interactionPaused));
+  }
+
+  function pauseForHover() {
+    hoverPaused = true;
+    clearInteractionResumeTimer();
+    updateAutoScrollFromInteraction();
+  }
+
+  function resumeForHover() {
+    hoverPaused = false;
+    updateAutoScrollFromInteraction();
+    scheduleInteractionResume();
+  }
+
+  function pauseForInteraction() {
+    interactionPaused = true;
+    clearInteractionResumeTimer();
+    updateAutoScrollFromInteraction();
+  }
+
+  function scheduleInteractionResume() {
+    clearInteractionResumeTimer();
+    if (hoverPaused) return;
+    interactionResumeTimer = setTimeout(() => {
+      interactionPaused = false;
+      interactionResumeTimer = null;
+      updateAutoScrollFromInteraction();
+      if (open && autoScroll) scheduleScrollBottom();
+    }, 900);
+  }
+
+  function handleUserInteraction() {
+    pauseForInteraction();
+    scheduleInteractionResume();
+    showScrollbars();
+  }
+
   function scheduleScrollBottom() {
     if (!open || !autoScroll) return;
     const run = () => {
@@ -455,24 +508,44 @@ export function createLoggerFooter(root, options = {}) {
     if (scrollListenerBound) return;
     scrollListenerBound = true;
     logEl.addEventListener('scroll', () => {
-      autoScroll = isNearBottom();
+      if (!hoverPaused && !interactionPaused) {
+        autoScroll = isNearBottom();
+      }
       showScrollbars();
     });
     logEl.addEventListener('pointerdown', () => {
-      autoScroll = false;
-      showScrollbars();
+      handleUserInteraction();
     });
     logEl.addEventListener('wheel', () => {
-      autoScroll = false;
-      showScrollbars();
+      handleUserInteraction();
     }, { passive: true });
     logEl.addEventListener('touchstart', () => {
-      autoScroll = false;
-      showScrollbars();
+      handleUserInteraction();
     }, { passive: true });
-    logEl.addEventListener('pointerenter', showScrollbars);
-    logEl.addEventListener('mousemove', showScrollbars);
-    logEl.addEventListener('focusin', showScrollbars);
+    logEl.addEventListener('pointerenter', () => {
+      pauseForHover();
+      showScrollbars();
+    });
+    logEl.addEventListener('mouseenter', () => {
+      pauseForHover();
+      showScrollbars();
+    });
+    logEl.addEventListener('mousemove', handleUserInteraction);
+    logEl.addEventListener('pointermove', handleUserInteraction);
+    logEl.addEventListener('keydown', handleUserInteraction);
+    logEl.addEventListener('focusin', handleUserInteraction);
+    logEl.addEventListener('pointerleave', () => {
+      hoverPaused = false;
+      updateAutoScrollFromInteraction();
+      scheduleInteractionResume();
+      showScrollbars();
+    });
+    logEl.addEventListener('mouseleave', () => {
+      hoverPaused = false;
+      updateAutoScrollFromInteraction();
+      scheduleInteractionResume();
+      showScrollbars();
+    });
   }
 
   function bindScrollbarActivity() {
@@ -995,6 +1068,7 @@ export function createLoggerFooter(root, options = {}) {
       footerObserver = null;
       if (scrollbarTimer) clearTimeout(scrollbarTimer);
       scrollbarTimer = null;
+      clearInteractionResumeTimer();
       formatterWorker?.terminate?.();
       formatterWorker = null;
       setScrollbarsActive(false);
