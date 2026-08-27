@@ -886,6 +886,9 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     function compareRecentItems(a, b, sort) {
       const eventA = a?.event || {};
       const eventB = b?.event || {};
+      const bookmarkedA = isRecentBookmarked(a?.id);
+      const bookmarkedB = isRecentBookmarked(b?.id);
+      if (bookmarkedA !== bookmarkedB) return bookmarkedA ? -1 : 1;
       if (sort === 'newest') return Number(eventB.created_at || 0) - Number(eventA.created_at || 0);
       if (sort === 'kind') return Number(eventA.kind || 0) - Number(eventB.kind || 0) || String(a?.id || '').localeCompare(String(b?.id || ''));
       if (sort === 'id') return String(a?.id || '').localeCompare(String(b?.id || ''));
