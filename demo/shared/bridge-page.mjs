@@ -45,6 +45,10 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     const seenRelay = new Set();
     const seenLibp2p = new Set();
     const seenProcessed = new Set();
+    const recentNostrToLibp2p = [];
+    const recentLibp2pToNostr = [];
+    const recentSeenRelay = [];
+    const recentSeenLibp2p = [];
     const relayCatalog = new Map();
     const relayInfoCatalog = new Map();
     const relayInfoInFlight = new Map();
@@ -72,6 +76,16 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     const seenRelayCountEl = document.getElementById('seenRelayCount');
     const seenLibp2pCountEl = document.getElementById('seenLibp2pCount');
     const relayPublishCountEl = document.getElementById('relayPublishCount');
+    const nostrToLibp2pDetailCountEl = document.getElementById('nostrToLibp2pDetailCount');
+    const libp2pToNostrDetailCountEl = document.getElementById('libp2pToNostrDetailCount');
+    const seenRelayDetailCountEl = document.getElementById('seenRelayDetailCount');
+    const seenLibp2pDetailCountEl = document.getElementById('seenLibp2pDetailCount');
+    const relayPublishDetailCountEl = document.getElementById('relayPublishDetailCount');
+    const nostrToLibp2pRecentEl = document.getElementById('nostrToLibp2pRecent');
+    const libp2pToNostrRecentEl = document.getElementById('libp2pToNostrRecent');
+    const seenRelayRecentEl = document.getElementById('seenRelayRecent');
+    const seenLibp2pRecentEl = document.getElementById('seenLibp2pRecent');
+    const relayPublishDetailStatusEl = document.getElementById('relayPublishDetailStatus');
     const defaultRelayCountEl = document.getElementById('defaultRelayCount');
     const defaultRelayListEl = document.getElementById('defaultRelayList');
     const relayCountEl = document.getElementById('relayCount');
@@ -123,6 +137,41 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       seenRelayCountEl.textContent = String(seenRelay.size);
       seenLibp2pCountEl.textContent = String(seenLibp2p.size);
       relayPublishCountEl.textContent = `${metrics.relayPublishesSucceeded}/${metrics.relayPublishesAttempted}`;
+      if (nostrToLibp2pDetailCountEl) nostrToLibp2pDetailCountEl.textContent = String(metrics.nostrToLibp2p);
+      if (libp2pToNostrDetailCountEl) libp2pToNostrDetailCountEl.textContent = String(metrics.libp2pToNostr);
+      if (seenRelayDetailCountEl) seenRelayDetailCountEl.textContent = String(seenRelay.size);
+      if (seenLibp2pDetailCountEl) seenLibp2pDetailCountEl.textContent = String(seenLibp2p.size);
+      if (relayPublishDetailCountEl) relayPublishDetailCountEl.textContent = `${metrics.relayPublishesSucceeded}/${metrics.relayPublishesAttempted}`;
+      if (relayPublishDetailStatusEl) relayPublishDetailStatusEl.textContent = metrics.relayPublishesAttempted ? `${metrics.relayPublishesSucceeded} successful publishes` : 'No publish attempts yet.';
+      if (nostrToLibp2pRecentEl) {
+        nostrToLibp2pRecentEl.innerHTML = recentNostrToLibp2p.length
+          ? recentNostrToLibp2p.map((item) => `<div>${escapeHtml(item)}</div>`).join('')
+          : '<div class="muted">No forwarded events yet.</div>';
+      }
+      if (libp2pToNostrRecentEl) {
+        libp2pToNostrRecentEl.innerHTML = recentLibp2pToNostr.length
+          ? recentLibp2pToNostr.map((item) => `<div>${escapeHtml(item)}</div>`).join('')
+          : '<div class="muted">No published events yet.</div>';
+      }
+      if (seenRelayRecentEl) {
+        seenRelayRecentEl.innerHTML = recentSeenRelay.length
+          ? recentSeenRelay.map((item) => `<div>${escapeHtml(item)}</div>`).join('')
+          : '<div class="muted">No relays seen yet.</div>';
+      }
+      if (seenLibp2pRecentEl) {
+        seenLibp2pRecentEl.innerHTML = recentSeenLibp2p.length
+          ? recentSeenLibp2p.map((item) => `<div>${escapeHtml(item)}</div>`).join('')
+          : '<div class="muted">No libp2p messages seen yet.</div>';
+      }
+    }
+
+    function pushRecent(list, value, limit = 8) {
+      if (!value) return;
+      const text = String(value);
+      const index = list.indexOf(text);
+      if (index !== -1) list.splice(index, 1);
+      list.unshift(text);
+      if (list.length > limit) list.length = limit;
     }
 
     function bytesToHex(bytes) {
@@ -1063,6 +1112,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       sourceSet.add(event.id);
       const alreadyProcessed = seenProcessed.has(event.id);
       seenProcessed.add(event.id);
+      pushRecent(source === 'libp2p' ? recentSeenLibp2p : recentSeenRelay, event.id);
       refreshMetrics();
       return !alreadyProcessed;
     }
@@ -1152,6 +1202,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         recordRelayInfo(event);
         scheduleRelayRender();
       }
+      pushRecent(recentNostrToLibp2p, `${event.id} · ${sourceRelay || 'relay'}`);
       window.__sharedFooter?.log('nostr', `${source} kind ${event.kind} ${event.id} by ${event.pubkey}`, 'trace', 'checking');
       // Persist every verified event and its relationships to IndexedDB.
       try {
@@ -1185,6 +1236,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         return;
       }
       window.__sharedFooter?.log('bridge', `libp2p→nostr ${direction} ${event.kind} ${event.id}`, 'trace', 'checking');
+      pushRecent(recentLibp2pToNostr, `${event.id} · ${relayHints?.[0] || 'libp2p'}`);
       // Persist event from libp2p, recording all relay hints as known sources.
       try {
         const db = await getDagDb();
