@@ -62,7 +62,9 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       ['seenLibp2p', { query: '', sort: 'oldest', openIds: new Set(), paused: false }],
     ]);
     const recentListControllers = new Map();
-    const bookmarkedRecentIds = new Set(loadRecentBookmarks());
+    const bookmarkedRecentRecords = loadRecentBookmarks();
+    const bookmarkedRecentIds = new Set(bookmarkedRecentRecords.map((record) => record.id));
+    const bookmarkedRecentSnapshots = new Map(bookmarkedRecentRecords.map((record) => [record.id, record]));
     const recentListStateSnapshot = loadRecentListState();
     const relayCatalog = new Map();
     const relayInfoCatalog = new Map();
@@ -234,7 +236,21 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       try {
         const raw = window.localStorage.getItem(BOOKMARKS_KEY);
         const parsed = raw ? JSON.parse(raw) : [];
-        return Array.isArray(parsed) ? parsed.filter((value) => typeof value === 'string' && value) : [];
+        if (!Array.isArray(parsed)) return [];
+        return parsed.flatMap((value) => {
+          if (typeof value === 'string' && value) {
+            return [{ id: value, event: null, source: '', updated_at: 0 }];
+          }
+          if (value && typeof value === 'object' && typeof value.id === 'string' && value.id) {
+            return [{
+              id: value.id,
+              event: value.event && typeof value.event === 'object' ? value.event : null,
+              source: typeof value.source === 'string' ? value.source : '',
+              updated_at: Number(value.updated_at) || 0,
+            }];
+          }
+          return [];
+        });
       } catch {
         return [];
       }
@@ -327,7 +343,8 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
 
     function persistRecentBookmarks() {
       try {
-        window.localStorage.setItem(BOOKMARKS_KEY, JSON.stringify([...bookmarkedRecentIds]));
+        const snapshot = [...bookmarkedRecentIds].map((id) => bookmarkedRecentSnapshots.get(id) || { id, event: null, source: '', updated_at: 0 });
+        window.localStorage.setItem(BOOKMARKS_KEY, JSON.stringify(snapshot));
       } catch {
         // best effort only
       }
@@ -335,6 +352,20 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
 
     function isRecentBookmarked(id) {
       return Boolean(id && bookmarkedRecentIds.has(id));
+    }
+
+    function getBookmarkedSnapshot(id) {
+      return id ? bookmarkedRecentSnapshots.get(id) || null : null;
+    }
+
+    function bookmarkSnapshotFromItem(item) {
+      if (!item?.id) return null;
+      return {
+        id: item.id,
+        event: item.event && typeof item.event === 'object' ? item.event : null,
+        source: typeof item.source === 'string' ? item.source : '',
+        updated_at: Date.now(),
+      };
     }
 
     function updateBookmarkButtons(id) {
@@ -348,12 +379,15 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       });
     }
 
-    function toggleRecentBookmark(id) {
+    function toggleRecentBookmark(id, item = null) {
       if (!id) return;
       if (bookmarkedRecentIds.has(id)) {
         bookmarkedRecentIds.delete(id);
+        bookmarkedRecentSnapshots.delete(id);
       } else {
         bookmarkedRecentIds.add(id);
+        const snapshot = bookmarkSnapshotFromItem(item) || bookmarkedRecentSnapshots.get(id) || { id, event: null, source: '', updated_at: Date.now() };
+        bookmarkedRecentSnapshots.set(id, snapshot);
       }
       persistRecentBookmarks();
       updateBookmarkButtons(id);
@@ -391,6 +425,8 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         const createdAt = item?.event?.created_at
           ? new Date(Number(item.event.created_at) * 1000).toLocaleString()
           : '';
+        const bookmarkedSnapshot = getBookmarkedSnapshot(item?.id);
+        const event = item?.event || bookmarkedSnapshot?.event || {};
         return `
           <details class="bridge-recent-event"${item?.id && openItems.has(item.id) ? ' open' : ''}>
             <summary class="bridge-recent-summary">
@@ -407,11 +443,11 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
               >${isRecentBookmarked(item?.id) ? '★' : '☆'}</button>
             </summary>
             <div class="bridge-event-detail bridge-recent-detail">
-              <div class="small muted" style="margin-bottom:8px;">${escapeHtml(item?.event?.kind != null ? `kind ${item.event.kind}` : 'Nostr event')}</div>
-              <div class="mono" style="margin-bottom:8px;">${escapeHtml(item?.event?.id || 'n/a')}</div>
-              <div class="small" style="margin-bottom:8px;">${escapeHtml(item?.event?.pubkey || 'n/a')}</div>
+              <div class="small muted" style="margin-bottom:8px;">${escapeHtml(event?.kind != null ? `kind ${event.kind}` : 'Nostr event')}</div>
+              <div class="mono" style="margin-bottom:8px;">${escapeHtml(event?.id || 'n/a')}</div>
+              <div class="small" style="margin-bottom:8px;">${escapeHtml(event?.pubkey || 'n/a')}</div>
               <div class="small muted" style="margin-bottom:8px;">${escapeHtml(createdAt)}</div>
-              <pre class="mono" style="margin:0;">${escapeJson(item?.event || {})}</pre>
+              <pre class="mono" style="margin:0;">${escapeJson(event || {})}</pre>
             </div>
           </details>
         `;
@@ -426,7 +462,8 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         button.addEventListener('click', (event) => {
           stop(event);
           const id = button.getAttribute('data-bookmark-id');
-          toggleRecentBookmark(id);
+          const item = visibleItems.find((entry) => entry?.id === id) || null;
+          toggleRecentBookmark(id, item);
         });
       });
       container.querySelectorAll('details.bridge-recent-event').forEach((details, index) => {
