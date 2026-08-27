@@ -7,6 +7,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     import { measureRelayPing } from './relay-ping.mjs';
     import { createSharedLibp2pStack } from './libp2p-stack.mjs';
     import { getNetworkUnixTime, initSharedNetworkTime } from './network-time.mjs';
+    import { BRIDGE_PROTOCOL, BRIDGE_PROTOCOL_VERSION, buildBridgeEnvelope, collectBridgeRelayHints, unwrapBridgeEnvelope } from './bridge-protocol.mjs';
     import { createListContainerController } from './list-container.mjs';
     import { createPeersListController } from './peers-list.mjs';
     import { createRelaysListController } from './relays-list.mjs';
@@ -21,8 +22,6 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     const BOOKMARKS_KEY = 'nostr-dag-bridge-bookmarks-v1';
     const RECENT_LIST_STATE_KEY = 'nostr-dag-bridge-recent-list-state-v1';
     const PANEL_STATE_KEY = 'nostr-dag-bridge-panel-state-v1';
-    const BRIDGE_PROTOCOL = 'nostr-dag-bridge';
-    const BRIDGE_PROTOCOL_VERSION = 1;
     const DEFAULT_RELAYS = [
       'wss://relay.damus.io',
       'wss://nos.lol',
@@ -580,57 +579,6 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       return signer;
     }
 
-    function isNostrEvent(value) {
-      return Boolean(
-        value &&
-        typeof value === 'object' &&
-        typeof value.id === 'string' &&
-        typeof value.pubkey === 'string' &&
-        typeof value.sig === 'string' &&
-        typeof value.content === 'string' &&
-        Array.isArray(value.tags) &&
-        Number.isFinite(Number(value.kind)) &&
-        Number.isFinite(Number(value.created_at))
-      );
-    }
-
-    function collectBridgeRelayHints(value, found = new Set()) {
-      if (!value) return found;
-      if (typeof value === 'string') {
-        const normalized = normalizeRelayUrl(value);
-        if (normalized) found.add(normalized);
-        return found;
-      }
-      if (Array.isArray(value)) {
-        for (const item of value) collectBridgeRelayHints(item, found);
-        return found;
-      }
-      if (typeof value === 'object') {
-        for (const item of Object.values(value)) collectBridgeRelayHints(item, found);
-      }
-      return found;
-    }
-
-    // Perfect IP (PIP) bridge envelope:
-    // - `protocol` and `version` identify the wire format
-    // - `event` remains a standard Nostr event
-    // - `relay_hints` carries deduplicated relay URLs for the Nostr publish path
-    // See `/PIP.md` for the repository-level specification.
-    function buildBridgeEnvelope(event, direction, relayHints = [], meta = {}) {
-      return {
-        protocol: BRIDGE_PROTOCOL,
-        version: BRIDGE_PROTOCOL_VERSION,
-        direction,
-        event,
-        relay_hints: [...new Set(relayHints.filter(Boolean))],
-        topic,
-        origin_peer_id: meta.originPeerId || node?.peerId?.toString?.() || globalThis.__currentLibp2pPeerId || '',
-        forwarded_by: meta.forwardedBy || '',
-        hop_count: Number.isFinite(Number(meta.hopCount)) ? Number(meta.hopCount) : 0,
-        ts: Date.now(),
-      };
-    }
-
     function buildBridgePresenceEvent(relayHints = []) {
       const signer = getBridgeSigner();
       const publishRelays = prioritizeRelayUrls([
@@ -659,42 +607,6 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         content: JSON.stringify(payload),
         pubkey: signer.publicKey,
       }, signer.secretKey);
-    }
-
-    // PIP decoders accept either a full bridge envelope or a raw Nostr event for compatibility.
-    // When relay hints are present, they are normalized and forwarded to the Nostr publish path.
-    function unwrapBridgeEnvelope(message) {
-      if (!message || typeof message !== 'object') return null;
-      if (isNostrEvent(message)) {
-        return {
-          event: message,
-          relayHints: [],
-          direction: 'libp2p->nostr',
-          originPeerId: '',
-          forwardedBy: '',
-          hopCount: 0,
-        };
-      }
-      const protocol = message.protocol || message.source;
-      const event = message.event || message.payload?.event || message.payload || null;
-      const relayHints = [
-        ...collectBridgeRelayHints(message.relay_hints),
-        ...collectBridgeRelayHints(message.relayHints),
-        ...collectBridgeRelayHints(message.relays),
-        ...collectBridgeRelayHints(message.relayTargets),
-      ];
-      if (protocol && protocol !== BRIDGE_PROTOCOL && protocol !== 'nostr-dag-bridge') {
-        return null;
-      }
-      if (!event || !isNostrEvent(event)) return null;
-      return {
-        event,
-        relayHints,
-        direction: message.direction || 'libp2p->nostr',
-        originPeerId: String(message.origin_peer_id || message.originPeerId || ''),
-        forwardedBy: String(message.forwarded_by || message.forwardedBy || ''),
-        hopCount: Number.isFinite(Number(message.hop_count)) ? Number(message.hop_count) : 0,
-      };
     }
 
     function scheduleDefaultRelayRender() {
@@ -1700,7 +1612,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         window.__sharedFooter?.log('bridge', `publishToLibp2p: node not ready, dropping ${direction} ${event.kind} ${event.id}`, 'warn', 'unavailable');
         return;
       }
-      const payload = buildBridgeEnvelope(event, direction, currentRelayUrls(), meta);
+      const payload = buildBridgeEnvelope(event, direction, currentRelayUrls(), { ...meta, topic });
       await node.services.pubsub.publish(topic, encoder.encode(JSON.stringify(payload)));
       metrics.nostrToLibp2p += direction === 'nostr->libp2p' ? 1 : 0;
       refreshMetrics();
