@@ -66,6 +66,15 @@
             <div class="bridge-stat-desc"><b id="nostrToLibp2pCount">0</b><span>Nostr events the bridge forwarded into the libp2p pubsub path.</span></div>
           </summary>
           <div class="bridge-stat-body">
+            <div class="bridge-list-controls">
+              <input class="bridge-list-search" type="search" placeholder="Search IDs, pubkeys, kinds…" data-list-search="nostrToLibp2p">
+              <select class="bridge-list-sort" data-list-sort="nostrToLibp2p">
+                <option value="oldest">Oldest first</option>
+                <option value="newest">Newest first</option>
+                <option value="kind">Kind</option>
+                <option value="id">ID</option>
+              </select>
+            </div>
             <div class="bridge-stat-detail-grid">
               <div><div class="small muted">Count</div><div class="mono" id="nostrToLibp2pDetailCount">0</div></div>
               <div>
@@ -81,6 +90,15 @@
             <div class="bridge-stat-desc"><b id="libp2pToNostrCount">0</b><span>Events the bridge received from libp2p and published back to Nostr relays.</span></div>
           </summary>
           <div class="bridge-stat-body">
+            <div class="bridge-list-controls">
+              <input class="bridge-list-search" type="search" placeholder="Search IDs, pubkeys, kinds…" data-list-search="libp2pToNostr">
+              <select class="bridge-list-sort" data-list-sort="libp2pToNostr">
+                <option value="oldest">Oldest first</option>
+                <option value="newest">Newest first</option>
+                <option value="kind">Kind</option>
+                <option value="id">ID</option>
+              </select>
+            </div>
             <div class="bridge-stat-detail-grid">
               <div><div class="small muted">Count</div><div class="mono" id="libp2pToNostrDetailCount">0</div></div>
               <div>
@@ -96,6 +114,15 @@
             <div class="bridge-stat-desc"><b id="seenRelayCount">0</b><span>Unique event IDs first seen from Nostr relays.</span></div>
           </summary>
           <div class="bridge-stat-body">
+            <div class="bridge-list-controls">
+              <input class="bridge-list-search" type="search" placeholder="Search IDs, pubkeys, kinds…" data-list-search="seenRelay">
+              <select class="bridge-list-sort" data-list-sort="seenRelay">
+                <option value="oldest">Oldest first</option>
+                <option value="newest">Newest first</option>
+                <option value="kind">Kind</option>
+                <option value="id">ID</option>
+              </select>
+            </div>
             <div class="bridge-stat-detail-grid">
               <div><div class="small muted">Count</div><div class="mono" id="seenRelayDetailCount">0</div></div>
               <div>
@@ -111,6 +138,15 @@
             <div class="bridge-stat-desc"><b id="seenLibp2pCount">0</b><span>Unique event IDs first seen from libp2p messages.</span></div>
           </summary>
           <div class="bridge-stat-body">
+            <div class="bridge-list-controls">
+              <input class="bridge-list-search" type="search" placeholder="Search IDs, pubkeys, kinds…" data-list-search="seenLibp2p">
+              <select class="bridge-list-sort" data-list-sort="seenLibp2p">
+                <option value="oldest">Oldest first</option>
+                <option value="newest">Newest first</option>
+                <option value="kind">Kind</option>
+                <option value="id">ID</option>
+              </select>
+            </div>
             <div class="bridge-stat-detail-grid">
               <div><div class="small muted">Count</div><div class="mono" id="seenLibp2pDetailCount">0</div></div>
               <div>

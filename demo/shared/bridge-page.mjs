@@ -49,6 +49,12 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     const recentLibp2pToNostr = [];
     const recentSeenRelay = [];
     const recentSeenLibp2p = [];
+    const recentListState = new Map([
+      ['nostrToLibp2p', { query: '', sort: 'oldest' }],
+      ['libp2pToNostr', { query: '', sort: 'oldest' }],
+      ['seenRelay', { query: '', sort: 'oldest' }],
+      ['seenLibp2p', { query: '', sort: 'oldest' }],
+    ]);
     const relayCatalog = new Map();
     const relayInfoCatalog = new Map();
     const relayInfoInFlight = new Map();
@@ -97,6 +103,23 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     const relayListEl = document.getElementById('relayList');
     const peerCountEl = document.getElementById('peerCount');
     const peerListEl = document.getElementById('peerList');
+
+    document.querySelectorAll('[data-list-search]').forEach((input) => {
+      input.addEventListener('input', () => {
+        const key = input.getAttribute('data-list-search');
+        if (!key || !recentListState.has(key)) return;
+        recentListState.get(key).query = input.value || '';
+        renderRecentLists();
+      });
+    });
+    document.querySelectorAll('[data-list-sort]').forEach((select) => {
+      select.addEventListener('change', () => {
+        const key = select.getAttribute('data-list-sort');
+        if (!key || !recentListState.has(key)) return;
+        recentListState.get(key).sort = select.value || 'oldest';
+        renderRecentLists();
+      });
+    });
 
     let node = null;
     let topic = 'nostr/bridge';
@@ -148,18 +171,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       if (seenLibp2pDetailCountEl) seenLibp2pDetailCountEl.textContent = String(seenLibp2p.size);
       if (relayPublishDetailCountEl) relayPublishDetailCountEl.textContent = `${metrics.relayPublishesSucceeded}/${metrics.relayPublishesAttempted}`;
       if (relayPublishDetailStatusEl) relayPublishDetailStatusEl.textContent = metrics.relayPublishesAttempted ? `${metrics.relayPublishesSucceeded} successful publishes` : 'No publish attempts yet.';
-      if (nostrToLibp2pRecentEl) {
-        renderRecentList(nostrToLibp2pRecentEl, recentNostrToLibp2p, (item) => renderEventInspector(nostrToLibp2pEventDetailEl, item, 'Forwarded Nostr event'));
-      }
-      if (libp2pToNostrRecentEl) {
-        renderRecentList(libp2pToNostrRecentEl, recentLibp2pToNostr, (item) => renderEventInspector(libp2pToNostrEventDetailEl, item, 'Published Nostr event'));
-      }
-      if (seenRelayRecentEl) {
-        renderRecentList(seenRelayRecentEl, recentSeenRelay, (item) => renderEventInspector(seenRelayEventDetailEl, item, 'Seen Nostr event'));
-      }
-      if (seenLibp2pRecentEl) {
-        renderRecentList(seenLibp2pRecentEl, recentSeenLibp2p, (item) => renderEventInspector(seenLibp2pEventDetailEl, item, 'Seen libp2p event'));
-      }
+      renderRecentLists();
     }
 
     function pushRecent(list, value) {
@@ -173,57 +185,59 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       return escapeHtml(JSON.stringify(value, null, 2));
     }
 
-    function renderRecentList(container, items, onSelect) {
+    function renderRecentList(container, items, onSelect, key) {
       if (!container) return;
-      if (container.dataset.renderedCount === undefined) {
-        container.dataset.renderedCount = '0';
-      }
-      const renderedCount = Number(container.dataset.renderedCount || '0');
-      if (!items.length) {
-        container.innerHTML = renderedCount > 0 ? '' : '<div class="muted">No recent events yet.</div>';
-        container.dataset.renderedCount = '0';
+      const visibleItems = getRecentItems(key, items);
+      if (!visibleItems.length) {
+        container.innerHTML = '<div class="muted">No recent events yet.</div>';
         return;
       }
-      if (renderedCount === 0 && container.querySelector('.muted')) {
-        container.innerHTML = '';
-      }
-      if (renderedCount > items.length) {
-        container.innerHTML = '';
-        container.dataset.renderedCount = '0';
-      }
-      const start = Number(container.dataset.renderedCount || '0');
-      for (let index = start; index < items.length; index += 1) {
-        const item = items[index];
+      container.innerHTML = visibleItems.map((item) => {
         const label = item?.id || 'n/a';
         const suffix = item?.source ? ` · ${item.source}` : '';
-        const details = document.createElement('details');
-        details.className = 'bridge-recent-event';
         const createdAt = item?.event?.created_at
           ? new Date(Number(item.event.created_at) * 1000).toLocaleString()
           : '';
-        details.innerHTML = `
-          <summary class="bridge-recent-summary">
-            <span class="mono">${escapeHtml(label)}</span>
-            <span class="muted">${escapeHtml(suffix)}</span>
-          </summary>
-          <div class="bridge-event-detail bridge-recent-detail">
-            <div class="small muted" style="margin-bottom:8px;">${escapeHtml(item?.event?.kind != null ? `kind ${item.event.kind}` : 'Nostr event')}</div>
-            <div class="mono" style="margin-bottom:8px;">${escapeHtml(item?.event?.id || 'n/a')}</div>
-            <div class="small" style="margin-bottom:8px;">${escapeHtml(item?.event?.pubkey || 'n/a')}</div>
-            <div class="small muted" style="margin-bottom:8px;">${escapeHtml(createdAt)}</div>
-            <pre class="mono" style="margin:0;">${escapeJson(item?.event || {})}</pre>
-          </div>
+        return `
+          <details class="bridge-recent-event">
+            <summary class="bridge-recent-summary">
+              <span class="mono">${escapeHtml(label)}</span>
+              <span class="muted">${escapeHtml(suffix)}</span>
+            </summary>
+            <div class="bridge-event-detail bridge-recent-detail">
+              <div class="small muted" style="margin-bottom:8px;">${escapeHtml(item?.event?.kind != null ? `kind ${item.event.kind}` : 'Nostr event')}</div>
+              <div class="mono" style="margin-bottom:8px;">${escapeHtml(item?.event?.id || 'n/a')}</div>
+              <div class="small" style="margin-bottom:8px;">${escapeHtml(item?.event?.pubkey || 'n/a')}</div>
+              <div class="small muted" style="margin-bottom:8px;">${escapeHtml(createdAt)}</div>
+              <pre class="mono" style="margin:0;">${escapeJson(item?.event || {})}</pre>
+            </div>
+          </details>
         `;
+      }).join('');
+      container.querySelectorAll('details.bridge-recent-event').forEach((details, index) => {
         details.addEventListener('toggle', () => {
           if (!details.open) return;
           container.querySelectorAll('details.bridge-recent-event[open]').forEach((other) => {
             if (other !== details) other.open = false;
           });
-          onSelect(item || null);
+          onSelect(visibleItems[index] || null);
         });
-        container.appendChild(details);
-      }
-      container.dataset.renderedCount = String(items.length);
+      });
+    }
+
+    function renderRecentLists() {
+      renderRecentList(nostrToLibp2pRecentEl, recentNostrToLibp2p, (item) => {
+        if (item) return;
+      }, 'nostrToLibp2p');
+      renderRecentList(libp2pToNostrRecentEl, recentLibp2pToNostr, (item) => {
+        if (item) return;
+      }, 'libp2pToNostr');
+      renderRecentList(seenRelayRecentEl, recentSeenRelay, (item) => {
+        if (item) return;
+      }, 'seenRelay');
+      renderRecentList(seenLibp2pRecentEl, recentSeenLibp2p, (item) => {
+        if (item) return;
+      }, 'seenLibp2p');
     }
 
     function bytesToHex(bytes) {
@@ -595,6 +609,41 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
 
     function measuredRelayCount(relays) {
       return relays.filter((relay) => relayPingSortValue(relayInfoForUrl(relay)) < Number.POSITIVE_INFINITY).length;
+    }
+
+    function normalizeText(value) {
+      return String(value || '').toLowerCase();
+    }
+
+    function recentItemSearchText(item) {
+      const event = item?.event || {};
+      const tags = Array.isArray(event.tags) ? event.tags.flat().join(' ') : '';
+      return [
+        item?.id,
+        item?.source,
+        event?.id,
+        event?.kind,
+        event?.pubkey,
+        event?.content,
+        tags,
+      ].map(normalizeText).join(' ');
+    }
+
+    function compareRecentItems(a, b, sort) {
+      const eventA = a?.event || {};
+      const eventB = b?.event || {};
+      if (sort === 'newest') return Number(eventB.created_at || 0) - Number(eventA.created_at || 0);
+      if (sort === 'kind') return Number(eventA.kind || 0) - Number(eventB.kind || 0) || String(a?.id || '').localeCompare(String(b?.id || ''));
+      if (sort === 'id') return String(a?.id || '').localeCompare(String(b?.id || ''));
+      return Number(eventA.created_at || 0) - Number(eventB.created_at || 0) || String(a?.id || '').localeCompare(String(b?.id || ''));
+    }
+
+    function getRecentItems(key, items) {
+      const state = recentListState.get(key) || { query: '', sort: 'oldest' };
+      const query = normalizeText(state.query).trim();
+      return [...items]
+        .filter((item) => !query || recentItemSearchText(item).includes(query))
+        .sort((a, b) => compareRecentItems(a, b, state.sort));
     }
 
     async function persistBridgeCache() {
