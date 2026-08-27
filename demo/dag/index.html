@@ -125,6 +125,7 @@
     import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     import { scheduleAfterPaint, yieldToBrowser } from '../shared/async-lifecycle.mjs';
     import { createSharedLibp2pStack, DEFAULT_BOOTSTRAP_PEERS } from '../shared/libp2p-stack.mjs';
+    import { buildBridgeEnvelope } from '../shared/bridge-protocol.mjs';
     import { getNetworkUnixTime } from '../shared/network-time.mjs';
     import {
       buildAttestDraft,
@@ -164,6 +165,7 @@
     const njumpAvailability = new Map();
     const pool = new SimplePool();
     const broadcastRelays = new Set(RELAYS);
+    const BRIDGE_TOPIC = 'nostr/bridge';
     const watchedRelays = new Set();
     const retryTimers = new Map();
     const broadcastQueue = [];
@@ -176,6 +178,8 @@
     let broadcastQueueRunning = false;
     let relayDiscoveryStarted = false;
     let libp2pPeerId = 'starting...';
+    let dagLibp2pNode = null;
+    let dagLibp2pNodePromise = null;
     let libp2pModuleCounts = { loaded: 0, failed: 0, total: 0 };
     let activeRepoSequence = null;
 
@@ -204,6 +208,14 @@
       const id = event?.id || '-';
       const pubkey = event?.pubkey || '-';
       window.__sharedFooter?.log('nostr', `${action} kind ${kind} ${id} by ${pubkey}`, level, state);
+    }
+
+    async function getDagLibp2pNode() {
+      if (dagLibp2pNode) return dagLibp2pNode;
+      if (dagLibp2pNodePromise) {
+        await dagLibp2pNodePromise;
+      }
+      return dagLibp2pNode;
     }
 
     // Step 7: derive deterministic participant keys from stable names.
@@ -390,22 +402,30 @@
     async function initLibp2pNode() {
       window.__sharedFooter?.log('libp2p', 'bootstrapping libp2p node', 'debug', 'checking');
       try {
-        const { node, bootstrapPeers } = await createSharedLibp2pStack({
-          bootstrapPeers: DEFAULT_BOOTSTRAP_PEERS,
-          onLog(level, text, state) {
-            window.__sharedFooter?.log('libp2p', text, level, state);
-          },
-          onPeer(peerEvent) {
-            window.__sharedFooter?.log('libp2p', `${peerEvent.kind} ${peerEvent.peer}`, 'trace', 'checking');
-          },
-          onStatus(state, peerId) {
-            window.__sharedFooter?.log('libp2p', `${state} ${peerId}`, 'info', 'available');
-          },
-        });
-        window.__sharedFooter?.log('libp2p', `bootstrap peers ready: ${bootstrapPeers.length}`, 'debug', 'available');
-        networkTime.attachNode(node);
-        setLibp2pStatus(node.peerId.toString());
-        window.__sharedFooter?.log('libp2p', `started ${node.peerId.toString()}`, 'info', 'available');
+        // The DAG page is a bridge: every event is published to relays and
+        // mirrored onto libp2p pubsub so the bridge page can fan it back out.
+        dagLibp2pNodePromise = (async () => {
+          const { node, bootstrapPeers } = await createSharedLibp2pStack({
+            bootstrapPeers: DEFAULT_BOOTSTRAP_PEERS,
+            onLog(level, text, state) {
+              window.__sharedFooter?.log('libp2p', text, level, state);
+            },
+            onPeer(peerEvent) {
+              window.__sharedFooter?.log('libp2p', `${peerEvent.kind} ${peerEvent.peer}`, 'trace', 'checking');
+            },
+            onStatus(state, peerId) {
+              window.__sharedFooter?.log('libp2p', `${state} ${peerId}`, 'info', 'available');
+            },
+          });
+          window.__sharedFooter?.log('libp2p', `bootstrap peers ready: ${bootstrapPeers.length}`, 'debug', 'available');
+          networkTime.attachNode(node);
+          setLibp2pStatus(node.peerId.toString());
+          window.__sharedFooter?.log('libp2p', `started ${node.peerId.toString()}`, 'info', 'available');
+          dagLibp2pNode = node;
+          globalThis.__dagLibp2pNode = node;
+          return node;
+        })();
+        await dagLibp2pNodePromise;
       } catch (e) {
         setLibp2pStatus('');
         window.__sharedFooter?.log('libp2p', `bootstrap failed: ${e.message}`, 'error', 'unavailable');
@@ -1031,7 +1051,8 @@
 
     async function publishEvent(event) {
       logNostrEvent('publish', event, 'trace', 'checking');
-      return queueBroadcast([event], `Event ${event.kind}`);
+      // Bridge rule: a DAG event should be mirrored to both transports.
+      return publishToBothProtocols([event], `Event ${event.kind}`);
     }
 
     async function publishEvents(eventsToPublish, successLabel) {
@@ -1040,6 +1061,34 @@
       }
       window.__sharedFooter?.log('demo', `publish ${eventsToPublish.length} events for ${successLabel}`, 'info', 'checking');
       window.__sharedFooter?.log('demo', `publish batch ids: ${eventsToPublish.map((event) => event.id).join(', ')}`, 'info', 'checking');
+      return publishToBothProtocols(eventsToPublish, successLabel);
+    }
+
+    async function publishToLibp2p(event, direction, meta = {}) {
+      const node = await getDagLibp2pNode();
+      if (!node?.services?.pubsub?.publish) {
+        window.__sharedFooter?.log('libp2p', `publishToLibp2p: node not ready, dropping ${direction} ${event.kind} ${event.id}`, 'warn', 'unavailable');
+        return false;
+      }
+      // Mirror the same signed event into the bridge pubsub topic so the
+      // browser bridge can fan it back out to the other transport.
+      const payload = buildBridgeEnvelope(event, direction, [...broadcastRelays], { ...meta, topic: BRIDGE_TOPIC });
+      window.__sharedFooter?.log('libp2p', `publish ${direction} ${event.kind} ${event.id} on ${BRIDGE_TOPIC}`, 'info', 'checking');
+      window.__sharedFooter?.log('libp2p', `bridge envelope:\n${JSON.stringify(payload, null, 2)}`, 'trace', 'checking');
+      await node.services.pubsub.publish(BRIDGE_TOPIC, new TextEncoder().encode(JSON.stringify(payload)));
+      window.__sharedFooter?.log('libp2p', `published ${direction} ${event.kind} ${event.id} on ${BRIDGE_TOPIC}`, 'info', 'available');
+      return true;
+    }
+
+    async function publishToBothProtocols(eventsToPublish, successLabel) {
+      // Bridge rule: every event is emitted to relays and mirrored to libp2p.
+      for (const event of eventsToPublish) {
+        try {
+          await publishToLibp2p(event, 'nostr->libp2p', { successLabel });
+        } catch (e) {
+          window.__sharedFooter?.log('libp2p', `publish failed for ${event.id}: ${e.message}`, 'warn', 'unavailable');
+        }
+      }
       return queueBroadcast(eventsToPublish, successLabel);
     }
 
