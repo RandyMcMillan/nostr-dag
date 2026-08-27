@@ -83,6 +83,27 @@ const emitLog = (onLog, level, text, state = "checking") => {
   }
 };
 
+const peerDetailSummary = (detail) => {
+  if (!detail || typeof detail !== "object") return "";
+  const bits = [];
+  const scalarText = (value) => {
+    if (value == null) return "";
+    if (typeof value === "string") return value;
+    if (typeof value === "number" || typeof value === "boolean") return String(value);
+    if (typeof value?.toString === "function") {
+      const text = value.toString();
+      if (text && text !== "[object Object]") return text;
+    }
+    return "";
+  };
+  if (scalarText(detail.connection?.remoteAddr)) bits.push(scalarText(detail.connection.remoteAddr));
+  if (detail.connection?.stat?.direction) bits.push(detail.connection.stat.direction);
+  if (scalarText(detail.peerId)) bits.push(scalarText(detail.peerId));
+  if (scalarText(detail.remotePeer)) bits.push(scalarText(detail.remotePeer));
+  if (!bits.length && detail.multiaddrs?.length) bits.push(scalarText(detail.multiaddrs[0]) || String(detail.multiaddrs[0]));
+  return bits.filter(Boolean).join(" · ");
+};
+
 const passthroughFilter = (multiaddrs) => (Array.isArray(multiaddrs) ? multiaddrs.filter(Boolean) : []).filter(Boolean);
 
 const ensureTransportFilters = (transport, label, onLog) => {
@@ -101,8 +122,9 @@ const ensureTransportFilters = (transport, label, onLog) => {
 const emitPeerEvent = (onPeer, onLog, kind, event, level = "debug", state = "checking") => {
   const peer = peerLabel(event);
   const detail = event?.detail || null;
+  const summary = peerDetailSummary(detail);
   onPeer?.({ kind, peer, detail });
-  emitLog(onLog, level, `peer ${kind}: ${peer}`, state);
+  emitLog(onLog, level, `peer ${kind}: ${peer}${summary ? ` (${summary})` : ""}`, state);
   emitLog(onLog, "trace", `peer ${kind} detail: ${describePeerDetail(detail)}`, state);
   reportPeers({
     peer_id: globalThis.__currentLibp2pPeerId || peer,
