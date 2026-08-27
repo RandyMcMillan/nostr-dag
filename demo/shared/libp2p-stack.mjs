@@ -191,6 +191,9 @@ export async function createSharedLibp2pStack({
 } = {}) {
   // Resolve the bootstrap peer list early so both WASM and JS paths can use it.
   const peers = [...new Set(bootstrapPeers.filter(Boolean))];
+  if (preferWebSocketsOnly) {
+    emitLog(onLog, "info", "starting with websocket-only libp2p fallback", "checking");
+  }
   // ---------------------------------------------------------------------------
   // Try the WASM P2pNode first (src/p2p.rs, p2p-wasm feature)
   // ---------------------------------------------------------------------------
@@ -271,10 +274,6 @@ export async function createSharedLibp2pStack({
   emitLog(onLog, "trace", "shared libp2p stack configuring transports and services", "checking");
   emitLog(onLog, "trace", "transports: webSockets, webRTC, webRTCDirect, circuitRelayTransport", "checking");
   emitLog(onLog, "trace", "services: identify, autoNAT, dcutr, pubsub", "checking");
-  if (preferWebSocketsOnly) {
-    emitLog(onLog, "info", "starting with websocket-only libp2p fallback", "checking");
-  }
-
   const buildTransportConfig = ({ webRTC: useWebRTC, webRTCDirect: useWebRTCDirect, circuitRelay: useCircuitRelay }) => ({
     transports: [
       ensureTransportFilters(webSockets(), "webSockets", onLog),
@@ -297,22 +296,6 @@ export async function createSharedLibp2pStack({
         webRTC: false,
         webRTCDirect: false,
         circuitRelay: false,
-      }),
-    },
-    {
-      name: "no webRTCDirect",
-      ...buildTransportConfig({
-        webRTC: includeWebRTC,
-        webRTCDirect: false,
-        circuitRelay: includeCircuitRelay,
-      }),
-    },
-    {
-      name: "full browser stack",
-      ...buildTransportConfig({
-        webRTC: includeWebRTC,
-        webRTCDirect: includeWebRTCDirect,
-        circuitRelay: includeCircuitRelay,
       }),
     },
   ] : [
