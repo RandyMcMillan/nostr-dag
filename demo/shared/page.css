@@ -339,22 +339,40 @@ button:hover, a.button:hover { background:var(--button-hover); }
 }
 
 .bridge-recent-event {
-  display:flex;
-  justify-content:space-between;
-  gap:10px;
+  display:block;
   width:100%;
-  padding:8px 10px;
   border:1px solid var(--border);
   border-radius:8px;
   background:rgba(255,255,255,.02);
-  color:inherit;
-  cursor:pointer;
-  text-align:left;
+  overflow:hidden;
 }
 
 .bridge-recent-event:hover {
   border-color:var(--accent);
   background:rgba(251,146,60,.08);
+}
+
+.bridge-recent-summary {
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  width:100%;
+  padding:8px 10px;
+  color:inherit;
+  cursor:pointer;
+  text-align:left;
+  list-style:none;
+}
+
+.bridge-recent-summary::-webkit-details-marker {
+  display:none;
+}
+
+.bridge-recent-detail {
+  border:0;
+  border-top:1px solid rgba(148,163,184,.18);
+  border-radius:0;
+  margin-top:0;
 }
 
 .bridge-event-detail {

@@ -173,22 +173,6 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       return escapeHtml(JSON.stringify(value, null, 2));
     }
 
-    function renderEventInspector(container, item, title = 'Nostr event') {
-      if (!container) return;
-      if (!item?.event) {
-        container.innerHTML = '<div class="muted">Select an event ID to inspect its Nostr event.</div>';
-        return;
-      }
-      const event = item.event;
-      container.innerHTML = `
-        <div class="small muted" style="margin-bottom:8px;">${escapeHtml(title)}</div>
-        <div class="mono" style="margin-bottom:8px;">${escapeHtml(event.id)}</div>
-        <div class="small" style="margin-bottom:8px;">kind ${escapeHtml(event.kind)} · ${escapeHtml(event.pubkey)}</div>
-        <div class="small muted" style="margin-bottom:8px;">${escapeHtml(new Date(Number(event.created_at) * 1000).toLocaleString())}</div>
-        <pre class="mono" style="margin:0;">${escapeJson(event)}</pre>
-      `;
-    }
-
     function renderRecentList(container, items, onSelect) {
       if (!container) return;
       if (container.dataset.renderedCount === undefined) {
@@ -209,12 +193,32 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         const item = items[index];
         const label = item?.id || 'n/a';
         const suffix = item?.source ? ` · ${item.source}` : '';
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'bridge-recent-event';
-        button.innerHTML = `<span class="mono">${escapeHtml(label)}</span><span class="muted">${escapeHtml(suffix)}</span>`;
-        button.addEventListener('click', () => onSelect(item || null));
-        container.appendChild(button);
+        const details = document.createElement('details');
+        details.className = 'bridge-recent-event';
+        const createdAt = item?.event?.created_at
+          ? new Date(Number(item.event.created_at) * 1000).toLocaleString()
+          : '';
+        details.innerHTML = `
+          <summary class="bridge-recent-summary">
+            <span class="mono">${escapeHtml(label)}</span>
+            <span class="muted">${escapeHtml(suffix)}</span>
+          </summary>
+          <div class="bridge-event-detail bridge-recent-detail">
+            <div class="small muted" style="margin-bottom:8px;">${escapeHtml(item?.event?.kind != null ? `kind ${item.event.kind}` : 'Nostr event')}</div>
+            <div class="mono" style="margin-bottom:8px;">${escapeHtml(item?.event?.id || 'n/a')}</div>
+            <div class="small" style="margin-bottom:8px;">${escapeHtml(item?.event?.pubkey || 'n/a')}</div>
+            <div class="small muted" style="margin-bottom:8px;">${escapeHtml(createdAt)}</div>
+            <pre class="mono" style="margin:0;">${escapeJson(item?.event || {})}</pre>
+          </div>
+        `;
+        details.addEventListener('toggle', () => {
+          if (!details.open) return;
+          container.querySelectorAll('details.bridge-recent-event[open]').forEach((other) => {
+            if (other !== details) other.open = false;
+          });
+          onSelect(item || null);
+        });
+        container.appendChild(details);
       }
       container.dataset.renderedCount = String(items.length);
     }
