@@ -189,7 +189,8 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       if (!container) return;
       const visibleItems = getRecentItems(key, items);
       if (!visibleItems.length) {
-        container.innerHTML = '<div class="muted">No recent events yet.</div>';
+        const query = (recentListState.get(key)?.query || '').trim();
+        container.innerHTML = `<div class="muted">${escapeHtml(query ? 'No matching events.' : 'No recent events yet.')}</div>`;
         return;
       }
       container.innerHTML = visibleItems.map((item) => {
