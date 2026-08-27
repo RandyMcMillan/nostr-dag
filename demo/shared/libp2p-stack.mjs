@@ -157,6 +157,9 @@ export async function createSharedLibp2pStack({
   onLog,
   onPeer,
   onStatus,
+  includeWebRTC = true,
+  includeWebRTCDirect = true,
+  includeCircuitRelay = true,
   // When the WASM P2pNode is available (loaded via pkg/nostr_dag.js) and
   // `useWasmP2p` is true (default), use it instead of the JS libp2p stack.
   // Set to false to force the pure-JS fallback.
@@ -246,30 +249,45 @@ export async function createSharedLibp2pStack({
   emitLog(onLog, "trace", "transports: webSockets, webRTC, webRTCDirect, circuitRelayTransport", "checking");
   emitLog(onLog, "trace", "services: identify, autoNAT, dcutr, pubsub", "checking");
 
+  const buildTransportConfig = ({ webRTC: useWebRTC, webRTCDirect: useWebRTCDirect, circuitRelay: useCircuitRelay }) => ({
+    transports: [
+      ensureTransportFilters(webSockets(), "webSockets", onLog),
+      ...(useWebRTC ? [ensureTransportFilters(webRTC(), "webRTC", onLog)] : []),
+      ...(useWebRTCDirect ? [ensureTransportFilters(webRTCDirect(), "webRTCDirect", onLog)] : []),
+      ...(useCircuitRelay ? [ensureTransportFilters(circuitRelayTransport(), "circuitRelayTransport", onLog)] : []),
+    ],
+    addresses: {
+      listen: [
+        ...(useCircuitRelay ? ["/p2p-circuit"] : []),
+        ...((useWebRTC || useWebRTCDirect) ? ["/webrtc"] : []),
+      ],
+    },
+  });
+
   const configs = [
     {
       name: "full browser stack",
-      transports: [
-        ensureTransportFilters(webSockets(), "webSockets", onLog),
-        ensureTransportFilters(webRTC(), "webRTC", onLog),
-        ensureTransportFilters(webRTCDirect(), "webRTCDirect", onLog),
-        ensureTransportFilters(circuitRelayTransport(), "circuitRelayTransport", onLog),
-      ],
-      addresses: { listen: ["/p2p-circuit", "/webrtc"] },
+      ...buildTransportConfig({
+        webRTC: includeWebRTC,
+        webRTCDirect: includeWebRTCDirect,
+        circuitRelay: includeCircuitRelay,
+      }),
     },
     {
       name: "no webRTCDirect",
-      transports: [
-        ensureTransportFilters(webSockets(), "webSockets", onLog),
-        ensureTransportFilters(webRTC(), "webRTC", onLog),
-        ensureTransportFilters(circuitRelayTransport(), "circuitRelayTransport", onLog),
-      ],
-      addresses: { listen: ["/p2p-circuit", "/webrtc"] },
+      ...buildTransportConfig({
+        webRTC: includeWebRTC,
+        webRTCDirect: false,
+        circuitRelay: includeCircuitRelay,
+      }),
     },
     {
       name: "webSockets only",
-      transports: [ensureTransportFilters(webSockets(), "webSockets", onLog)],
-      addresses: {},
+      ...buildTransportConfig({
+        webRTC: false,
+        webRTCDirect: false,
+        circuitRelay: false,
+      }),
     },
   ];
 
