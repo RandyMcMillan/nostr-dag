@@ -124,6 +124,7 @@
     import { neventEncode, npubEncode } from 'https://esm.sh/nostr-tools@2.10.4/nip19';
     import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     import { scheduleAfterPaint, yieldToBrowser } from '../shared/async-lifecycle.mjs';
+    import { stampBridgeRoundTripTag } from '../shared/bridge-roundtrip.mjs';
     import { createSharedLibp2pStack, DEFAULT_BOOTSTRAP_PEERS } from '../shared/libp2p-stack.mjs';
     import { serializeDagBridgeEnvelope } from '../shared/cross-protocol-broadcast.mjs';
     import { getNetworkUnixTime } from '../shared/network-time.mjs';
@@ -877,7 +878,7 @@
       const event = finalizeEvent({
         kind: 0,
         created_at: getNetworkUnixTime(),
-        tags: [],
+        tags: stampBridgeRoundTripTag([]),
         content: JSON.stringify(profile),
         pubkey: author.pk,
       }, author.sk);
@@ -929,7 +930,7 @@
     // Step 20: create a signed event with the requested parent set.
     function buildEvent(author, kind, content, parentIds) {
       window.__sharedFooter?.log('demo', `build event kind ${kind} for ${author.name}`, 'info', 'checking');
-      const tags = parentIds.map((id) => ['e', id]);
+      const tags = stampBridgeRoundTripTag(parentIds.map((id) => ['e', id]));
       window.__sharedFooter?.log(
         'demo',
         `build event parents ${parentIds.length ? parentIds.join(', ') : 'none'}`,
@@ -953,6 +954,7 @@
     function signDraftEvent(author, draft) {
       return finalizeEvent({
         ...draft,
+        tags: stampBridgeRoundTripTag(Array.isArray(draft.tags) ? draft.tags : []),
         pubkey: author.pk,
       }, author.sk);
     }
