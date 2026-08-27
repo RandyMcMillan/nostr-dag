@@ -333,6 +333,40 @@ button:hover, a.button:hover { background:var(--button-hover); }
 .bridge-detail-list {
   display:grid;
   gap:6px;
+  max-height:140px;
+  overflow:auto;
+  padding-right:4px;
+}
+
+.bridge-recent-event {
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  width:100%;
+  padding:8px 10px;
+  border:1px solid var(--border);
+  border-radius:8px;
+  background:rgba(255,255,255,.02);
+  color:inherit;
+  cursor:pointer;
+  text-align:left;
+}
+
+.bridge-recent-event:hover {
+  border-color:var(--accent);
+  background:rgba(251,146,60,.08);
+}
+
+.bridge-event-detail {
+  max-height:220px;
+  overflow:auto;
+  margin-top:10px;
+  padding:10px;
+  border:1px solid var(--border);
+  border-radius:8px;
+  background:rgba(255,255,255,.02);
+  white-space:pre-wrap;
+  word-break:break-word;
 }
 
 .bridge-peer {

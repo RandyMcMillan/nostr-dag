@@ -86,6 +86,11 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     const seenRelayRecentEl = document.getElementById('seenRelayRecent');
     const seenLibp2pRecentEl = document.getElementById('seenLibp2pRecent');
     const relayPublishDetailStatusEl = document.getElementById('relayPublishDetailStatus');
+    const nostrToLibp2pEventDetailEl = document.getElementById('nostrToLibp2pEventDetail');
+    const libp2pToNostrEventDetailEl = document.getElementById('libp2pToNostrEventDetail');
+    const seenRelayEventDetailEl = document.getElementById('seenRelayEventDetail');
+    const seenLibp2pEventDetailEl = document.getElementById('seenLibp2pEventDetail');
+    const relayPublishEventDetailEl = document.getElementById('relayPublishEventDetail');
     const defaultRelayCountEl = document.getElementById('defaultRelayCount');
     const defaultRelayListEl = document.getElementById('defaultRelayList');
     const relayCountEl = document.getElementById('relayCount');
@@ -144,34 +149,74 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       if (relayPublishDetailCountEl) relayPublishDetailCountEl.textContent = `${metrics.relayPublishesSucceeded}/${metrics.relayPublishesAttempted}`;
       if (relayPublishDetailStatusEl) relayPublishDetailStatusEl.textContent = metrics.relayPublishesAttempted ? `${metrics.relayPublishesSucceeded} successful publishes` : 'No publish attempts yet.';
       if (nostrToLibp2pRecentEl) {
-        nostrToLibp2pRecentEl.innerHTML = recentNostrToLibp2p.length
-          ? recentNostrToLibp2p.map((item) => `<div>${escapeHtml(item)}</div>`).join('')
-          : '<div class="muted">No forwarded events yet.</div>';
+        renderRecentList(nostrToLibp2pRecentEl, recentNostrToLibp2p, (item) => renderEventInspector(nostrToLibp2pEventDetailEl, item, 'Forwarded Nostr event'));
       }
       if (libp2pToNostrRecentEl) {
-        libp2pToNostrRecentEl.innerHTML = recentLibp2pToNostr.length
-          ? recentLibp2pToNostr.map((item) => `<div>${escapeHtml(item)}</div>`).join('')
-          : '<div class="muted">No published events yet.</div>';
+        renderRecentList(libp2pToNostrRecentEl, recentLibp2pToNostr, (item) => renderEventInspector(libp2pToNostrEventDetailEl, item, 'Published Nostr event'));
       }
       if (seenRelayRecentEl) {
-        seenRelayRecentEl.innerHTML = recentSeenRelay.length
-          ? recentSeenRelay.map((item) => `<div>${escapeHtml(item)}</div>`).join('')
-          : '<div class="muted">No relays seen yet.</div>';
+        renderRecentList(seenRelayRecentEl, recentSeenRelay, (item) => renderEventInspector(seenRelayEventDetailEl, item, 'Seen Nostr event'));
       }
       if (seenLibp2pRecentEl) {
-        seenLibp2pRecentEl.innerHTML = recentSeenLibp2p.length
-          ? recentSeenLibp2p.map((item) => `<div>${escapeHtml(item)}</div>`).join('')
-          : '<div class="muted">No libp2p messages seen yet.</div>';
+        renderRecentList(seenLibp2pRecentEl, recentSeenLibp2p, (item) => renderEventInspector(seenLibp2pEventDetailEl, item, 'Seen libp2p event'));
       }
     }
 
-    function pushRecent(list, value, limit = 8) {
-      if (!value) return;
-      const text = String(value);
-      const index = list.indexOf(text);
+    function pushRecent(list, value) {
+      if (!value?.id) return;
+      const index = list.findIndex((entry) => entry?.id === value.id);
       if (index !== -1) list.splice(index, 1);
-      list.unshift(text);
-      if (list.length > limit) list.length = limit;
+      list.push(value);
+    }
+
+    function escapeJson(value) {
+      return escapeHtml(JSON.stringify(value, null, 2));
+    }
+
+    function renderEventInspector(container, item, title = 'Nostr event') {
+      if (!container) return;
+      if (!item?.event) {
+        container.innerHTML = '<div class="muted">Select an event ID to inspect its Nostr event.</div>';
+        return;
+      }
+      const event = item.event;
+      container.innerHTML = `
+        <div class="small muted" style="margin-bottom:8px;">${escapeHtml(title)}</div>
+        <div class="mono" style="margin-bottom:8px;">${escapeHtml(event.id)}</div>
+        <div class="small" style="margin-bottom:8px;">kind ${escapeHtml(event.kind)} · ${escapeHtml(event.pubkey)}</div>
+        <div class="small muted" style="margin-bottom:8px;">${escapeHtml(new Date(Number(event.created_at) * 1000).toLocaleString())}</div>
+        <pre class="mono" style="margin:0;">${escapeJson(event)}</pre>
+      `;
+    }
+
+    function renderRecentList(container, items, onSelect) {
+      if (!container) return;
+      if (container.dataset.renderedCount === undefined) {
+        container.dataset.renderedCount = '0';
+      }
+      const renderedCount = Number(container.dataset.renderedCount || '0');
+      if (!items.length) {
+        container.innerHTML = '<div class="muted">No recent events yet.</div>';
+        container.dataset.renderedCount = '0';
+        return;
+      }
+      if (renderedCount > items.length) {
+        container.innerHTML = '';
+        container.dataset.renderedCount = '0';
+      }
+      const start = Number(container.dataset.renderedCount || '0');
+      for (let index = start; index < items.length; index += 1) {
+        const item = items[index];
+        const label = item?.id || 'n/a';
+        const suffix = item?.source ? ` · ${item.source}` : '';
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'bridge-recent-event';
+        button.innerHTML = `<span class="mono">${escapeHtml(label)}</span><span class="muted">${escapeHtml(suffix)}</span>`;
+        button.addEventListener('click', () => onSelect(item || null));
+        container.appendChild(button);
+      }
+      container.dataset.renderedCount = String(items.length);
     }
 
     function bytesToHex(bytes) {
@@ -1112,7 +1157,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       sourceSet.add(event.id);
       const alreadyProcessed = seenProcessed.has(event.id);
       seenProcessed.add(event.id);
-      pushRecent(source === 'libp2p' ? recentSeenLibp2p : recentSeenRelay, event.id);
+      pushRecent(source === 'libp2p' ? recentSeenLibp2p : recentSeenRelay, { id: event.id, source, event });
       refreshMetrics();
       return !alreadyProcessed;
     }
@@ -1202,7 +1247,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         recordRelayInfo(event);
         scheduleRelayRender();
       }
-      pushRecent(recentNostrToLibp2p, `${event.id} · ${sourceRelay || 'relay'}`);
+      pushRecent(recentNostrToLibp2p, { id: event.id, source: sourceRelay || 'relay', event });
       window.__sharedFooter?.log('nostr', `${source} kind ${event.kind} ${event.id} by ${event.pubkey}`, 'trace', 'checking');
       // Persist every verified event and its relationships to IndexedDB.
       try {
@@ -1236,7 +1281,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         return;
       }
       window.__sharedFooter?.log('bridge', `libp2p→nostr ${direction} ${event.kind} ${event.id}`, 'trace', 'checking');
-      pushRecent(recentLibp2pToNostr, `${event.id} · ${relayHints?.[0] || 'libp2p'}`);
+      pushRecent(recentLibp2pToNostr, { id: event.id, source: relayHints?.[0] || 'libp2p', event });
       // Persist event from libp2p, recording all relay hints as known sources.
       try {
         const db = await getDagDb();
