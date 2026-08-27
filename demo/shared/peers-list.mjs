@@ -67,7 +67,7 @@ export function createPeersListController({
             </div>
           </div>
         </summary>
-        <div class="bridge-peer-detail mono">${peer.detail ? String(formatPeerDetail(peer.detail)).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;') : 'no detail'}</div>
+        <pre class="bridge-peer-detail mono">${peer.detail ? String(formatPeerDetail(peer.detail)).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;') : 'no detail'}</pre>
       </details>
     `).join('');
 
