@@ -184,6 +184,9 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         container.dataset.renderedCount = '0';
         return;
       }
+      if (renderedCount === 0 && container.querySelector('.muted')) {
+        container.innerHTML = '';
+      }
       if (renderedCount > items.length) {
         container.innerHTML = '';
         container.dataset.renderedCount = '0';
