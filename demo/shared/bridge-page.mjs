@@ -7,7 +7,6 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     import { measureRelayPing } from './relay-ping.mjs';
     import { createSharedLibp2pStack } from './libp2p-stack.mjs';
     import { getNetworkUnixTime, initSharedNetworkTime } from './network-time.mjs';
-    import { isSafari } from './browser-detect.mjs';
     import { BRIDGE_PROTOCOL, BRIDGE_PROTOCOL_VERSION, buildBridgeEnvelope, collectBridgeRelayHints, unwrapBridgeEnvelope } from './bridge-protocol.mjs';
     import { createListContainerController } from './list-container.mjs';
     import { createPeersListController } from './peers-list.mjs';
@@ -1782,10 +1781,6 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       started = true;
       setStatus('starting libp2p node', 'checking');
       try {
-        const preferWebSocketsOnly = isSafari();
-        if (preferWebSocketsOnly) {
-          window.__sharedFooter?.log('bridge', 'Safari detected; using websocket-first libp2p fallback', 'info', 'checking');
-        }
         const configs = [
           // Prefer hole punching-capable transports first.
           { includeWebRTC: true, includeWebRTCDirect: true, includeCircuitRelay: true },
@@ -1800,7 +1795,6 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
           try {
             const stack = await createSharedLibp2pStack({
               ...config,
-              preferWebSocketsOnly,
               onLog(level, text, state) {
                 window.__sharedFooter?.log('libp2p', text, level, state);
               },
@@ -1824,6 +1818,10 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
             });
             node = stack.node;
             networkTime.attachNode(node);
+            const isWebSocketsOnly = !config.includeWebRTC && !config.includeWebRTCDirect && !config.includeCircuitRelay;
+            if (isWebSocketsOnly) {
+              setStatus('', 'warning');
+            }
             window.__sharedFooter?.log('bridge', `bridge p2p config ok: ${JSON.stringify(config)}`, 'debug', 'available');
             lastError = null;
             break;
