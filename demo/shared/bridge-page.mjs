@@ -10,6 +10,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     import { BRIDGE_PROTOCOL, BRIDGE_PROTOCOL_VERSION, buildBridgeEnvelope, collectBridgeRelayHints, unwrapBridgeEnvelope } from './bridge-protocol.mjs';
     import { createListContainerController } from './list-container.mjs';
     import { createPeersListController } from './peers-list.mjs';
+    import { extractBridgeRoundTripStartMs } from './bridge-roundtrip.mjs';
     import { createRelaysListController } from './relays-list.mjs';
     import { getRecentItems } from './bridge-recent-query.mjs';
     import { persistBridgeCacheState, restoreBridgeCacheState } from './bridge-cache.mjs';
@@ -109,6 +110,13 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       libp2pToNostr: 0,
       relayPublishesAttempted: 0,
       relayPublishesSucceeded: 0,
+      realNetworkRoundTripSamples: 0,
+      realNetworkRoundTripTotalMs: 0,
+      realNetworkRoundTripLastMs: null,
+      realNetworkRoundTripMinMs: null,
+      realNetworkRoundTripMaxMs: null,
+      realNetworkRoundTripLastEventId: '',
+      realNetworkRoundTripLastRelay: '',
     };
 
     const bridgeStatusEl = document.getElementById('bridgeStatus');
@@ -127,6 +135,9 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     const seenRelayRecentEl = document.getElementById('seenRelayRecent');
     const seenLibp2pRecentEl = document.getElementById('seenLibp2pRecent');
     const relayPublishDetailStatusEl = document.getElementById('relayPublishDetailStatus');
+    const bridgeRoundTripCountEl = document.getElementById('bridgeRoundTripCount');
+    const bridgeRoundTripDetailCountEl = document.getElementById('bridgeRoundTripDetailCount');
+    const bridgeRoundTripDetailStatusEl = document.getElementById('bridgeRoundTripDetailStatus');
     const nostrToLibp2pEventDetailEl = document.getElementById('nostrToLibp2pEventDetail');
     const libp2pToNostrEventDetailEl = document.getElementById('libp2pToNostrEventDetail');
     const seenRelayEventDetailEl = document.getElementById('seenRelayEventDetail');
@@ -306,17 +317,60 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     }
 
     function refreshMetrics() {
+      const roundTripAvgMs = metrics.realNetworkRoundTripSamples > 0
+        ? Math.round(metrics.realNetworkRoundTripTotalMs / metrics.realNetworkRoundTripSamples)
+        : null;
       nostrToLibp2pCountEl.textContent = String(metrics.nostrToLibp2p);
       libp2pToNostrCountEl.textContent = String(metrics.libp2pToNostr);
       seenRelayCountEl.textContent = String(seenRelay.size);
       seenLibp2pCountEl.textContent = String(seenLibp2p.size);
       relayPublishCountEl.textContent = `${metrics.relayPublishesSucceeded}/${metrics.relayPublishesAttempted}`;
+      if (bridgeRoundTripCountEl) bridgeRoundTripCountEl.textContent = String(metrics.realNetworkRoundTripSamples);
       if (nostrToLibp2pDetailCountEl) nostrToLibp2pDetailCountEl.textContent = String(metrics.nostrToLibp2p);
       if (libp2pToNostrDetailCountEl) libp2pToNostrDetailCountEl.textContent = String(metrics.libp2pToNostr);
       if (seenRelayDetailCountEl) seenRelayDetailCountEl.textContent = String(seenRelay.size);
       if (seenLibp2pDetailCountEl) seenLibp2pDetailCountEl.textContent = String(seenLibp2p.size);
       if (relayPublishDetailCountEl) relayPublishDetailCountEl.textContent = `${metrics.relayPublishesSucceeded}/${metrics.relayPublishesAttempted}`;
       if (relayPublishDetailStatusEl) relayPublishDetailStatusEl.textContent = metrics.relayPublishesAttempted ? `${metrics.relayPublishesSucceeded} successful publishes` : 'No publish attempts yet.';
+      if (bridgeRoundTripDetailCountEl) bridgeRoundTripDetailCountEl.textContent = metrics.realNetworkRoundTripSamples ? `${metrics.realNetworkRoundTripSamples} sample${metrics.realNetworkRoundTripSamples === 1 ? '' : 's'}` : '0 samples';
+      if (bridgeRoundTripDetailStatusEl) {
+        if (!metrics.realNetworkRoundTripSamples) {
+          bridgeRoundTripDetailStatusEl.textContent = 'Waiting for a DAG-created event to return from a relay.';
+        } else {
+          const parts = [
+            metrics.realNetworkRoundTripLastMs != null ? `last ${Math.round(metrics.realNetworkRoundTripLastMs)} ms` : null,
+            roundTripAvgMs != null ? `avg ${roundTripAvgMs} ms` : null,
+            metrics.realNetworkRoundTripMinMs != null ? `min ${Math.round(metrics.realNetworkRoundTripMinMs)} ms` : null,
+            metrics.realNetworkRoundTripMaxMs != null ? `max ${Math.round(metrics.realNetworkRoundTripMaxMs)} ms` : null,
+          ].filter(Boolean);
+          bridgeRoundTripDetailStatusEl.textContent = parts.join(' · ');
+        }
+      }
+    }
+
+    function recordRealNetworkRoundTrip(event, relay) {
+      const startedAtMs = extractBridgeRoundTripStartMs(event);
+      if (!Number.isFinite(startedAtMs)) return;
+      const elapsedMs = Math.max(0, Math.round(Date.now() - startedAtMs));
+      metrics.realNetworkRoundTripSamples += 1;
+      metrics.realNetworkRoundTripTotalMs += elapsedMs;
+      metrics.realNetworkRoundTripLastMs = elapsedMs;
+      metrics.realNetworkRoundTripMinMs = metrics.realNetworkRoundTripMinMs == null
+        ? elapsedMs
+        : Math.min(metrics.realNetworkRoundTripMinMs, elapsedMs);
+      metrics.realNetworkRoundTripMaxMs = metrics.realNetworkRoundTripMaxMs == null
+        ? elapsedMs
+        : Math.max(metrics.realNetworkRoundTripMaxMs, elapsedMs);
+      metrics.realNetworkRoundTripLastEventId = event.id;
+      metrics.realNetworkRoundTripLastRelay = relay || '';
+      refreshMetrics();
+      scheduleBridgeCachePersist();
+      window.__sharedFooter?.log(
+        'bridge',
+        `real network round trip ${elapsedMs} ms for ${event.id}${relay ? ` via ${relay}` : ''}`,
+        'info',
+        'available',
+      );
     }
 
     function pushRecent(key, list, value) {
@@ -1437,6 +1491,9 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       if (!markSeen('relay', event)) {
         window.__sharedFooter?.log('bridge', `deduped ${event.id}`, 'trace', 'available');
         return;
+      }
+      if (source === 'relay') {
+        recordRealNetworkRoundTrip(event, sourceRelay || '');
       }
       if (event.kind === 10002 || event.kind === 3) {
         recordRelayInfo(event);
