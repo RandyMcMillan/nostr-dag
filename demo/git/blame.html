@@ -25,56 +25,26 @@
   <footer id="pageFooter"></footer>
 
   <script type="module">
-    import { bootstrapDemoPageChrome } from '../shared/page-shell.mjs';
+    import { bootstrapGitChrome } from '../shared/git-page.mjs';
     import { scheduleAfterPaint } from '../shared/async-lifecycle.mjs';
     import { remoteTagNames } from '../shared/git-refs.mjs';
     import { createGitProgressReporter } from '../shared/git-progress.mjs';
     import { cloneWithSingleBranchFallback } from '../shared/git-clone.mjs';
+    import { bootstrapGitChrome, GIT_REPOS, isSafariMobile, probeRemoteHost } from '../shared/git-page.mjs';
     import { resolveHref } from '../shared/page-path.js';
     import git from 'https://cdn.jsdelivr.net/npm/isomorphic-git@1.25.0/+esm';
     import http from 'https://cdn.jsdelivr.net/npm/isomorphic-git@1.25.0/http/web/+esm';
     import LightningFS from 'https://cdn.jsdelivr.net/npm/@isomorphic-git/lightning-fs@4.6.0/+esm';
 
     const fs = new LightningFS('git-viewer');
-    const { footer, networkTime } = bootstrapDemoPageChrome({
+    const { footer, networkTime } = bootstrapGitChrome({
       headerRoot: document.getElementById('sharedHeader'),
       footerRoot: document.getElementById('pageFooter'),
-      headerOptions: {
-        title: 'nostr-dag',
-        logoHref: resolveHref('../git/', window.location.href),
-        iconHref: resolveHref('../shared/favicon.ico', window.location.href),
-        subtitleHtml: '',
-        navItems: [
-          { label: 'dag', href: resolveHref('../dag/', window.location.href) },
-          { label: 'Bridge', href: resolveHref('../bridge/', window.location.href) },
-        ],
-      },
-      footerOptions: {
-        title: 'Logger',
-        initialState: 'idle',
-        initialTitle: 'starting...',
-        initialLevel: 'none',
-      },
-      footerMode: 'after-paint',
     });
     footer.setLevel('none');
     const statusEl = document.getElementById('status');
     const viewEl = document.getElementById('view');
-    const repos = [
-      { name:'nostr-dag', url:'https://github.com/RandyMcMillan/nostr-dag', dir:'/repos/nostr-dag' },
-      { name:'isomorphic-git', url:'https://github.com/isomorphic-git/isomorphic-git', dir:'/repos/isomorphic-git' },
-      { name:'nostr-tools', url:'https://github.com/nbd-wtf/nostr-tools', dir:'/repos/nostr-tools' },
-      { name:'js-libp2p', url:'https://github.com/libp2p/js-libp2p', dir:'/repos/js-libp2p' },
-      { name:'js-libp2p-noise', url:'https://github.com/ChainSafe/js-libp2p-noise', dir:'/repos/js-libp2p-noise' },
-      { name:'js-libp2p-yamux', url:'https://github.com/ChainSafe/js-libp2p-yamux', dir:'/repos/js-libp2p-yamux' },
-      { name:'discv5', url:'https://github.com/ChainSafe/discv5', dir:'/repos/discv5' },
-      { name:'lightning-fs', url:'https://github.com/isomorphic-git/lightning-fs', dir:'/repos/lightning-fs' },
-    ];
-
-    function isSafariMobile() {
-      const ua = globalThis.navigator?.userAgent || '';
-      return /iPhone|iPad|iPod/i.test(ua) && /Safari/i.test(ua) && !/CriOS|FxiOS|EdgiOS/i.test(ua);
-    }
+    const repos = GIT_REPOS;
 
     async function initGitP2P() {
       try {
@@ -122,8 +92,7 @@
     function createCommitSummary(commit) { const message = commit?.commit?.message || 'n/a'; const summary = message.split('\n')[0] || 'n/a'; const author = commit?.commit?.author?.name || 'unknown'; const timestamp = Number(commit?.commit?.author?.timestamp); const date = Number.isFinite(timestamp) ? new Date(timestamp * 1000).toLocaleString() : 'n/a'; return { oid: commit?.oid || 'n/a', summary, author, date, message, parents: Array.isArray(commit?.commit?.parent) ? commit.commit.parent : [] }; }
     async function pathExists(path) { try { await fs.promises.stat(path); return true; } catch { return false; } }
     async function ensureDir(path) { try { await fs.promises.mkdir(path, { recursive: true }); } catch (e) { if (e?.code !== 'EEXIST') throw e; } }
-    function remoteProbeUrl(repo) { return `${new URL(repo.url).origin}/favicon.ico`; }
-    async function probeRemoteHost(repo) { const controller = new AbortController(); const timeout = window.setTimeout(() => controller.abort(), 8000); try { await fetch(remoteProbeUrl(repo), { method:'GET', mode:'no-cors', cache:'no-store', signal:controller.signal }); return true; } catch { return false; } finally { window.clearTimeout(timeout); } }
+    // probeRemoteHost now lives in shared/git-page.mjs
     function progressContextLabel(route) { if (route?.branch) return `branch ${route.branch}`; if (route?.tag) return `tag ${route.tag}`; return ''; }
     const reporters = new Map();
     function getGitProgressReporter(repo, operation, route) { const context = progressContextLabel(route); const key = `${repo.name}:${operation}:${context}`; if (!reporters.has(key)) reporters.set(key, createGitProgressReporter(repo.name, operation, context)); return reporters.get(key); }
