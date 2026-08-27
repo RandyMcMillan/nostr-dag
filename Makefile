@@ -1,3 +1,5 @@
+# Keep this file aligned with .justfile for shared build/site targets.
+
 .DEFAULT_GOAL := help
 
 CARGO ?= cargo
@@ -80,6 +82,8 @@ site: wasm
 	cp demo/git/blame.html site/git/blame.html
 	mkdir -p site/dag
 	cp demo/dag/index.html site/dag/index.html
+	# Keep this in sync with .justfile so /dag/ keeps its action module after site rebuilds.
+	cp demo/dag/*.mjs site/dag/
 	mkdir -p site/bridge
 	cp demo/bridge/*.html site/bridge/
 
