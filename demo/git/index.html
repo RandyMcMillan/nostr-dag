@@ -27,14 +27,6 @@
   <footer id="pageFooter"></footer>
 
   <script type="module">
-    import { bootstrapGitChrome } from '../shared/git-page.mjs';
-
-    bootstrapGitChrome({
-      headerRoot: document.getElementById('sharedHeader'),
-    });
-  </script>
-
-  <script type="module">
     import { scheduleAfterPaint } from '../shared/async-lifecycle.mjs';
     import { remoteTagNames } from '../shared/git-refs.mjs';
     import { createGitProgressReporter } from '../shared/git-progress.mjs';
@@ -66,6 +58,7 @@
     const statusEl = document.getElementById('status');
     const reposEl = document.getElementById('repos');
     const repoState = new Map();
+    const repos = GIT_REPOS;
     const { networkTime, footer } = bootstrapGitChrome({
       headerRoot: document.getElementById('sharedHeader'),
       footerRoot: document.getElementById('pageFooter'),
