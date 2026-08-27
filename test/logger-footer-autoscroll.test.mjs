@@ -22,8 +22,8 @@ function createFakeNode() {
     querySelectorAll() {
       return [];
     },
-    trigger(name) {
-      this.listeners[name]?.();
+    trigger(name, event = {}) {
+      this.listeners[name]?.(event);
     },
   };
 }
@@ -56,7 +56,11 @@ function createFakeRoot() {
 }
 
 test('logger footer scrolls to bottom unless user scrolls away', async () => {
-  globalThis.requestAnimationFrame = (cb) => cb();
+  const rafQueue = [];
+  globalThis.requestAnimationFrame = (cb) => {
+    rafQueue.push(cb);
+    return rafQueue.length;
+  };
   globalThis.localStorage = {
     getItem() { return null; },
     setItem() {},
@@ -68,15 +72,75 @@ test('logger footer scrolls to bottom unless user scrolls away', async () => {
   const footer = createLoggerFooter(root, { title: 'Logger' });
 
   footer.setLevel('info');
+  while (rafQueue.length) rafQueue.shift()();
   const logEl = root.nodes.logEl;
 
   logEl.scrollTop = 800;
   logEl.trigger('scroll');
   footer.log('git', 'one', 'info');
+  while (rafQueue.length) rafQueue.shift()();
   assert.equal(logEl.scrollTop, logEl.scrollHeight);
 
   logEl.scrollTop = 100;
   logEl.trigger('pointerdown');
   footer.log('git', 'two', 'info');
+  while (rafQueue.length) rafQueue.shift()();
   assert.equal(logEl.scrollTop, 100);
+});
+
+test('logger footer pauses auto-scroll on hover and resumes after idle', async () => {
+  const rafQueue = [];
+  const timerQueue = [];
+  let nextTimerId = 0;
+
+  globalThis.requestAnimationFrame = (cb) => {
+    rafQueue.push(cb);
+    return rafQueue.length;
+  };
+  globalThis.setTimeout = (cb) => {
+    const timer = { id: ++nextTimerId, cb, cancelled: false };
+    timerQueue.push(timer);
+    return timer.id;
+  };
+  globalThis.clearTimeout = (id) => {
+    const timer = timerQueue.find((entry) => entry.id === id);
+    if (timer) timer.cancelled = true;
+  };
+  globalThis.localStorage = {
+    getItem() { return null; },
+    setItem() {},
+  };
+
+  const source = await readFile(new URL('../demo/shared/logger-footer.js', import.meta.url), 'utf8');
+  const { createLoggerFooter } = await import(`data:text/javascript;charset=utf-8,${encodeURIComponent(source)}`);
+  const root = createFakeRoot();
+  const footer = createLoggerFooter(root, { title: 'Logger' });
+
+  footer.setLevel('info');
+  while (rafQueue.length) rafQueue.shift()();
+  const logEl = root.nodes.logEl;
+
+  logEl.scrollTop = 800;
+  logEl.trigger('scroll');
+  footer.log('git', 'initial', 'info');
+  while (rafQueue.length) rafQueue.shift()();
+  assert.equal(logEl.scrollTop, logEl.scrollHeight);
+
+  logEl.trigger('pointerenter');
+  footer.log('git', 'hover-paused', 'info');
+  while (rafQueue.length) rafQueue.shift()();
+  assert.equal(logEl.scrollTop, logEl.scrollHeight, 'hover should pause auto-scroll');
+
+  logEl.scrollTop = 700;
+  footer.log('git', 'still-paused', 'info');
+  while (rafQueue.length) rafQueue.shift()();
+  assert.equal(logEl.scrollTop, 700, 'content should not force scroll while hovered');
+
+  logEl.trigger('pointerleave');
+  for (const timer of timerQueue.splice(0)) {
+    if (!timer.cancelled) timer.cb();
+  }
+  footer.log('git', 'resumed', 'info');
+  while (rafQueue.length) rafQueue.shift()();
+  assert.equal(logEl.scrollTop, logEl.scrollHeight);
 });
