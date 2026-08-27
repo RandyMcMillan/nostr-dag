@@ -62,6 +62,12 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       ['seenRelay', new Set()],
       ['seenLibp2p', new Set()],
     ]);
+    const pendingRecentItems = new Map([
+      ['nostrToLibp2p', []],
+      ['libp2pToNostr', []],
+      ['seenRelay', []],
+      ['seenLibp2p', []],
+    ]);
     const bookmarkedRecentIds = new Set(loadRecentBookmarks());
     const relayCatalog = new Map();
     const relayInfoCatalog = new Map();
@@ -185,8 +191,13 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       if (relayPublishDetailStatusEl) relayPublishDetailStatusEl.textContent = metrics.relayPublishesAttempted ? `${metrics.relayPublishesSucceeded} successful publishes` : 'No publish attempts yet.';
     }
 
-    function pushRecent(list, value) {
+    function pushRecent(key, list, value) {
       if (!value?.id) return;
+      if (hasOpenRecentListItem()) {
+        const pending = pendingRecentItems.get(key);
+        if (pending) pending.push(value);
+        return;
+      }
       const index = list.findIndex((entry) => entry?.id === value.id);
       if (index !== -1) list.splice(index, 1);
       list.push(value);
@@ -240,6 +251,29 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       persistRecentBookmarks();
       updateBookmarkButtons(id);
       scheduleRecentListsRender();
+    }
+
+    function flushPendingRecentItems() {
+      for (const [key, pending] of pendingRecentItems.entries()) {
+        if (!pending.length) continue;
+        const list = getRecentListByKey(key);
+        if (!list) continue;
+        for (const value of pending) {
+          const index = list.findIndex((entry) => entry?.id === value.id);
+          if (index !== -1) list.splice(index, 1);
+          list.push(value);
+        }
+        pending.length = 0;
+      }
+      scheduleRecentListsRender();
+    }
+
+    function getRecentListByKey(key) {
+      if (key === 'nostrToLibp2p') return recentNostrToLibp2p;
+      if (key === 'libp2pToNostr') return recentLibp2pToNostr;
+      if (key === 'seenRelay') return recentSeenRelay;
+      if (key === 'seenLibp2p') return recentSeenLibp2p;
+      return null;
     }
 
     function scheduleRecentListsRender() {
@@ -333,6 +367,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
           openSet.delete(item.id);
           recentListOpenState.set(key, openSet);
           if (!hasOpenRecentListItem() && recentListsRenderPending) {
+            flushPendingRecentItems();
             scheduleRecentListsRender();
           }
         });
@@ -1402,7 +1437,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       sourceSet.add(event.id);
       const alreadyProcessed = seenProcessed.has(event.id);
       seenProcessed.add(event.id);
-      pushRecent(source === 'libp2p' ? recentSeenLibp2p : recentSeenRelay, { id: event.id, source, event });
+      pushRecent(source === 'libp2p' ? 'seenLibp2p' : 'seenRelay', source === 'libp2p' ? recentSeenLibp2p : recentSeenRelay, { id: event.id, source, event });
       refreshMetrics();
       return !alreadyProcessed;
     }
@@ -1490,7 +1525,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         recordRelayInfo(event);
         scheduleRelayRender();
       }
-      pushRecent(recentNostrToLibp2p, { id: event.id, source: sourceRelay || 'relay', event });
+      pushRecent('nostrToLibp2p', recentNostrToLibp2p, { id: event.id, source: sourceRelay || 'relay', event });
       window.__sharedFooter?.log('nostr', `${source} kind ${event.kind} ${event.id} by ${event.pubkey}`, 'trace', 'checking');
       // Persist every verified event and its relationships to IndexedDB.
       try {
@@ -1524,7 +1559,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         return;
       }
       window.__sharedFooter?.log('bridge', `libp2p→nostr ${direction} ${event.kind} ${event.id}`, 'trace', 'checking');
-      pushRecent(recentLibp2pToNostr, { id: event.id, source: relayHints?.[0] || 'libp2p', event });
+      pushRecent('libp2pToNostr', recentLibp2pToNostr, { id: event.id, source: relayHints?.[0] || 'libp2p', event });
       metrics.libp2pToNostr += 1;
       refreshMetrics();
       // Persist event from libp2p, recording all relay hints as known sources.
