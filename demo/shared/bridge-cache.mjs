@@ -104,6 +104,23 @@ export function restoreBridgeCacheState(state) {
       metrics.libp2pToNostr = Number(payload.metrics.libp2pToNostr || 0);
       metrics.relayPublishesAttempted = Number(payload.metrics.relayPublishesAttempted || 0);
       metrics.relayPublishesSucceeded = Number(payload.metrics.relayPublishesSucceeded || 0);
+      metrics.realNetworkRoundTripSamples = Number(payload.metrics.realNetworkRoundTripSamples || 0);
+      metrics.realNetworkRoundTripTotalMs = Number(payload.metrics.realNetworkRoundTripTotalMs || 0);
+      metrics.realNetworkRoundTripLastMs = Number.isFinite(Number(payload.metrics.realNetworkRoundTripLastMs))
+        ? Number(payload.metrics.realNetworkRoundTripLastMs)
+        : null;
+      metrics.realNetworkRoundTripMinMs = Number.isFinite(Number(payload.metrics.realNetworkRoundTripMinMs))
+        ? Number(payload.metrics.realNetworkRoundTripMinMs)
+        : null;
+      metrics.realNetworkRoundTripMaxMs = Number.isFinite(Number(payload.metrics.realNetworkRoundTripMaxMs))
+        ? Number(payload.metrics.realNetworkRoundTripMaxMs)
+        : null;
+      metrics.realNetworkRoundTripLastEventId = typeof payload.metrics.realNetworkRoundTripLastEventId === 'string'
+        ? payload.metrics.realNetworkRoundTripLastEventId
+        : '';
+      metrics.realNetworkRoundTripLastRelay = typeof payload.metrics.realNetworkRoundTripLastRelay === 'string'
+        ? payload.metrics.realNetworkRoundTripLastRelay
+        : '';
     }
     if (Array.isArray(payload.seenRelayIds)) {
       seenRelay.clear();
