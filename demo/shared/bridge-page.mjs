@@ -56,10 +56,10 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     const recentSeenRelay = [];
     const recentSeenLibp2p = [];
     const recentListState = new Map([
-      ['nostrToLibp2p', { query: '', sort: 'oldest', openIds: new Set(), paused: false }],
-      ['libp2pToNostr', { query: '', sort: 'oldest', openIds: new Set(), paused: false }],
-      ['seenRelay', { query: '', sort: 'oldest', openIds: new Set(), paused: false }],
-      ['seenLibp2p', { query: '', sort: 'oldest', openIds: new Set(), paused: false }],
+      ['nostrToLibp2p', { query: '', sort: 'newest', openIds: new Set(), paused: false }],
+      ['libp2pToNostr', { query: '', sort: 'newest', openIds: new Set(), paused: false }],
+      ['seenRelay', { query: '', sort: 'newest', openIds: new Set(), paused: false }],
+      ['seenLibp2p', { query: '', sort: 'newest', openIds: new Set(), paused: false }],
     ]);
     const recentListControllers = new Map();
     const bookmarkedRecentRecords = loadRecentBookmarks();
@@ -160,7 +160,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       select.addEventListener('change', () => {
         const key = select.getAttribute('data-list-sort');
         if (!key || !recentListState.has(key)) return;
-        recentListState.get(key).sort = select.value || 'oldest';
+        recentListState.get(key).sort = select.value || 'newest';
         persistRecentListState();
         scheduleRecentListsRender();
       });
@@ -275,7 +275,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         for (const [key, state] of recentListState.entries()) {
           snapshot[key] = {
             query: String(state.query || ''),
-            sort: String(state.sort || 'oldest'),
+            sort: String(state.sort || 'newest'),
             open: [...(state.openIds || new Set())],
           };
         }
@@ -340,7 +340,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         const snapshot = recentListStateSnapshot[key];
         if (snapshot && typeof snapshot === 'object') {
           state.query = String(snapshot.query || '');
-          state.sort = String(snapshot.sort || 'oldest');
+          state.sort = String(snapshot.sort || 'newest');
           state.openIds = new Set(Array.isArray(snapshot.open) ? snapshot.open.filter((value) => typeof value === 'string' && value) : []);
         }
         state.paused = false;
@@ -353,7 +353,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       document.querySelectorAll('[data-list-sort]').forEach((select) => {
         const key = select.getAttribute('data-list-sort');
         if (!key || !recentListState.has(key)) return;
-        select.value = recentListState.get(key).sort || 'oldest';
+        select.value = recentListState.get(key).sort || 'newest';
       });
     }
 
@@ -444,17 +444,19 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       container.innerHTML = visibleItems.map((item) => {
         const label = item?.id || 'n/a';
         const suffix = item?.source ? ` · ${item.source}` : '';
-        const createdAt = item?.event?.created_at
-          ? new Date(Number(item.event.created_at) * 1000).toLocaleString()
-          : '';
+        const createdAt = Number(item?.event?.created_at);
+        const createdAtText = Number.isFinite(createdAt) ? String(Math.trunc(createdAt)) : '';
         const bookmarkedSnapshot = getBookmarkedSnapshot(item?.id);
         const event = item?.event || bookmarkedSnapshot?.event || {};
         return `
           <details class="bridge-recent-event"${item?.id && openItems.has(item.id) ? ' open' : ''}>
             <summary class="bridge-recent-summary">
               <span class="bridge-recent-summary-main">
-                <span class="mono">${escapeHtml(label)}</span>
-                <span class="muted">${escapeHtml(suffix)}</span>
+                <span class="bridge-recent-summary-top">
+                  <span class="mono">${escapeHtml(label)}</span>
+                  <span class="muted">${escapeHtml(suffix)}</span>
+                </span>
+                <span class="bridge-recent-summary-bottom mono">${escapeHtml(createdAtText)}</span>
               </span>
               <button
                 type="button"
@@ -468,7 +470,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
               <div class="small muted" style="margin-bottom:8px;">${escapeHtml(event?.kind != null ? `kind ${event.kind}` : 'Nostr event')}</div>
               <div class="mono" style="margin-bottom:8px;">${escapeHtml(event?.id || 'n/a')}</div>
               <div class="small" style="margin-bottom:8px;">${escapeHtml(event?.pubkey || 'n/a')}</div>
-              <div class="small muted" style="margin-bottom:8px;">${escapeHtml(createdAt)}</div>
+              <div class="small muted" style="margin-bottom:8px;">${escapeHtml(createdAtText)}</div>
               <pre class="mono" style="margin:0;">${escapeJson(event || {})}</pre>
             </div>
           </details>
@@ -922,12 +924,12 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         const trimmed = token.trim();
         if (!trimmed) continue;
         const lower = trimmed.toLowerCase();
-        if (['asc', 'ascn', 'oldest', 'up'].includes(lower)) {
-          sort = 'oldest';
+        if (['asc', 'ascn', 'newest', 'down'].includes(lower)) {
+          sort = 'newest';
           continue;
         }
-        if (['desc', 'descn', 'newest', 'down'].includes(lower)) {
-          sort = 'newest';
+        if (['desc', 'descn', 'oldest', 'up'].includes(lower)) {
+          sort = 'oldest';
           continue;
         }
         if (['kind', 'id'].includes(lower)) {
@@ -995,9 +997,9 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     }
 
     function getRecentItems(key, items) {
-      const state = recentListState.get(key) || { query: '', sort: 'oldest' };
+      const state = recentListState.get(key) || { query: '', sort: 'newest' };
       const parsed = parseRecentQuery(state.query);
-      const sort = parsed.sort || state.sort || 'oldest';
+      const sort = parsed.sort || state.sort || 'newest';
       return [...items]
         .filter((item) => matchesRecentItemQuery(item, parsed.filters))
         .sort((a, b) => compareRecentItems(a, b, sort));
