@@ -1,4 +1,6 @@
+import { measureRelayPing } from './relay-ping.mjs';
 import { resolveHref } from './page-path.js';
+import { getDagDb } from './dag-db.mjs';
 
 const CACHE_KEY = 'nostr-dag-bridge-cache-v2';
 
@@ -34,6 +36,9 @@ function createNostrRelay(relayUrl, data = {}) {
     url,
     fetch_url: data.fetch_url || '',
     fetched_at: data.fetched_at || 0,
+    ping_ms: Number.isFinite(Number(data.ping_ms)) ? Number(data.ping_ms) : null,
+    ping_fetched_at: data.ping_fetched_at || 0,
+    ping_error: data.ping_error || '',
     name: data.name || '',
     description: data.description || '',
     pubkey: data.pubkey || '',
@@ -112,7 +117,33 @@ async function fetchRelayInfo(relayUrl) {
   if (!normalized) return null;
   const cache = loadBridgeCache();
   const cached = cache.relayInfoCatalog.get(normalized);
-  if (cached && !cached.error) return cached;
+  if (cached && cached.ping_ms !== null && cached.ping_fetched_at && !cached.error) return cached;
+  if (cached && !cached.error) {
+    const pingMs = await measureRelayPing(normalized);
+    const record = createNostrRelay(normalized, {
+      ...cached,
+      ping_ms: pingMs,
+      ping_fetched_at: pingMs === null ? cached.ping_fetched_at || 0 : Date.now(),
+      ping_error: pingMs === null ? (cached.ping_error || 'unreachable') : '',
+    });
+    cache.relayInfoCatalog.set(normalized, record);
+    try {
+      const db = await getDagDb();
+      await db.setRelayInfo(normalized, record);
+    } catch {
+      // best effort only
+    }
+    try {
+      const payload = {
+        relayCatalog: [...cache.relayCatalog.values()],
+        relayInfoCatalog: [...cache.relayInfoCatalog.entries()],
+      };
+      window.localStorage.setItem(CACHE_KEY, JSON.stringify(payload));
+    } catch {
+      // best effort only
+    }
+    return record;
+  }
 
   const candidates = [nip11ProxyUrl(normalized), nip11FetchUrl(normalized)].filter(Boolean);
   let lastError = null;
@@ -126,12 +157,22 @@ async function fetchRelayInfo(relayUrl) {
       const raw = await response.text();
       if (!response.ok) throw new Error(`${response.status} ${response.statusText}\n${raw}`);
       const data = JSON.parse(raw || '{}');
+      const pingMs = await measureRelayPing(normalized);
       const record = createNostrRelay(normalized, {
         ...data,
         fetch_url: candidate,
         fetched_at: Date.now(),
+        ping_ms: pingMs,
+        ping_fetched_at: pingMs === null ? 0 : Date.now(),
+        ping_error: pingMs === null ? 'unreachable' : '',
       });
       cache.relayInfoCatalog.set(normalized, record);
+      try {
+        const db = await getDagDb();
+        await db.setRelayInfo(normalized, record);
+      } catch {
+        // best effort only
+      }
       try {
         const payload = {
           relayCatalog: [...cache.relayCatalog.values()],
@@ -150,6 +191,7 @@ async function fetchRelayInfo(relayUrl) {
   return createNostrRelay(normalized, {
     fetch_url: nip11FetchUrl(normalized),
     fetched_at: Date.now(),
+    ping_error: lastError?.message || 'unable to fetch NIP-11',
     error: lastError?.message || 'unable to fetch NIP-11',
   });
 }
@@ -168,6 +210,7 @@ function relayHeaderHtml(relay, info, source, loading) {
     info.name || '',
     info.description || '',
     info.version ? `v${info.version}` : '',
+    Number.isFinite(Number(info.ping_ms)) ? `${Math.round(Number(info.ping_ms))} ms` : '',
   ].filter(Boolean) : [];
   return `
     <div class="bridge-card bridge-relay-card bridge-relay-detail-card">
@@ -180,6 +223,7 @@ function relayHeaderHtml(relay, info, source, loading) {
           <div class="bridge-relay-meta">
             ${gitCapable ? '<span class="bridge-pill bridge-pill-git" aria-label="Supports NIP-34 git kinds" title="Supports NIP-34 git kinds"><span aria-hidden="true">⎇</span></span>' : ''}
             ${info?.error ? `<span class="bridge-pill">NIP-11 unavailable</span>` : hasInfo ? '<span class="bridge-pill bridge-pill-ok" aria-label="NIP-11 loaded"><span class="bridge-pill-dot" aria-hidden="true"></span></span>' : loading ? '<span class="bridge-pill">NIP-11 loading</span>' : ''}
+            ${Number.isFinite(Number(info?.ping_ms)) ? `<span class="bridge-pill bridge-pill-relay" title="Measured relay ping">${escapeHtml(`${Math.round(Number(info.ping_ms))} ms`)}</span>` : ''}
           </div>
         </div>
       </div>
@@ -203,6 +247,7 @@ function renderRelayDetail(relay, info, source, loading) {
     info.pubkey ? `<span class="bridge-pill bridge-pill-relay">pubkey ${escapeHtml(info.pubkey)}</span>` : '',
     info.contact ? `<span class="bridge-pill bridge-pill-relay">${escapeHtml(info.contact)}</span>` : '',
     info.software ? `<span class="bridge-pill bridge-pill-relay">${escapeHtml(info.software)}</span>` : '',
+    Number.isFinite(Number(info.ping_ms)) ? `<span class="bridge-pill bridge-pill-relay">ping ${escapeHtml(`${Math.round(Number(info.ping_ms))} ms`)}</span>` : '',
     info.icon ? `<span class="bridge-pill bridge-pill-relay">icon</span>` : '',
     info.negentropy ? '<span class="bridge-pill bridge-pill-relay">negentropy</span>' : '',
     typeof info.limitation?.auth_required === 'boolean' ? `<span class="bridge-pill bridge-pill-relay">${info.limitation.auth_required ? 'auth required' : 'no auth'}</span>` : '',
