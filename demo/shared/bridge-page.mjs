@@ -55,6 +55,12 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       ['seenRelay', { query: '', sort: 'oldest' }],
       ['seenLibp2p', { query: '', sort: 'oldest' }],
     ]);
+    const recentListOpenState = new Map([
+      ['nostrToLibp2p', new Set()],
+      ['libp2pToNostr', new Set()],
+      ['seenRelay', new Set()],
+      ['seenLibp2p', new Set()],
+    ]);
     const relayCatalog = new Map();
     const relayInfoCatalog = new Map();
     const relayInfoInFlight = new Map();
@@ -105,11 +111,13 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     const peerListEl = document.getElementById('peerList');
 
     document.querySelectorAll('[data-list-search]').forEach((input) => {
-      input.addEventListener('input', () => {
+      input.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
         const key = input.getAttribute('data-list-search');
         if (!key || !recentListState.has(key)) return;
         recentListState.get(key).query = input.value || '';
-        renderRecentLists();
+        scheduleRecentListsRender();
       });
     });
     document.querySelectorAll('[data-list-sort]').forEach((select) => {
@@ -117,7 +125,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         const key = select.getAttribute('data-list-sort');
         if (!key || !recentListState.has(key)) return;
         recentListState.get(key).sort = select.value || 'oldest';
-        renderRecentLists();
+        scheduleRecentListsRender();
       });
     });
 
@@ -131,6 +139,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     const bridgeVerificationQueue = [];
     const bridgeVerificationSeen = new Map();
     const bridgeVerificationBackoff = new Map();
+    let recentListsRenderScheduled = false;
 
     const sharedFooterLogBuffer = window.__sharedFooterLogBuffer || [];
     window.__sharedFooterLogBuffer = sharedFooterLogBuffer;
@@ -171,7 +180,6 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       if (seenLibp2pDetailCountEl) seenLibp2pDetailCountEl.textContent = String(seenLibp2p.size);
       if (relayPublishDetailCountEl) relayPublishDetailCountEl.textContent = `${metrics.relayPublishesSucceeded}/${metrics.relayPublishesAttempted}`;
       if (relayPublishDetailStatusEl) relayPublishDetailStatusEl.textContent = metrics.relayPublishesAttempted ? `${metrics.relayPublishesSucceeded} successful publishes` : 'No publish attempts yet.';
-      renderRecentLists();
     }
 
     function pushRecent(list, value) {
@@ -179,18 +187,34 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       const index = list.findIndex((entry) => entry?.id === value.id);
       if (index !== -1) list.splice(index, 1);
       list.push(value);
+      scheduleRecentListsRender();
     }
 
     function escapeJson(value) {
       return escapeHtml(JSON.stringify(value, null, 2));
     }
 
+    function scheduleRecentListsRender() {
+      if (recentListsRenderScheduled) return;
+      recentListsRenderScheduled = true;
+      queueMicrotask(() => {
+        recentListsRenderScheduled = false;
+        renderRecentLists();
+      });
+    }
+
     function renderRecentList(container, items, onSelect, key) {
       if (!container) return;
       const visibleItems = getRecentItems(key, items);
+      const openItems = recentListOpenState.get(key) || new Set();
       if (!visibleItems.length) {
         const query = (recentListState.get(key)?.query || '').trim();
-        container.innerHTML = `<div class="muted">${escapeHtml(query ? 'No matching events.' : 'No recent events yet.')}</div>`;
+        container.innerHTML = `
+          <div class="muted">${escapeHtml(query ? 'No matching events.' : 'No recent events yet.')}</div>
+          <div class="small muted" style="margin-top:6px;">
+            Press Enter to search. Try <span class="mono">kind:0</span>, <span class="mono">pubkey:…</span>, <span class="mono">id:…</span>, <span class="mono">source:…</span>, <span class="mono">ascn</span>, or <span class="mono">descn</span>.
+          </div>
+        `;
         return;
       }
       container.innerHTML = visibleItems.map((item) => {
@@ -200,7 +224,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
           ? new Date(Number(item.event.created_at) * 1000).toLocaleString()
           : '';
         return `
-          <details class="bridge-recent-event">
+          <details class="bridge-recent-event"${item?.id && openItems.has(item.id) ? ' open' : ''}>
             <summary class="bridge-recent-summary">
               <span class="mono">${escapeHtml(label)}</span>
               <span class="muted">${escapeHtml(suffix)}</span>
@@ -217,11 +241,21 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       }).join('');
       container.querySelectorAll('details.bridge-recent-event').forEach((details, index) => {
         details.addEventListener('toggle', () => {
-          if (!details.open) return;
-          container.querySelectorAll('details.bridge-recent-event[open]').forEach((other) => {
-            if (other !== details) other.open = false;
-          });
-          onSelect(visibleItems[index] || null);
+          const item = visibleItems[index] || null;
+          const openSet = recentListOpenState.get(key) || new Set();
+          if (!item?.id) return;
+          if (details.open) {
+            openSet.clear();
+            openSet.add(item.id);
+            container.querySelectorAll('details.bridge-recent-event[open]').forEach((other) => {
+              if (other !== details) other.open = false;
+            });
+            recentListOpenState.set(key, openSet);
+            onSelect(item);
+            return;
+          }
+          openSet.delete(item.id);
+          recentListOpenState.set(key, openSet);
         });
       });
     }
@@ -630,6 +664,80 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       ].map(normalizeText).join(' ');
     }
 
+    function tokenizeRecentQuery(rawQuery) {
+      const query = String(rawQuery || '').trim();
+      if (!query) return [];
+      return query.match(/(?:[^\s"]+|"[^"]*")+/g) || [];
+    }
+
+    function parseRecentQuery(rawQuery) {
+      const tokens = tokenizeRecentQuery(rawQuery);
+      const filters = [];
+      let sort = null;
+      for (const token of tokens) {
+        const trimmed = token.trim();
+        if (!trimmed) continue;
+        const lower = trimmed.toLowerCase();
+        if (['asc', 'ascn', 'oldest', 'up'].includes(lower)) {
+          sort = 'oldest';
+          continue;
+        }
+        if (['desc', 'descn', 'newest', 'down'].includes(lower)) {
+          sort = 'newest';
+          continue;
+        }
+        if (['kind', 'id'].includes(lower)) {
+          sort = lower;
+          continue;
+        }
+        const colonIndex = trimmed.indexOf(':');
+        if (colonIndex === -1) {
+          filters.push({ type: 'text', value: trimmed.replaceAll('"', '') });
+          continue;
+        }
+        const field = trimmed.slice(0, colonIndex).toLowerCase();
+        const value = trimmed.slice(colonIndex + 1).replaceAll('"', '').trim();
+        if (!value) continue;
+        if (field === 'kind') {
+          filters.push({ type: 'kind', value });
+          continue;
+        }
+        if (['id', 'pubkey', 'source', 'content', 'tag', 'relay', 'event'].includes(field)) {
+          filters.push({ type: field, value });
+          continue;
+        }
+        filters.push({ type: 'text', value: trimmed.replaceAll('"', '') });
+      }
+      return { filters, sort };
+    }
+
+    function recentItemFieldValue(item, field) {
+      const event = item?.event || {};
+      if (field === 'id' || field === 'event') return `${item?.id || ''} ${event?.id || ''}`;
+      if (field === 'pubkey') return event?.pubkey || '';
+      if (field === 'content') return event?.content || '';
+      if (field === 'source') return item?.source || '';
+      if (field === 'relay') return item?.relay || item?.source || '';
+      if (field === 'tag') return Array.isArray(event.tags) ? event.tags.flat().join(' ') : '';
+      if (field === 'kind') return String(event?.kind ?? '');
+      return recentItemSearchText(item);
+    }
+
+    function matchesRecentItemQuery(item, filters) {
+      if (!filters.length) return true;
+      for (const filter of filters) {
+        const haystack = normalizeText(recentItemFieldValue(item, filter.type));
+        const needle = normalizeText(filter.value);
+        if (!needle) continue;
+        if (filter.type === 'kind') {
+          if (haystack !== needle) return false;
+          continue;
+        }
+        if (!haystack.includes(needle)) return false;
+      }
+      return true;
+    }
+
     function compareRecentItems(a, b, sort) {
       const eventA = a?.event || {};
       const eventB = b?.event || {};
@@ -641,10 +749,11 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
 
     function getRecentItems(key, items) {
       const state = recentListState.get(key) || { query: '', sort: 'oldest' };
-      const query = normalizeText(state.query).trim();
+      const parsed = parseRecentQuery(state.query);
+      const sort = parsed.sort || state.sort || 'oldest';
       return [...items]
-        .filter((item) => !query || recentItemSearchText(item).includes(query))
-        .sort((a, b) => compareRecentItems(a, b, state.sort));
+        .filter((item) => matchesRecentItemQuery(item, parsed.filters))
+        .sort((a, b) => compareRecentItems(a, b, sort));
     }
 
     async function persistBridgeCache() {

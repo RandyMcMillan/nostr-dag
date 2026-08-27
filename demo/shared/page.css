@@ -370,8 +370,12 @@ button:hover, a.button:hover { background:var(--button-hover); }
   overflow:hidden;
 }
 
-.bridge-recent-event:hover {
+.bridge-recent-event[open] {
   border-color:var(--accent);
+  background:rgba(251,146,60,.08);
+}
+
+.bridge-recent-event[open] .bridge-recent-summary {
   background:rgba(251,146,60,.08);
 }
 
@@ -385,10 +389,26 @@ button:hover, a.button:hover { background:var(--button-hover); }
   cursor:pointer;
   text-align:left;
   list-style:none;
+  user-select:none;
+}
+
+.bridge-recent-summary:active {
+  background:rgba(251,146,60,.12);
 }
 
 .bridge-recent-summary::-webkit-details-marker {
   display:none;
+}
+
+.bridge-recent-summary::after {
+  content:'▸';
+  color:var(--muted);
+  flex:0 0 auto;
+}
+
+.bridge-recent-event[open] .bridge-recent-summary::after {
+  content:'▾';
+  color:var(--accent);
 }
 
 .bridge-recent-detail {
@@ -396,6 +416,7 @@ button:hover, a.button:hover { background:var(--button-hover); }
   border-top:1px solid rgba(148,163,184,.18);
   border-radius:0;
   margin-top:0;
+  display:block;
 }
 
 .bridge-event-detail {
