@@ -164,6 +164,21 @@
             </div>
           </div>
         </details>
+        <details class="bridge-stat" data-stat-key="realNetworkRoundTrip">
+          <summary class="bridge-stat-summary">
+            <div class="bridge-stat-title">Real network RTT</div>
+            <div class="bridge-stat-desc"><b id="bridgeRoundTripCount">0</b><span>Events created on <code>/dag</code> and first seen again by the bridge from a real relay.</span></div>
+          </summary>
+          <div class="bridge-stat-body">
+            <div class="bridge-stat-detail-grid">
+              <div><div class="small muted">Samples</div><div class="mono" id="bridgeRoundTripDetailCount">0 samples</div></div>
+              <div>
+                <div class="small muted">Status</div>
+                <div id="bridgeRoundTripDetailStatus" class="bridge-detail-list">Waiting for a DAG-created event to return from a relay.</div>
+              </div>
+            </div>
+          </div>
+        </details>
       </div>
       <div class="small muted" style="margin-top:10px;">Bridge peer will also report to <code>/peers</code> when running on localhost.</div>
       <p class="small muted" style="margin-bottom:0;">Events are forwarded as JSON envelopes over libp2p pubsub and published back to the configured WSS relays when received from the swarm.</p>
