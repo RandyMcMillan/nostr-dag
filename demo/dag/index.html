@@ -104,12 +104,14 @@
 
   </main>
 
+  <footer id="pageFooter"></footer>
+
   <script type="module">
     import { bootstrapDagChrome } from '../shared/dag-page.mjs';
 
     window.__dagChrome = bootstrapDagChrome({
       headerRoot: document.getElementById('sharedHeader'),
-      footerRoot: document.getElementById('sharedFooter'),
+      footerRoot: document.getElementById('pageFooter'),
     });
   </script>
 
@@ -196,8 +198,6 @@
     const resetBtnEl = document.getElementById('resetBtn');
     const seedBtnEl = document.getElementById('seedBtn');
     const ackRoundBtnEl = document.getElementById('ackRoundBtn');
-
-    const short = (id) => id ? `${id.slice(0, 10)}…` : '-';
 
     function logNostrEvent(action, event, level = 'trace', state = 'checking') {
       const kind = event?.kind ?? '?';
@@ -542,7 +542,7 @@
 
     function registerParticipant(participant) {
       if (!participant?.pk) return;
-      window.__sharedFooter?.log('demo', `register participant ${participant.pk.slice(0, 12)}`, 'trace', 'checking');
+      window.__sharedFooter?.log('demo', `register participant ${participant.pk}`, 'trace', 'checking');
       const existing = discoveredParticipants.get(participant.pk) || {};
       discoveredParticipants.set(participant.pk, {
         ...existing,
@@ -577,7 +577,7 @@
     }
 
     function openProfileModal(pubkey) {
-      window.__sharedFooter?.log('demo', `open profile ${pubkey.slice(0, 12)}`, 'debug', 'available');
+      window.__sharedFooter?.log('demo', `open profile ${pubkey}`, 'debug', 'available');
       const participant = participants.find((p) => p.pk === pubkey) || {};
       const profile = participantProfile(pubkey) || participant.profile || {};
       const name = profile.name || participant.name || pubkey.slice(0, 8);
@@ -663,7 +663,7 @@
       }
 
       if (event.kind === 0) {
-        window.__sharedFooter?.log('demo', `discovered profile metadata ${event.pubkey.slice(0, 12)}`, 'trace', 'checking');
+        window.__sharedFooter?.log('demo', `discovered profile metadata ${event.pubkey}`, 'trace', 'checking');
         try {
           const metadata = JSON.parse(event.content || '{}');
           const profile = createParticipantProfile({
@@ -800,7 +800,7 @@
       window.__sharedFooter?.log('demo', `initialized ${participants.length} participants`, 'info', 'available');
 
       authorEl.innerHTML = participants
-        .map((p, i) => `<option value="${i}">${p.name} (${p.pk.slice(0, 12)}…)</option>`)
+        .map((p, i) => `<option value="${i}">${p.name} (${p.pk})</option>`)
         .join('');
     }
 
@@ -848,14 +848,23 @@
         quorumId: baseProfile.quorum_id || author.quorumId,
         quorumEventId,
       });
+      window.__sharedFooter?.log(
+        'demo',
+        `build metadata event for ${author.name} (${author.pk}) quorum_event_id ${quorumEventId}`,
+        'info',
+        'checking',
+      );
+      window.__sharedFooter?.log('demo', `metadata profile:\n${JSON.stringify(profile, null, 2)}`, 'info', 'checking');
 
-      return finalizeEvent({
+      const event = finalizeEvent({
         kind: 0,
         created_at: getNetworkUnixTime(),
         tags: [],
         content: JSON.stringify(profile),
         pubkey: author.pk,
       }, author.sk);
+      window.__sharedFooter?.log('demo', `metadata event built ${event.id}`, 'info', 'available');
+      return event;
     }
 
     function currentTips() {
@@ -872,20 +881,43 @@
 
     function resolveParents() {
       const mode = parentsModeEl.value;
-      if (mode === 'none') return [];
+      if (mode === 'none') {
+        window.__sharedFooter?.log('demo', 'resolve parents: genesis / none', 'info', 'available');
+        return [];
+      }
       if (mode === 'custom') {
-        return customParentsEl.value
+        const parents = customParentsEl.value
           .split(',')
           .map((s) => s.trim())
           .filter(Boolean);
+        window.__sharedFooter?.log(
+          'demo',
+          `resolve parents: custom -> ${parents.length ? parents.join(', ') : 'none'}`,
+          'info',
+          'available',
+        );
+        return parents;
       }
-      return currentTips();
+      const tips = currentTips();
+      window.__sharedFooter?.log(
+        'demo',
+        `resolve parents: tips -> ${tips.length ? tips.join(', ') : 'none'}`,
+        'info',
+        'available',
+      );
+      return tips;
     }
 
     // Step 20: create a signed event with the requested parent set.
     function buildEvent(author, kind, content, parentIds) {
-      window.__sharedFooter?.log('demo', `build event kind ${kind} for ${author.name}`, 'trace', 'checking');
+      window.__sharedFooter?.log('demo', `build event kind ${kind} for ${author.name}`, 'info', 'checking');
       const tags = parentIds.map((id) => ['e', id]);
+      window.__sharedFooter?.log(
+        'demo',
+        `build event parents ${parentIds.length ? parentIds.join(', ') : 'none'}`,
+        'info',
+        'checking',
+      );
       const event = {
         kind,
         created_at: getNetworkUnixTime(),
@@ -893,7 +925,10 @@
         content,
         pubkey: author.pk,
       };
-      return finalizeEvent(event, author.sk);
+      window.__sharedFooter?.log('demo', `build event draft:\n${JSON.stringify(event, null, 2)}`, 'info', 'checking');
+      const signed = finalizeEvent(event, author.sk);
+      window.__sharedFooter?.log('demo', `build event signed ${signed.id}`, 'info', 'available');
+      return signed;
     }
 
     // Step 20b: sign protocol-specific event drafts so the demo can emit real NIP-34 and PIP events.
@@ -907,12 +942,17 @@
     // Step 21: insert events into the WASM DAG and mirror them into UI state.
     function insertEvent(event) {
       logNostrEvent('insert', event, 'trace', 'checking');
+      window.__sharedFooter?.log('demo', `insert event json:\n${JSON.stringify(event, null, 2)}`, 'info', 'checking');
+      if ([39078, 39079, 39080, 39081].includes(event.kind)) {
+        window.__sharedFooter?.log('demo', `quorum event insert ${event.kind}:${event.id}`, 'info', 'checking');
+      }
       const result = JSON.parse(dag.insert(JSON.stringify(event)));
       if (result.type === 'Duplicate') {
         window.__sharedFooter?.log('demo', `duplicate event ${event.id}`, 'warn', 'available');
         throw new Error('Duplicate event');
       }
-      window.__sharedFooter?.log('demo', `inserted event ${event.id}`, 'trace', result.type === 'Buffered' ? 'checking' : 'available');
+      window.__sharedFooter?.log('demo', `inserted event ${event.id}`, 'info', result.type === 'Buffered' ? 'checking' : 'available');
+      window.__sharedFooter?.log('demo', `insert result: ${result.type} canonical=${isCanonical(event.id)}`, 'info', result.type === 'Buffered' ? 'checking' : 'available');
       if (event.kind === 0) {
         discoverFromEvent(event);
       }
@@ -931,10 +971,13 @@
 
     // Step 22: serialize relay publishing so the demo stays predictable.
     function queueBroadcast(eventsToPublish, successLabel) {
-      window.__sharedFooter?.log('demo', `queue broadcast ${successLabel} (${eventsToPublish.length})`, 'trace', 'checking');
+      const summary = eventsToPublish.map((event) => `${event.kind}:${event.id}`).join(', ');
+      window.__sharedFooter?.log('demo', `queue broadcast ${successLabel} (${eventsToPublish.length})`, 'info', 'checking');
+      window.__sharedFooter?.log('demo', `queue broadcast events: ${summary || 'none'}`, 'info', 'checking');
       return new Promise((resolve) => {
         broadcastQueue.push({ eventsToPublish, successLabel, resolve });
         if (!broadcastQueueRunning) {
+          window.__sharedFooter?.log('demo', 'broadcast queue idle -> start drain', 'info', 'checking');
           void drainBroadcastQueue();
         }
       });
@@ -943,19 +986,23 @@
     async function drainBroadcastQueue() {
       if (broadcastQueueRunning) return;
       broadcastQueueRunning = true;
-      window.__sharedFooter?.log('demo', 'draining broadcast queue', 'debug', 'checking');
+      window.__sharedFooter?.log('demo', 'draining broadcast queue', 'info', 'checking');
 
       try {
         while (broadcastQueue.length) {
           const { eventsToPublish, successLabel, resolve } = broadcastQueue.shift();
           let published = 0;
+          window.__sharedFooter?.log('demo', `broadcast batch start: ${successLabel}`, 'info', 'checking');
 
           for (const event of eventsToPublish) {
+            window.__sharedFooter?.log('demo', `broadcast event ${event.kind}:${event.id}`, 'info', 'checking');
             for (const relay of [...broadcastRelays]) {
               try {
                 await Promise.any(pool.publish([relay], event));
                 published += 1;
+                window.__sharedFooter?.log('demo', `broadcast ok ${event.id} -> ${relay}`, 'info', 'available');
               } catch {
+                window.__sharedFooter?.log('demo', `broadcast failed ${event.id} -> ${relay}`, 'warn', 'unavailable');
                 // Ignore relay-specific publish failures and keep moving.
               }
               await sleep(300);
@@ -973,10 +1020,12 @@
               30000
             );
           }
+          window.__sharedFooter?.log('demo', `broadcast batch complete: ${successLabel} (${published} deliveries)`, published > 0 ? 'info' : 'warn', published > 0 ? 'available' : 'unavailable');
           resolve();
         }
       } finally {
         broadcastQueueRunning = false;
+        window.__sharedFooter?.log('demo', 'broadcast queue drained', 'info', 'available');
       }
     }
 
@@ -989,13 +1038,14 @@
       for (const event of eventsToPublish) {
         logNostrEvent(`publish batch ${successLabel}`, event, 'trace', 'checking');
       }
-      window.__sharedFooter?.log('demo', `publish ${eventsToPublish.length} events for ${successLabel}`, 'trace', 'checking');
+      window.__sharedFooter?.log('demo', `publish ${eventsToPublish.length} events for ${successLabel}`, 'info', 'checking');
+      window.__sharedFooter?.log('demo', `publish batch ids: ${eventsToPublish.map((event) => event.id).join(', ')}`, 'info', 'checking');
       return queueBroadcast(eventsToPublish, successLabel);
     }
 
     // Step 19b: broadcast a real repository announcement/state/issue/PR chain instead of fake genesis notes.
     async function createNip34SequenceEvents() {
-      window.__sharedFooter?.log('demo', 'create NIP-34 sequence events', 'debug', 'checking');
+      window.__sharedFooter?.log('demo', 'create NIP-34 sequence events', 'info', 'checking');
       const [maintainer, stateAuthor, issueAuthor, prAuthor] = participants;
       const createdAt = getNetworkUnixTime();
       const repoId = 'nostr-dag-demo';
@@ -1018,6 +1068,7 @@
         maintainers: participants.map((participant) => participant.pk),
         hashtags: ['nostr-dag', 'nip34', 'quorum'],
       }));
+      window.__sharedFooter?.log('demo', `repo announcement event:\n${JSON.stringify(repoAnnouncement, null, 2)}`, 'info', 'checking');
       insertEvent(repoAnnouncement);
       await yieldToMainThread();
 
@@ -1033,6 +1084,7 @@
         head: 'refs/heads/main',
         parents: [repoAnnouncement.id],
       }));
+      window.__sharedFooter?.log('demo', `repo state event:\n${JSON.stringify(repoState, null, 2)}`, 'info', 'checking');
       insertEvent(repoState);
       await yieldToMainThread();
 
@@ -1046,6 +1098,7 @@
         content: 'Replace fake demo events with a real NIP-34 repository sequence and quorum attestations.',
         parents: [repoState.id],
       }));
+      window.__sharedFooter?.log('demo', `issue event:\n${JSON.stringify(issue, null, 2)}`, 'info', 'checking');
       insertEvent(issue);
       await yieldToMainThread();
 
@@ -1064,9 +1117,16 @@
         content: 'This PR event advertises the demo branch carrying the quorum-attested NIP-34 flow.',
         parents: [issue.id],
       }));
+      window.__sharedFooter?.log('demo', `pull request event:\n${JSON.stringify(pullRequest, null, 2)}`, 'info', 'checking');
       insertEvent(pullRequest);
 
       const protocolEvents = [repoAnnouncement, repoState, issue, pullRequest];
+      window.__sharedFooter?.log(
+        'demo',
+        `NIP-34 sequence ids: ${protocolEvents.map((event) => `${event.kind}:${event.id}`).join(', ')}`,
+        'info',
+        'available',
+      );
       return {
         repoId,
         repoCloneUrl,
@@ -1077,7 +1137,7 @@
 
     // Step 19c: run the real manifest → slice → attest → seal sequence over the latest NIP-34 payload.
     async function createQuorumSequenceEvents(repoSequence) {
-      window.__sharedFooter?.log('demo', 'create quorum sequence events', 'debug', 'checking');
+      window.__sharedFooter?.log('demo', 'create quorum sequence events', 'info', 'checking');
       const [repoAnnouncement, repoState, issue, pullRequest] = repoSequence.protocolEvents;
       const manifestAuthor = participants[participants.length - 1];
       const createdAt = getNetworkUnixTime();
@@ -1090,6 +1150,7 @@
         events: [repoAnnouncement, repoState, issue, pullRequest],
       });
       const payloadBytes = utf8Bytes(payloadJson);
+      window.__sharedFooter?.log('demo', `quorum payload json:\n${payloadJson}`, 'info', 'checking');
       const rootId = `nip34-quorum-${repoAnnouncement.id}`;
       const digest = await sha256Hex(payloadBytes);
       const sliceSize = Math.max(96, Math.ceil(payloadBytes.length / 3));
@@ -1103,8 +1164,10 @@
         totalSlices: slices.length,
         parents: [pullRequest.id],
       }));
+      window.__sharedFooter?.log('demo', `manifest event:\n${JSON.stringify(manifestEvent, null, 2)}`, 'info', 'checking');
       insertEvent(manifestEvent);
       await yieldToMainThread();
+      window.__sharedFooter?.log('demo', `quorum manifest ${manifestEvent.id} with ${slices.length} slices pending`, 'info', 'checking');
 
       const sliceEvents = [];
       for (let i = 0; i < slices.length; i += 1) {
@@ -1119,7 +1182,9 @@
           parents: i === 0 ? [] : [sliceEvents[i - 1].id],
         }));
         sliceEvents.push(sliceEvent);
+        window.__sharedFooter?.log('demo', `slice event ${i + 1}/${slices.length}:\n${JSON.stringify(sliceEvent, null, 2)}`, 'info', 'checking');
         insertEvent(sliceEvent);
+        window.__sharedFooter?.log('demo', `quorum slice ${i + 1}/${slices.length} ${sliceEvent.id}`, 'info', 'checking');
         if (i % 2 === 1) await yieldToMainThread();
       }
 
@@ -1136,7 +1201,9 @@
           parents: [],
         }));
         attestationEvents.push(attestation);
+        window.__sharedFooter?.log('demo', `attestation event ${i + 1}/${attesters.length}:\n${JSON.stringify(attestation, null, 2)}`, 'info', 'checking');
         insertEvent(attestation);
+        window.__sharedFooter?.log('demo', `quorum attest ${i + 1}/${attesters.length} ${attestation.id} by ${attesters[i].name}`, 'info', 'checking');
         if (i % 2 === 1) await yieldToMainThread();
       }
 
@@ -1148,7 +1215,9 @@
         attestIds: attestationEvents.map((event) => event.id),
         parents: [],
       }));
+      window.__sharedFooter?.log('demo', `seal event:\n${JSON.stringify(sealEvent, null, 2)}`, 'info', 'checking');
       insertEvent(sealEvent);
+      window.__sharedFooter?.log('demo', `quorum seal ${sealEvent.id} digest ${digest}`, 'info', 'available');
 
       return {
         manifestEvent,
@@ -1161,20 +1230,57 @@
     async function createEvent() {
       try {
         await ensureDagBootReady();
-        window.__sharedFooter?.log('demo', 'create custom event requested', 'debug', 'checking');
         const author = participants[Number(authorEl.value)];
         const kind = Number(kindEl.value);
         const content = contentEl.value.trim();
         const parents = resolveParents();
+        const parentSummary = parents.length ? parents.join(', ') : 'none';
+        window.__sharedFooter?.log(
+          'demo',
+          `Create Event clicked: author ${author.name}, kind ${kind}, parents ${parentSummary}`,
+          'info',
+          'checking',
+        );
+        window.__sharedFooter?.log(
+          'demo',
+          `create event payload: content ${content ? `${content.length} chars` : 'empty'}, parent mode ${parentsModeEl.value}`,
+          'info',
+          'checking',
+        );
         const event = kind === 0 && !content
           ? buildMetadataEvent(author)
           : buildEvent(author, kind, content, parents);
+        window.__sharedFooter?.log(
+          'demo',
+          `create event built ${event.kind}:${event.id} by ${author.name}`,
+          'info',
+          'available',
+        );
+        window.__sharedFooter?.log(
+          'demo',
+          `create event json:\n${JSON.stringify(event, null, 2)}`,
+          'info',
+          'available',
+        );
         insertEvent(event);
         contentEl.value = '';
         render();
+        window.__sharedFooter?.log(
+          'demo',
+          `create event publishing ${event.kind}:${event.id}`,
+          'info',
+          'checking',
+        );
         await publishEvent(event);
+        window.__sharedFooter?.log(
+          'demo',
+          `create event complete ${event.kind}:${event.id}`,
+          'info',
+          'available',
+        );
       } catch (e) {
         setStatus(`Create failed: ${e.message}`, false);
+        window.__sharedFooter?.log('demo', `create event failed: ${e.message}`, 'error', 'unavailable');
       }
     }
 
@@ -1197,11 +1303,18 @@
         const author = participants[i];
         const event = buildMetadataEvent(author);
         profileEvents.push(event);
+        window.__sharedFooter?.log('demo', `profile event ${i + 1}/${participants.length}:\n${JSON.stringify(event, null, 2)}`, 'info', 'checking');
         insertEvent(event);
         if (i % 2 === 1) await yieldToMainThread();
       }
       render();
       await yieldToMainThread();
+      window.__sharedFooter?.log(
+        'demo',
+        `broadcasting quorum metadata events to ${broadcastRelays.size} relays:\n${profileEvents.map((event) => JSON.stringify(event, null, 2)).join('\n\n---\n\n')}`,
+        'info',
+        'checking',
+      );
       await publishEvents(profileEvents, 'Quorum metadata');
     }
 
@@ -1308,7 +1421,8 @@
         `;
       }).join('');
 
-      setStatus('DAG updated.', true);
+      statusEl.textContent = 'DAG updated.';
+      statusEl.className = 'status ok';
       scheduleCachePersist();
     }
 
@@ -1424,7 +1538,7 @@
       }
     }
 
-    window.__sharedFooter.setLevel('none');
+    window.__sharedFooter.setLevel('info');
     window.__libp2pModuleRegistry = registry;
     window.__setLibp2pModuleCounts?.({ loaded, failed, total: modules.length });
   </script>
