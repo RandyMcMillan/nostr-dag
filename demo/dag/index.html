@@ -410,9 +410,6 @@
             onLog(level, text, state) {
               window.__sharedFooter?.log('libp2p', text, level, state);
             },
-            onPeer(peerEvent) {
-              window.__sharedFooter?.log('libp2p', `${peerEvent.kind} ${peerEvent.peer}`, 'trace', 'checking');
-            },
             onStatus(state, peerId) {
               window.__sharedFooter?.log('libp2p', `${state} ${peerId}`, 'info', 'available');
             },
