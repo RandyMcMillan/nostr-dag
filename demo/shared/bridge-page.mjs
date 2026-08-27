@@ -1733,11 +1733,14 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         return;
       }
       const { event, relayHints, direction, originPeerId, hopCount } = envelope;
-      if (!markSeen('libp2p', event)) return;
+      const seenOnLibp2pBefore = seenLibp2p.has(event.id);
+      const seenOnRelayBefore = seenRelay.has(event.id);
+      markSeen('libp2p', event);
       if (!verifyEvent(event)) {
         window.__sharedFooter?.log('bridge', `rejected libp2p payload ${event.id}`, 'warn', 'unavailable');
         return;
       }
+      if (seenOnLibp2pBefore) return;
       window.__sharedFooter?.log('bridge', `libp2p→nostr ${direction} ${event.kind} ${event.id}`, 'trace', 'checking');
       pushRecent('libp2pToNostr', recentLibp2pToNostr, { id: event.id, source: relayHints?.[0] || 'libp2p', event });
       metrics.libp2pToNostr += 1;
@@ -1757,11 +1760,13 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         window.__sharedFooter?.log('bridge', `dag-db persist (libp2p) failed: ${dbErr.message}`, 'warn', 'unavailable');
       }
       try {
-        await publishToRelays(event, 'libp2p->nostr', relayHints);
+        if (!seenOnRelayBefore) {
+          await publishToRelays(event, 'libp2p->nostr', relayHints);
+        }
       } catch (e) {
         window.__sharedFooter?.log('bridge', `relay publish failed: ${e.message}`, 'error', 'unavailable');
       }
-      if (direction !== 'libp2p->libp2p') {
+      if (direction !== 'libp2p->libp2p' && !seenOnLibp2pBefore) {
         try {
           await forwardLibp2pEvent(event, relayHints, originPeerId, hopCount);
         } catch (e) {
