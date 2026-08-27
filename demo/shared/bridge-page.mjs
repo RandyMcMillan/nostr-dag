@@ -16,6 +16,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     const CACHE_KEY = 'nostr-dag-bridge-cache-v2';
     const SIGNER_KEY = 'nostr-dag-bridge-signer-v1';
     const BOOKMARKS_KEY = 'nostr-dag-bridge-bookmarks-v1';
+    const RECENT_LIST_STATE_KEY = 'nostr-dag-bridge-recent-list-state-v1';
     const BRIDGE_PROTOCOL = 'nostr-dag-bridge';
     const BRIDGE_PROTOCOL_VERSION = 1;
     const DEFAULT_RELAYS = [
@@ -62,13 +63,21 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       ['seenRelay', new Set()],
       ['seenLibp2p', new Set()],
     ]);
+    const recentListPausedState = new Map([
+      ['nostrToLibp2p', false],
+      ['libp2pToNostr', false],
+      ['seenRelay', false],
+      ['seenLibp2p', false],
+    ]);
     const pendingRecentItems = new Map([
       ['nostrToLibp2p', []],
       ['libp2pToNostr', []],
       ['seenRelay', []],
       ['seenLibp2p', []],
     ]);
+    const recentListControllers = new Map();
     const bookmarkedRecentIds = new Set(loadRecentBookmarks());
+    const recentListStateSnapshot = loadRecentListState();
     const relayCatalog = new Map();
     const relayInfoCatalog = new Map();
     const relayInfoInFlight = new Map();
@@ -82,7 +91,6 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     let relayRenderScheduled = false;
     let peerRenderScheduled = false;
     let recentListsRenderScheduled = false;
-    let recentListsRenderPending = false;
     let rawEventLogCount = 0;
     let rawEventLogSuppressed = false;
     const metrics = {
@@ -120,6 +128,19 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     const peerCountEl = document.getElementById('peerCount');
     const peerListEl = document.getElementById('peerList');
 
+    [
+      ['nostrToLibp2p', nostrToLibp2pRecentEl, recentNostrToLibp2p],
+      ['libp2pToNostr', libp2pToNostrRecentEl, recentLibp2pToNostr],
+      ['seenRelay', seenRelayRecentEl, recentSeenRelay],
+      ['seenLibp2p', seenLibp2pRecentEl, recentSeenLibp2p],
+    ].forEach(([key, container, items]) => {
+      recentListControllers.set(key, createRecentListController(key, container, items));
+    });
+
+    restoreRecentListUiState();
+    renderRecentLists();
+    scheduleRecentListsRender();
+
     document.querySelectorAll('[data-list-search]').forEach((input) => {
       input.addEventListener('keydown', (event) => {
         if (event.key !== 'Enter') return;
@@ -127,6 +148,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         const key = input.getAttribute('data-list-search');
         if (!key || !recentListState.has(key)) return;
         recentListState.get(key).query = input.value || '';
+        persistRecentListState();
         scheduleRecentListsRender();
       });
     });
@@ -135,6 +157,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         const key = select.getAttribute('data-list-sort');
         if (!key || !recentListState.has(key)) return;
         recentListState.get(key).sort = select.value || 'oldest';
+        persistRecentListState();
         scheduleRecentListsRender();
       });
     });
@@ -192,12 +215,12 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     }
 
     function pushRecent(key, list, value) {
-      if (!value?.id) return;
-      if (hasOpenRecentListItem()) {
-        const pending = pendingRecentItems.get(key);
-        if (pending) pending.push(value);
+      const controller = recentListControllers.get(key);
+      if (controller) {
+        controller.queue(value);
         return;
       }
+      if (!value?.id) return;
       const index = list.findIndex((entry) => entry?.id === value.id);
       if (index !== -1) list.splice(index, 1);
       list.push(value);
@@ -208,6 +231,42 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       return escapeHtml(JSON.stringify(value, null, 2));
     }
 
+    function createRecentListController(key, container, items) {
+      return {
+        key,
+        container,
+        items,
+        queue(value) {
+          if (!value?.id) return;
+          if (isRecentListPaused(key)) {
+            const pending = pendingRecentItems.get(key);
+            if (pending) pending.push(value);
+            return;
+          }
+          const index = items.findIndex((entry) => entry?.id === value.id);
+          if (index !== -1) items.splice(index, 1);
+          items.push(value);
+          scheduleRecentListsRender();
+        },
+        pause() {
+          recentListPausedState.set(key, true);
+          persistRecentListState();
+        },
+        resume() {
+          recentListPausedState.set(key, false);
+          persistRecentListState();
+          flushPendingRecentItems(key);
+          scheduleRecentListsRender();
+        },
+        render() {
+          renderRecentList(container, items, () => {}, key);
+        },
+        flush() {
+          flushPendingRecentItems(key);
+        },
+      };
+    }
+
     function loadRecentBookmarks() {
       try {
         const raw = window.localStorage.getItem(BOOKMARKS_KEY);
@@ -216,6 +275,56 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       } catch {
         return [];
       }
+    }
+
+    function loadRecentListState() {
+      try {
+        const raw = window.localStorage.getItem(RECENT_LIST_STATE_KEY);
+        const parsed = raw ? JSON.parse(raw) : {};
+        return parsed && typeof parsed === 'object' ? parsed : {};
+      } catch {
+        return {};
+      }
+    }
+
+    function persistRecentListState() {
+      try {
+        const snapshot = {};
+        for (const [key, state] of recentListState.entries()) {
+          snapshot[key] = {
+            query: String(state.query || ''),
+            sort: String(state.sort || 'oldest'),
+            open: [...(recentListOpenState.get(key) || new Set())],
+          };
+        }
+        window.localStorage.setItem(RECENT_LIST_STATE_KEY, JSON.stringify(snapshot));
+      } catch {
+        // best effort only
+      }
+    }
+
+    function restoreRecentListUiState() {
+      for (const [key, state] of recentListState.entries()) {
+        const snapshot = recentListStateSnapshot[key];
+        if (snapshot && typeof snapshot === 'object') {
+          state.query = String(snapshot.query || '');
+          state.sort = String(snapshot.sort || 'oldest');
+          recentListOpenState.set(key, new Set());
+        }
+        recentListPausedState.set(key, false);
+        const pending = pendingRecentItems.get(key);
+        if (pending) pending.length = 0;
+      }
+      document.querySelectorAll('[data-list-search]').forEach((input) => {
+        const key = input.getAttribute('data-list-search');
+        if (!key || !recentListState.has(key)) return;
+        input.value = recentListState.get(key).query || '';
+      });
+      document.querySelectorAll('[data-list-sort]').forEach((select) => {
+        const key = select.getAttribute('data-list-sort');
+        if (!key || !recentListState.has(key)) return;
+        select.value = recentListState.get(key).sort || 'oldest';
+      });
     }
 
     function persistRecentBookmarks() {
@@ -253,19 +362,16 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       scheduleRecentListsRender();
     }
 
-    function flushPendingRecentItems() {
-      for (const [key, pending] of pendingRecentItems.entries()) {
-        if (!pending.length) continue;
-        const list = getRecentListByKey(key);
-        if (!list) continue;
-        for (const value of pending) {
-          const index = list.findIndex((entry) => entry?.id === value.id);
-          if (index !== -1) list.splice(index, 1);
-          list.push(value);
-        }
-        pending.length = 0;
+    function flushPendingRecentItems(key) {
+      const pending = pendingRecentItems.get(key);
+      const list = getRecentListByKey(key);
+      if (!pending || !pending.length || !list) return;
+      for (const value of pending) {
+        const index = list.findIndex((entry) => entry?.id === value.id);
+        if (index !== -1) list.splice(index, 1);
+        list.push(value);
       }
-      scheduleRecentListsRender();
+      pending.length = 0;
     }
 
     function getRecentListByKey(key) {
@@ -278,26 +384,22 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
 
     function scheduleRecentListsRender() {
       if (recentListsRenderScheduled) return;
-      if (hasOpenRecentListItem()) {
-        recentListsRenderPending = true;
-        return;
-      }
       recentListsRenderScheduled = true;
       queueMicrotask(() => {
         recentListsRenderScheduled = false;
-        recentListsRenderPending = false;
         renderRecentLists();
       });
     }
 
-    function hasOpenRecentListItem() {
-      return [...recentListOpenState.values()].some((openSet) => openSet && openSet.size > 0);
+    function isRecentListPaused(key) {
+      return Boolean(recentListPausedState.get(key));
     }
 
     function renderRecentList(container, items, onSelect, key) {
       if (!container) return;
-      const visibleItems = getRecentItems(key, items);
+      if (isRecentListPaused(key)) return;
       const openItems = recentListOpenState.get(key) || new Set();
+      const visibleItems = getRecentItems(key, items);
       if (!visibleItems.length) {
         const query = (recentListState.get(key)?.query || '').trim();
         container.innerHTML = `
@@ -356,6 +458,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         details.addEventListener('toggle', () => {
           const item = visibleItems[index] || null;
           const openSet = recentListOpenState.get(key) || new Set();
+          const controller = recentListControllers.get(key) || null;
           if (!item?.id) return;
           if (details.open) {
             openSet.clear();
@@ -364,32 +467,23 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
               if (other !== details) other.open = false;
             });
             recentListOpenState.set(key, openSet);
+            controller?.pause();
+            persistRecentListState();
             onSelect(item);
             return;
           }
           openSet.delete(item.id);
           recentListOpenState.set(key, openSet);
-          if (!hasOpenRecentListItem() && recentListsRenderPending) {
-            flushPendingRecentItems();
-            scheduleRecentListsRender();
-          }
+          persistRecentListState();
+          controller?.resume();
         });
       });
     }
 
     function renderRecentLists() {
-      renderRecentList(nostrToLibp2pRecentEl, recentNostrToLibp2p, (item) => {
-        if (item) return;
-      }, 'nostrToLibp2p');
-      renderRecentList(libp2pToNostrRecentEl, recentLibp2pToNostr, (item) => {
-        if (item) return;
-      }, 'libp2pToNostr');
-      renderRecentList(seenRelayRecentEl, recentSeenRelay, (item) => {
-        if (item) return;
-      }, 'seenRelay');
-      renderRecentList(seenLibp2pRecentEl, recentSeenLibp2p, (item) => {
-        if (item) return;
-      }, 'seenLibp2p');
+      for (const controller of recentListControllers.values()) {
+        controller.render();
+      }
     }
 
     function bytesToHex(bytes) {
