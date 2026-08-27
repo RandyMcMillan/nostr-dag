@@ -42,7 +42,9 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     const networkTime = initSharedNetworkTime();
 
     const pool = new SimplePool();
-    const seen = new Set();
+    const seenRelay = new Set();
+    const seenLibp2p = new Set();
+    const seenProcessed = new Set();
     const relayCatalog = new Map();
     const relayInfoCatalog = new Map();
     const relayInfoInFlight = new Map();
@@ -67,7 +69,8 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     const bridgeStatusEl = document.getElementById('bridgeStatus');
     const nostrToLibp2pCountEl = document.getElementById('nostrToLibp2pCount');
     const libp2pToNostrCountEl = document.getElementById('libp2pToNostrCount');
-    const seenCountEl = document.getElementById('seenCount');
+    const seenRelayCountEl = document.getElementById('seenRelayCount');
+    const seenLibp2pCountEl = document.getElementById('seenLibp2pCount');
     const relayPublishCountEl = document.getElementById('relayPublishCount');
     const defaultRelayCountEl = document.getElementById('defaultRelayCount');
     const defaultRelayListEl = document.getElementById('defaultRelayList');
@@ -117,7 +120,8 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     function refreshMetrics() {
       nostrToLibp2pCountEl.textContent = String(metrics.nostrToLibp2p);
       libp2pToNostrCountEl.textContent = String(metrics.libp2pToNostr);
-      seenCountEl.textContent = String(seen.size);
+      seenRelayCountEl.textContent = String(seenRelay.size);
+      seenLibp2pCountEl.textContent = String(seenLibp2p.size);
       relayPublishCountEl.textContent = `${metrics.relayPublishesSucceeded}/${metrics.relayPublishesAttempted}`;
     }
 
@@ -486,6 +490,10 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         if (pingA !== pingB) return pingA - pingB;
         return a.localeCompare(b);
       });
+    }
+
+    function measuredRelayCount(relays) {
+      return relays.filter((relay) => relayPingSortValue(relayInfoForUrl(relay)) < Number.POSITIVE_INFINITY).length;
     }
 
     async function persistBridgeCache() {
@@ -1049,11 +1057,14 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       return parsed.length ? entriesToText(parsed) : String(detail);
     }
 
-    function markSeen(event) {
-      if (!event?.id || seen.has(event.id)) return false;
-      seen.add(event.id);
+    function markSeen(source, event) {
+      if (!event?.id) return false;
+      const sourceSet = source === 'libp2p' ? seenLibp2p : seenRelay;
+      sourceSet.add(event.id);
+      const alreadyProcessed = seenProcessed.has(event.id);
+      seenProcessed.add(event.id);
       refreshMetrics();
-      return true;
+      return !alreadyProcessed;
     }
 
     async function publishToLibp2p(event, direction) {
@@ -1133,7 +1144,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         window.__sharedFooter?.log('bridge', `rejected invalid event ${event.id}`, 'warn', 'unavailable');
         return;
       }
-      if (!markSeen(event)) {
+      if (!markSeen('relay', event)) {
         window.__sharedFooter?.log('bridge', `deduped ${event.id}`, 'trace', 'available');
         return;
       }
@@ -1168,7 +1179,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         return;
       }
       const { event, relayHints, direction } = envelope;
-      if (!markSeen(event)) return;
+      if (!markSeen('libp2p', event)) return;
       if (!verifyEvent(event)) {
         window.__sharedFooter?.log('bridge', `rejected libp2p payload ${event.id}`, 'warn', 'unavailable');
         return;
@@ -1276,8 +1287,11 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
           oneose() {},
         });
 
-        setStatus(`bridging ${relaysSnapshot.length} relays on ${topic}`, 'available');
+        const measuredCount = measuredRelayCount(relaysSnapshot);
+        const statusCount = measuredCount > 0 ? `${measuredCount} measured` : `${relaysSnapshot.length} known`;
+        setStatus(`bridging ${statusCount} relays on ${topic}`, 'available');
         window.__sharedFooter?.log('bridge', `bridge ready on topic ${topic}`, 'info', 'available');
+        window.__sharedFooter?.log('bridge', `relay snapshot known=${relaysSnapshot.length} measured=${measuredCount}`, 'debug', 'available');
         for (const relay of relaysSnapshot) {
           window.__sharedFooter?.log('bridge', `query nostr relay ${relay}`, 'trace', 'checking');
         }

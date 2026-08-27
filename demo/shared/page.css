@@ -268,6 +268,41 @@ button:hover, a.button:hover { background:var(--button-hover); }
 .bridge-metrics,
 .bridge-peers { margin-bottom: 16px; }
 
+.bridge-stats {
+  display:grid;
+  gap:10px;
+  margin:12px 0 0;
+}
+
+.bridge-stat {
+  display:grid;
+  grid-template-columns: 160px 1fr;
+  gap:10px 12px;
+  align-items:start;
+  padding:10px 12px;
+  border:1px solid var(--border);
+  border-radius:10px;
+  background:var(--surface);
+}
+
+.bridge-stat dt {
+  font-weight:700;
+  color:var(--fg);
+}
+
+.bridge-stat dd {
+  margin:0;
+  display:flex;
+  gap:10px;
+  align-items:baseline;
+  color:var(--muted);
+}
+
+.bridge-stat dd b {
+  color:var(--fg);
+  min-width:4ch;
+}
+
 .bridge-peer {
   border:1px solid var(--border);
   border-radius:12px;
