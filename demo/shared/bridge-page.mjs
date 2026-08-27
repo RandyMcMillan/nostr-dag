@@ -1237,6 +1237,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       const record = {
         ...peer,
         source: peer.source || source,
+        detail: sanitizePeerDetail(peer.detail),
         updated_at: peer.updated_at || Date.now(),
       };
       if (source === 'browser') {
@@ -1504,6 +1505,15 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       }
       const parsed = parseKeyValueString(detail);
       return parsed.length ? entriesToText(parsed) : String(detail);
+    }
+
+    function sanitizePeerDetail(detail) {
+      try {
+        const text = formatPeerDetail(detail);
+        return text ? String(text) : 'no detail';
+      } catch {
+        return 'no detail';
+      }
     }
 
     function markSeen(source, event) {
