@@ -125,7 +125,7 @@
     import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     import { scheduleAfterPaint, yieldToBrowser } from '../shared/async-lifecycle.mjs';
     import { createSharedLibp2pStack, DEFAULT_BOOTSTRAP_PEERS } from '../shared/libp2p-stack.mjs';
-    import { buildBridgeEnvelope } from '../shared/bridge-protocol.mjs';
+    import { serializeDagBridgeEnvelope } from '../shared/cross-protocol-broadcast.mjs';
     import { getNetworkUnixTime } from '../shared/network-time.mjs';
     import {
       buildAttestDraft,
@@ -1072,10 +1072,11 @@
       }
       // Mirror the same signed event into the bridge pubsub topic so the
       // browser bridge can fan it back out to the other transport.
-      const payload = buildBridgeEnvelope(event, direction, [...broadcastRelays], { ...meta, topic: BRIDGE_TOPIC });
+      const payloadJson = serializeDagBridgeEnvelope(event, [...broadcastRelays], { ...meta, topic: BRIDGE_TOPIC });
+      const payload = JSON.parse(payloadJson);
       window.__sharedFooter?.log('libp2p', `publish ${direction} ${event.kind} ${event.id} on ${BRIDGE_TOPIC}`, 'info', 'checking');
       window.__sharedFooter?.log('libp2p', `bridge envelope:\n${JSON.stringify(payload, null, 2)}`, 'trace', 'checking');
-      await node.services.pubsub.publish(BRIDGE_TOPIC, new TextEncoder().encode(JSON.stringify(payload)));
+      await node.services.pubsub.publish(BRIDGE_TOPIC, new TextEncoder().encode(payloadJson));
       window.__sharedFooter?.log('libp2p', `published ${direction} ${event.kind} ${event.id} on ${BRIDGE_TOPIC}`, 'info', 'available');
       return true;
     }
