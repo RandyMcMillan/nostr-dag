@@ -18,6 +18,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     const SIGNER_KEY = 'nostr-dag-bridge-signer-v1';
     const BOOKMARKS_KEY = 'nostr-dag-bridge-bookmarks-v1';
     const RECENT_LIST_STATE_KEY = 'nostr-dag-bridge-recent-list-state-v1';
+    const PANEL_STATE_KEY = 'nostr-dag-bridge-panel-state-v1';
     const BRIDGE_PROTOCOL = 'nostr-dag-bridge';
     const BRIDGE_PROTOCOL_VERSION = 1;
     const DEFAULT_RELAYS = [
@@ -110,6 +111,8 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     const relayListEl = document.getElementById('relayList');
     const peerCountEl = document.getElementById('peerCount');
     const peerListEl = document.getElementById('peerList');
+    const peerPanelEl = peerListEl?.closest?.('details.bridge-collapsible') || null;
+    const relayPanelEl = relayListEl?.closest?.('details.bridge-collapsible') || null;
 
     [
       ['nostrToLibp2p', nostrToLibp2pRecentEl, recentNostrToLibp2p],
@@ -128,6 +131,9 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     });
 
     restoreRecentListUiState();
+    restorePanelState();
+    peerPanelEl?.addEventListener('toggle', persistPanelState);
+    relayPanelEl?.addEventListener('toggle', persistPanelState);
     renderRecentLists();
     syncRecentListPauseState();
     scheduleRecentListsRender();
@@ -256,6 +262,37 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       } catch {
         // best effort only
       }
+    }
+
+    function loadPanelState() {
+      try {
+        const raw = window.localStorage.getItem(PANEL_STATE_KEY);
+        const parsed = raw ? JSON.parse(raw) : {};
+        return parsed && typeof parsed === 'object' ? parsed : {};
+      } catch {
+        return {};
+      }
+    }
+
+    function persistPanelState() {
+      try {
+        const openPeerKeys = [...peerListEl.querySelectorAll('details[open][data-peer-key]')]
+          .map((el) => el.getAttribute('data-peer-key'))
+          .filter(Boolean);
+        window.localStorage.setItem(PANEL_STATE_KEY, JSON.stringify({
+          peersOpen: Boolean(peerPanelEl?.open),
+          relaysOpen: Boolean(relayPanelEl?.open),
+          openPeerKeys,
+        }));
+      } catch {
+        // best effort only
+      }
+    }
+
+    function restorePanelState() {
+      const snapshot = loadPanelState();
+      if (peerPanelEl) peerPanelEl.open = Boolean(snapshot.peersOpen);
+      if (relayPanelEl) relayPanelEl.open = Boolean(snapshot.relaysOpen);
     }
 
     function restoreRecentListUiState() {
@@ -1260,9 +1297,10 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         return;
       }
       window.__sharedFooter?.log('bridge', `render peers (${peers.length})`, 'trace', 'checking');
-      const openPeerKeys = [...peerListEl.querySelectorAll('details[open][data-peer-key]')]
-        .map((el) => el.getAttribute('data-peer-key'))
-        .filter(Boolean);
+      const openPeerKeys = new Set([
+        ...[...peerListEl.querySelectorAll('details[open][data-peer-key]')].map((el) => el.getAttribute('data-peer-key')).filter(Boolean),
+        ...((loadPanelState().openPeerKeys || []).filter((value) => typeof value === 'string' && value)),
+      ]);
       peerListEl.innerHTML = peers.map((peer) => `
         <details class="bridge-card bridge-peer" data-peer-key="${escapeHtml(peerKey(peer))}">
           <summary class="bridge-card-summary">
@@ -1287,6 +1325,10 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
           }
         }
       }
+      peerListEl.querySelectorAll('details[data-peer-key]').forEach((details) => {
+        details.addEventListener('toggle', persistPanelState);
+      });
+      persistPanelState();
     }
 
     // Poll the local preview server when available. Pages deployments just render browser peers.
