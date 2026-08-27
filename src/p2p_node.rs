@@ -4,8 +4,17 @@ use libp2p::Multiaddr;
 #[cfg(feature = "p2p")]
 use crate::{
     bridge_native::unwrap_bridge_envelope,
+    create_ack_event,
+    event::DAG_EVENT_KIND,
     p2p::{parse_transfer_event, TransferEventPayload},
+    Dag, InsertResult, PIP_ATTEST_KIND, PIP_JOIN_KIND, PIP_SEAL_KIND,
 };
+
+#[cfg(feature = "p2p")]
+use nostr::{Event, EventId, Keys, PublicKey};
+
+#[cfg(feature = "p2p")]
+use std::collections::BTreeSet;
 
 #[cfg(feature = "p2p")]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -15,6 +24,101 @@ pub enum NodeCommand {
     Help,
     Status,
     Quit,
+}
+
+#[cfg(feature = "p2p")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PeerReaction {
+    pub summary: InboundSummary,
+    pub outbound_messages: Vec<String>,
+    pub inserted_event_id: Option<String>,
+    pub canonical_count: usize,
+    pub tip_count: usize,
+}
+
+#[cfg(feature = "p2p")]
+pub struct PeerRuntime {
+    keys: Keys,
+    dag: Dag,
+    participants: BTreeSet<PublicKey>,
+}
+
+#[cfg(feature = "p2p")]
+impl PeerRuntime {
+    pub fn new(keys: Keys, participants: impl IntoIterator<Item = PublicKey>) -> Self {
+        let participants: BTreeSet<PublicKey> = participants.into_iter().collect();
+        let dag = Dag::new(participants.iter().copied());
+        Self {
+            keys,
+            dag,
+            participants,
+        }
+    }
+
+    pub fn new_with_self_participation(keys: Keys) -> Self {
+        let self_pubkey = keys.public_key();
+        Self::new(keys, [self_pubkey])
+    }
+
+    pub fn public_key(&self) -> PublicKey {
+        self.keys.public_key()
+    }
+
+    pub fn participant_count(&self) -> usize {
+        self.participants.len()
+    }
+
+    pub fn status_line(&self, listen_addrs: &[String], connected_peers: usize) -> String {
+        format!(
+            "STATUS nostr_pubkey={} listen_addrs={} connected_peers={} participants={} canonical={} tips={}",
+            self.public_key(),
+            listen_addrs.join(","),
+            connected_peers,
+            self.participant_count(),
+            self.dag.canonical_events().count(),
+            self.dag.tips().count(),
+        )
+    }
+
+    pub fn process_inbound_message(&mut self, message: &str) -> PeerReaction {
+        let summary = summarize_inbound_message(message);
+        let Some(event) = decode_event_message(message) else {
+            return PeerReaction {
+                summary,
+                outbound_messages: Vec::new(),
+                inserted_event_id: None,
+                canonical_count: self.dag.canonical_events().count(),
+                tip_count: self.dag.tips().count(),
+            };
+        };
+
+        let inserted_event_id = match self.dag.insert(event.clone()) {
+            InsertResult::Inserted(id) | InsertResult::Buffered { event_id: id, .. } => {
+                Some(id.to_hex())
+            }
+            InsertResult::Duplicate => None,
+        };
+
+        let mut outbound_messages = Vec::new();
+        if should_ack_event(&event) {
+            let tips: Vec<EventId> = self.dag.tips().collect();
+            if !tips.is_empty() {
+                if let Ok(ack) = create_ack_event(&self.keys, &tips) {
+                    let ack_json = serde_json::to_string(&ack).unwrap();
+                    let _ = self.dag.insert(ack.clone());
+                    outbound_messages.push(ack_json);
+                }
+            }
+        }
+
+        PeerReaction {
+            summary,
+            outbound_messages,
+            inserted_event_id,
+            canonical_count: self.dag.canonical_events().count(),
+            tip_count: self.dag.tips().count(),
+        }
+    }
 }
 
 #[cfg(feature = "p2p")]
@@ -163,6 +267,25 @@ pub fn format_inbound_summary(summary: &InboundSummary) -> String {
 }
 
 #[cfg(feature = "p2p")]
+fn decode_event_message(message: &str) -> Option<Event> {
+    if let Some(envelope) = unwrap_bridge_envelope(message) {
+        return Some(envelope.event);
+    }
+
+    serde_json::from_str::<Event>(message).ok()
+}
+
+#[cfg(feature = "p2p")]
+fn should_ack_event(event: &Event) -> bool {
+    event.kind != DAG_EVENT_KIND
+        && event.kind != PIP_ATTEST_KIND
+        && event.kind != PIP_SEAL_KIND
+        && event.kind != PIP_JOIN_KIND
+        && event.kind != crate::p2p::TRANSFER_MANIFEST_KIND
+        && event.kind != crate::p2p::TRANSFER_SLICE_KIND
+}
+
+#[cfg(feature = "p2p")]
 pub const HELP_TEXT: &str = concat!(
     "Commands:\n",
     "  /help                 show this help\n",
@@ -301,5 +424,45 @@ mod tests {
             InboundSummary::Raw { message } => assert_eq!(message, "plain-text-message"),
             other => panic!("unexpected raw summary: {other:?}"),
         }
+    }
+
+    #[cfg(feature = "p2p")]
+    #[test]
+    fn runtime_acknowledges_nostr_events_but_not_protocol_frames() {
+        let runtime_keys = Keys::generate();
+        let sender_keys = Keys::generate();
+        let mut runtime = PeerRuntime::new_with_self_participation(runtime_keys.clone());
+
+        let chat_event = EventBuilder::new(nostr::Kind::Custom(42), "{\"hello\":\"peer\"}")
+            .sign_with_keys(&sender_keys)
+            .unwrap();
+        let chat_json = serde_json::to_string(&chat_event).unwrap();
+        let reaction = runtime.process_inbound_message(&chat_json);
+
+        assert!(matches!(
+            reaction.summary,
+            InboundSummary::NostrEvent { .. }
+        ));
+        assert_eq!(reaction.outbound_messages.len(), 1);
+        assert!(reaction.inserted_event_id.is_some());
+        assert!(reaction.canonical_count >= 1);
+        assert!(reaction.tip_count >= 1);
+
+        let payload = b"native peer protocol sample";
+        let slices = packetize_payload("root-protocol", payload, 8);
+        let manifest = TransferManifest {
+            root_id: "root-protocol".to_string(),
+            total_bytes: payload.len(),
+            total_slices: slices.len(),
+        };
+        let manifest_event = build_transfer_manifest_event(&runtime_keys, &manifest).unwrap();
+        let manifest_json = serde_json::to_string(&manifest_event).unwrap();
+        let reaction = runtime.process_inbound_message(&manifest_json);
+
+        assert!(matches!(
+            reaction.summary,
+            InboundSummary::TransferManifest { .. }
+        ));
+        assert!(reaction.outbound_messages.is_empty());
     }
 }

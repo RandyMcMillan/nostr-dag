@@ -21,7 +21,7 @@ use libp2p::{
 };
 use nostr_dag::p2p::{NETWORK_TIME_PROTOCOL, NETWORK_TIME_VERSION, NOSTR_DAG_TOPIC};
 use nostr_dag::p2p_node::{
-    format_inbound_summary, parse_node_command, summarize_inbound_message, NodeCommand, HELP_TEXT,
+    format_inbound_summary, parse_node_command, NodeCommand, PeerRuntime, HELP_TEXT,
 };
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::mpsc;
@@ -44,6 +44,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .init();
 
     let local_key = identity::Keypair::generate_ed25519();
+    let runtime_keys = nostr::Keys::generate();
+    let mut runtime = PeerRuntime::new_with_self_participation(runtime_keys);
     let local_peer_id = local_key.public().to_peer_id();
     let topic = IdentTopic::new(NOSTR_DAG_TOPIC);
 
@@ -98,7 +100,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let _ = stdin_ready_rx.await;
 
-    println!("READY peer_id={local_peer_id} topic={NOSTR_DAG_TOPIC}");
+    println!(
+        "READY peer_id={local_peer_id} nostr_pubkey={} topic={NOSTR_DAG_TOPIC}",
+        runtime.public_key()
+    );
     println!("HELP\n{HELP_TEXT}");
 
     let mut discovered_peers = HashSet::<PeerId>::new();
@@ -136,9 +141,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     }
                     Some(NodeCommand::Status) => {
                         println!(
-                            "STATUS peer_id={local_peer_id} listen_addrs={} connected_peers={} discovered_peers={}",
-                            listen_addrs.join(","),
-                            swarm.connected_peers().count(),
+                            "{} discovered_peers={}",
+                            runtime.status_line(&listen_addrs, swarm.connected_peers().count()),
                             discovered_peers.len(),
                         );
                     }
@@ -183,12 +187,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                 );
                             }
 
-                            let summary = summarize_inbound_message(&text);
+                            let reaction = runtime.process_inbound_message(&text);
+                            let summary = reaction.summary;
                             println!(
                                 "{} source={}",
                                 format_inbound_summary(&summary),
                                 propagation_source.to_string()
                             );
+                            if let Some(event_id) = reaction.inserted_event_id {
+                                println!(
+                                    "DAG inserted event={event_id} canonical={} tips={}",
+                                    reaction.canonical_count,
+                                    reaction.tip_count
+                                );
+                            }
+                            for ack in reaction.outbound_messages {
+                                if let Err(err) = swarm.behaviour_mut().gossipsub.publish(
+                                    IdentTopic::new(NOSTR_DAG_TOPIC),
+                                    ack.as_bytes(),
+                                ) {
+                                    warn!(?err, "ack publish failed");
+                                } else {
+                                    println!("ACK published");
+                                }
+                            }
                             debug!(%text, "gossipsub message received");
                         }
                     }
