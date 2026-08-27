@@ -358,8 +358,15 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     }
 
     function syncRecentListPauseState() {
-      for (const state of recentListState.values()) {
-        state.paused = state.openIds.size > 0;
+      const containers = new Map([
+        ['nostrToLibp2p', nostrToLibp2pRecentEl],
+        ['libp2pToNostr', libp2pToNostrRecentEl],
+        ['seenRelay', seenRelayRecentEl],
+        ['seenLibp2p', seenLibp2pRecentEl],
+      ]);
+      for (const [key, state] of recentListState.entries()) {
+        const container = containers.get(key) || null;
+        state.paused = Boolean(container?.querySelector('details.bridge-recent-event[open]'));
       }
     }
 
@@ -609,7 +616,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     // - `event` remains a standard Nostr event
     // - `relay_hints` carries deduplicated relay URLs for the Nostr publish path
     // See `/PIP.md` for the repository-level specification.
-    function buildBridgeEnvelope(event, direction, relayHints = []) {
+    function buildBridgeEnvelope(event, direction, relayHints = [], meta = {}) {
       return {
         protocol: BRIDGE_PROTOCOL,
         version: BRIDGE_PROTOCOL_VERSION,
@@ -617,6 +624,9 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         event,
         relay_hints: [...new Set(relayHints.filter(Boolean))],
         topic,
+        origin_peer_id: meta.originPeerId || node?.peerId?.toString?.() || globalThis.__currentLibp2pPeerId || '',
+        forwarded_by: meta.forwardedBy || '',
+        hop_count: Number.isFinite(Number(meta.hopCount)) ? Number(meta.hopCount) : 0,
         ts: Date.now(),
       };
     }
@@ -660,6 +670,9 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
           event: message,
           relayHints: [],
           direction: 'libp2p->nostr',
+          originPeerId: '',
+          forwardedBy: '',
+          hopCount: 0,
         };
       }
       const protocol = message.protocol || message.source;
@@ -678,6 +691,9 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         event,
         relayHints,
         direction: message.direction || 'libp2p->nostr',
+        originPeerId: String(message.origin_peer_id || message.originPeerId || ''),
+        forwardedBy: String(message.forwarded_by || message.forwardedBy || ''),
+        hopCount: Number.isFinite(Number(message.hop_count)) ? Number(message.hop_count) : 0,
       };
     }
 
@@ -1679,17 +1695,29 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       return !alreadyProcessed;
     }
 
-    async function publishToLibp2p(event, direction) {
+    async function publishToLibp2p(event, direction, meta = {}) {
       if (!node) {
         window.__sharedFooter?.log('bridge', `publishToLibp2p: node not ready, dropping ${direction} ${event.kind} ${event.id}`, 'warn', 'unavailable');
         return;
       }
-      const payload = buildBridgeEnvelope(event, direction, currentRelayUrls());
+      const payload = buildBridgeEnvelope(event, direction, currentRelayUrls(), meta);
       await node.services.pubsub.publish(topic, encoder.encode(JSON.stringify(payload)));
       metrics.nostrToLibp2p += direction === 'nostr->libp2p' ? 1 : 0;
       refreshMetrics();
       scheduleBridgeCachePersist();
       window.__sharedFooter?.log('bridge', `${direction} ${event.kind} ${event.id}`, 'trace', 'available');
+    }
+
+    async function forwardLibp2pEvent(event, relayHints = [], originPeerId = '', hopCount = 0) {
+      const currentPeerId = node?.peerId?.toString?.() || globalThis.__currentLibp2pPeerId || '';
+      if (!node || !event?.id) return;
+      if (!originPeerId || originPeerId === currentPeerId) return;
+      await publishToLibp2p(event, 'libp2p->libp2p', {
+        originPeerId,
+        forwardedBy: currentPeerId,
+        hopCount: Number(hopCount) + 1,
+        relayHints,
+      });
     }
 
     async function publishToRelays(event, direction, relayHints = []) {
@@ -1792,7 +1820,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         window.__sharedFooter?.log('bridge', 'rejected libp2p payload with unsupported protocol', 'warn', 'unavailable');
         return;
       }
-      const { event, relayHints, direction } = envelope;
+      const { event, relayHints, direction, originPeerId, hopCount } = envelope;
       if (!markSeen('libp2p', event)) return;
       if (!verifyEvent(event)) {
         window.__sharedFooter?.log('bridge', `rejected libp2p payload ${event.id}`, 'warn', 'unavailable');
@@ -1820,6 +1848,13 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         await publishToRelays(event, 'libp2p->nostr', relayHints);
       } catch (e) {
         window.__sharedFooter?.log('bridge', `relay publish failed: ${e.message}`, 'error', 'unavailable');
+      }
+      if (direction !== 'libp2p->libp2p') {
+        try {
+          await forwardLibp2pEvent(event, relayHints, originPeerId, hopCount);
+        } catch (e) {
+          window.__sharedFooter?.log('bridge', `libp2p forward failed: ${e.message}`, 'warn', 'unavailable');
+        }
       }
     }
 
