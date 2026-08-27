@@ -130,6 +130,38 @@ impl EventStore {
             CREATE INDEX IF NOT EXISTS idx_dag_seen_by_event ON dag_seen_by(event_id);
             ",
         )
+        .and_then(|_| self.migrate_dag_edges_schema())
+    }
+
+    fn migrate_dag_edges_schema(&self) -> Result<()> {
+        let legacy = self
+            .conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'dag_edges'",
+                [],
+                |row| row.get::<_, Option<String>>(0),
+            )?
+            .unwrap_or_default();
+        if !legacy.contains("parent_id  TEXT    NOT NULL REFERENCES events(id)") {
+            return Ok(());
+        }
+
+        self.conn.execute_batch(
+            "
+            PRAGMA foreign_keys=OFF;
+            ALTER TABLE dag_edges RENAME TO dag_edges_legacy;
+            CREATE TABLE dag_edges (
+                parent_id  TEXT    NOT NULL,
+                child_id   TEXT    NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+                depth      INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (parent_id, child_id)
+            );
+            INSERT INTO dag_edges (parent_id, child_id, depth)
+            SELECT parent_id, child_id, depth FROM dag_edges_legacy;
+            DROP TABLE dag_edges_legacy;
+            PRAGMA foreign_keys=ON;
+            "
+        )
     }
 
     // -----------------------------------------------------------------------
@@ -602,5 +634,55 @@ mod tests {
             .unwrap();
         let relays = store.relays_for_user("pk1").unwrap();
         assert_eq!(relays, vec!["wss://r.example.com"]);
+    }
+
+    #[test]
+    fn migrate_rebuilds_legacy_dag_edges_schema() {
+        let path = {
+            let mut path = std::env::temp_dir();
+            path.push(format!("nostr-dag-legacy-{}.db", std::process::id()));
+            let _ = std::fs::remove_file(&path);
+            path
+        };
+
+        {
+            let conn = Connection::open(&path).expect("legacy db");
+            conn.execute_batch(
+                "
+                PRAGMA foreign_keys=ON;
+                CREATE TABLE events (
+                    id           TEXT PRIMARY KEY,
+                    pubkey       TEXT NOT NULL,
+                    kind         INTEGER NOT NULL,
+                    created_at   INTEGER NOT NULL,
+                    content      TEXT NOT NULL,
+                    sig          TEXT NOT NULL,
+                    raw_json     TEXT NOT NULL,
+                    first_seen_at INTEGER NOT NULL,
+                    source_relay TEXT
+                );
+                CREATE TABLE dag_edges (
+                    parent_id TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+                    child_id TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+                    depth INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (parent_id, child_id)
+                );
+                INSERT INTO events (id, pubkey, kind, created_at, content, sig, raw_json, first_seen_at, source_relay)
+                VALUES
+                    ('parent1', 'pk0', 1, 1, '', 'sig', '{}', 1, NULL),
+                    ('child1', 'pk1', 21000, 1, '', 'sig', '{}', 1, NULL);
+                INSERT INTO dag_edges (parent_id, child_id, depth) VALUES ('parent1', 'child1', 0);
+                ",
+            )
+            .expect("seed legacy schema");
+        }
+
+        let store = EventStore::open(path.to_str().expect("path")).expect("migrated store");
+        store
+            .upsert_event("child1", "pk1", 21000, 1_000, "", "sig", "{}", &[], None, 1_000)
+            .unwrap();
+        assert_eq!(store.children_of("parent1").unwrap(), vec!["child1".to_string()]);
+
+        let _ = std::fs::remove_file(&path);
     }
 }
