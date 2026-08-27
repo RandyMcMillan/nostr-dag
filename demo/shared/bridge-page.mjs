@@ -11,17 +11,30 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     import { createListContainerController } from './list-container.mjs';
     import { createPeersListController } from './peers-list.mjs';
     import { createRelaysListController } from './relays-list.mjs';
-    // Persistent IndexedDB store for all Nostr events and relationships
-    // seen by the bridge (events, tags, relays, users, DAG edges, peer acks).
-    import { getDagDb } from './dag-db.mjs';
+    import {
+      bookmarkSnapshotFromItem as bookmarkSnapshotFromItemState,
+      getBookmarkedSnapshot as getBookmarkedSnapshotState,
+      isRecentBookmarked as isRecentBookmarkedState,
+      loadPanelState as loadPanelStateSnapshot,
+      loadRecentBookmarks as loadRecentBookmarksState,
+      loadRecentListState as loadRecentListStateSnapshot,
+      persistPanelState as persistPanelStateSnapshot,
+      persistRecentBookmarks as persistRecentBookmarksState,
+      persistRecentListState as persistRecentListStateSnapshot,
+      restorePanelState as restorePanelStateFromSnapshot,
+      restoreRecentListUiState as restoreRecentListUiStateFromSnapshot,
+      restoreStatPanelState as restoreStatPanelStateFromSnapshot,
+      syncRecentListPauseState as syncRecentListPauseStateFromState,
+      toggleRecentBookmark as toggleRecentBookmarkState,
+      updateBookmarkButtons as updateBookmarkButtonsState,
+    } from './bridge-recent-state.mjs';
+        // Persistent IndexedDB store for all Nostr events and relationships
+        // seen by the bridge (events, tags, relays, users, DAG edges, peer acks).
+        import { getDagDb } from './dag-db.mjs';
 
     const encoder = new TextEncoder();
     const decoder = new TextDecoder();
-    const CACHE_KEY = 'nostr-dag-bridge-cache-v2';
     const SIGNER_KEY = 'nostr-dag-bridge-signer-v1';
-    const BOOKMARKS_KEY = 'nostr-dag-bridge-bookmarks-v1';
-    const RECENT_LIST_STATE_KEY = 'nostr-dag-bridge-recent-list-state-v1';
-    const PANEL_STATE_KEY = 'nostr-dag-bridge-panel-state-v1';
     const DEFAULT_RELAYS = [
       'wss://relay.damus.io',
       'wss://nos.lol',
@@ -126,6 +139,77 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     const peerPanelEl = peerListEl?.closest?.('details.bridge-collapsible') || null;
     const relayPanelEl = relayListEl?.closest?.('details.bridge-collapsible') || null;
     const statPanelEls = [...document.querySelectorAll('details.bridge-stat[data-stat-key]')];
+
+    function loadRecentBookmarks() {
+      return loadRecentBookmarksState();
+    }
+
+    function loadRecentListState() {
+      return loadRecentListStateSnapshot();
+    }
+
+    function persistRecentListState() {
+      return persistRecentListStateSnapshot(recentListState);
+    }
+
+    function loadPanelState() {
+      return loadPanelStateSnapshot();
+    }
+
+    function persistPanelState() {
+      return persistPanelStateSnapshot({
+        peerListEl,
+        peerPanelEl,
+        relayPanelEl,
+        statPanelEls,
+      });
+    }
+
+    function restorePanelState() {
+      return restorePanelStateFromSnapshot(loadPanelState(), peerPanelEl, relayPanelEl);
+    }
+
+    function restoreStatPanelState() {
+      return restoreStatPanelStateFromSnapshot(loadPanelState(), statPanelEls);
+    }
+
+    function restoreRecentListUiState() {
+      return restoreRecentListUiStateFromSnapshot(recentListState, recentListStateSnapshot);
+    }
+
+    function syncRecentListPauseState() {
+      return syncRecentListPauseStateFromState(recentListState, recentPauseContainers);
+    }
+
+    function persistRecentBookmarks() {
+      return persistRecentBookmarksState(bookmarkedRecentIds, bookmarkedRecentSnapshots);
+    }
+
+    function isRecentBookmarked(id) {
+      return isRecentBookmarkedState(id, bookmarkedRecentIds);
+    }
+
+    function getBookmarkedSnapshot(id) {
+      return getBookmarkedSnapshotState(id, bookmarkedRecentSnapshots);
+    }
+
+    function bookmarkSnapshotFromItem(item) {
+      return bookmarkSnapshotFromItemState(item);
+    }
+
+    function updateBookmarkButtons(id) {
+      return updateBookmarkButtonsState(id, bookmarkedRecentIds);
+    }
+
+    function toggleRecentBookmark(id, item = null) {
+      return toggleRecentBookmarkState({
+        id,
+        item,
+        bookmarkedRecentIds,
+        bookmarkedRecentSnapshots,
+        scheduleRecentListsRender,
+      });
+    }
 
     [
       ['nostrToLibp2p', nostrToLibp2pRecentEl, recentNostrToLibp2p],
@@ -243,193 +327,12 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       return escapeHtml(JSON.stringify(value, null, 2));
     }
 
-    function loadRecentBookmarks() {
-      try {
-        const raw = window.localStorage.getItem(BOOKMARKS_KEY);
-        const parsed = raw ? JSON.parse(raw) : [];
-        if (!Array.isArray(parsed)) return [];
-        return parsed.flatMap((value) => {
-          if (typeof value === 'string' && value) {
-            return [{ id: value, event: null, source: '', updated_at: 0 }];
-          }
-          if (value && typeof value === 'object' && typeof value.id === 'string' && value.id) {
-            return [{
-              id: value.id,
-              event: value.event && typeof value.event === 'object' ? value.event : null,
-              source: typeof value.source === 'string' ? value.source : '',
-              updated_at: Number(value.updated_at) || 0,
-            }];
-          }
-          return [];
-        });
-      } catch {
-        return [];
-      }
-    }
-
-    function loadRecentListState() {
-      try {
-        const raw = window.localStorage.getItem(RECENT_LIST_STATE_KEY);
-        const parsed = raw ? JSON.parse(raw) : {};
-        return parsed && typeof parsed === 'object' ? parsed : {};
-      } catch {
-        return {};
-      }
-    }
-
-    function persistRecentListState() {
-      try {
-        const snapshot = {};
-        for (const [key, state] of recentListState.entries()) {
-          snapshot[key] = {
-            query: String(state.query || ''),
-            sort: String(state.sort || 'newest'),
-            open: [...(state.openIds || new Set())],
-          };
-        }
-        window.localStorage.setItem(RECENT_LIST_STATE_KEY, JSON.stringify(snapshot));
-      } catch {
-        // best effort only
-      }
-    }
-
-    function loadPanelState() {
-      try {
-        const raw = window.localStorage.getItem(PANEL_STATE_KEY);
-        const parsed = raw ? JSON.parse(raw) : {};
-        return parsed && typeof parsed === 'object' ? parsed : {};
-      } catch {
-        return {};
-      }
-    }
-
-    function persistPanelState() {
-      try {
-        const openPeerKeys = [...peerListEl.querySelectorAll('details[open][data-peer-key]')]
-          .map((el) => el.getAttribute('data-peer-key'))
-          .filter(Boolean);
-        const statPanels = {};
-        statPanelEls.forEach((panel) => {
-          const key = panel.getAttribute('data-stat-key');
-          if (!key) return;
-          statPanels[key] = Boolean(panel.open);
-        });
-        window.localStorage.setItem(PANEL_STATE_KEY, JSON.stringify({
-          peersOpen: Boolean(peerPanelEl?.open),
-          relaysOpen: Boolean(relayPanelEl?.open),
-          openPeerKeys,
-          statPanels,
-        }));
-      } catch {
-        // best effort only
-      }
-    }
-
-    function restorePanelState() {
-      const snapshot = loadPanelState();
-      if (peerPanelEl) peerPanelEl.open = Boolean(snapshot.peersOpen);
-      if (relayPanelEl) relayPanelEl.open = Boolean(snapshot.relaysOpen);
-    }
-
-    function restoreStatPanelState() {
-      const snapshot = loadPanelState();
-      const statPanels = snapshot.statPanels && typeof snapshot.statPanels === 'object' ? snapshot.statPanels : {};
-      statPanelEls.forEach((panel) => {
-        const key = panel.getAttribute('data-stat-key');
-        if (!key) return;
-        if (Object.prototype.hasOwnProperty.call(statPanels, key)) {
-          panel.open = Boolean(statPanels[key]);
-        }
-      });
-    }
-
-    function restoreRecentListUiState() {
-      for (const [key, state] of recentListState.entries()) {
-        const snapshot = recentListStateSnapshot[key];
-        if (snapshot && typeof snapshot === 'object') {
-          state.query = String(snapshot.query || '');
-          state.sort = String(snapshot.sort || 'newest');
-          state.openIds = new Set(Array.isArray(snapshot.open) ? snapshot.open.filter((value) => typeof value === 'string' && value) : []);
-        }
-        state.paused = false;
-      }
-      document.querySelectorAll('[data-list-search]').forEach((input) => {
-        const key = input.getAttribute('data-list-search');
-        if (!key || !recentListState.has(key)) return;
-        input.value = recentListState.get(key).query || '';
-      });
-      document.querySelectorAll('[data-list-sort]').forEach((select) => {
-        const key = select.getAttribute('data-list-sort');
-        if (!key || !recentListState.has(key)) return;
-        select.value = recentListState.get(key).sort || 'newest';
-      });
-    }
-
-    function syncRecentListPauseState() {
-      const containers = new Map([
-        ['nostrToLibp2p', nostrToLibp2pRecentEl],
-        ['libp2pToNostr', libp2pToNostrRecentEl],
-        ['seenRelay', seenRelayRecentEl],
-        ['seenLibp2p', seenLibp2pRecentEl],
-      ]);
-      for (const [key, state] of recentListState.entries()) {
-        const container = containers.get(key) || null;
-        state.paused = Boolean(container?.querySelector('details.bridge-recent-event[open]'));
-      }
-    }
-
-    function persistRecentBookmarks() {
-      try {
-        const snapshot = [...bookmarkedRecentIds].map((id) => bookmarkedRecentSnapshots.get(id) || { id, event: null, source: '', updated_at: 0 });
-        window.localStorage.setItem(BOOKMARKS_KEY, JSON.stringify(snapshot));
-      } catch {
-        // best effort only
-      }
-    }
-
-    function isRecentBookmarked(id) {
-      return Boolean(id && bookmarkedRecentIds.has(id));
-    }
-
-    function getBookmarkedSnapshot(id) {
-      return id ? bookmarkedRecentSnapshots.get(id) || null : null;
-    }
-
-    function bookmarkSnapshotFromItem(item) {
-      if (!item?.id) return null;
-      return {
-        id: item.id,
-        event: item.event && typeof item.event === 'object' ? item.event : null,
-        source: typeof item.source === 'string' ? item.source : '',
-        updated_at: Date.now(),
-      };
-    }
-
-    function updateBookmarkButtons(id) {
-      const bookmarked = isRecentBookmarked(id);
-      document.querySelectorAll('[data-bookmark-id]').forEach((button) => {
-        if (button.getAttribute('data-bookmark-id') !== id) return;
-        button.textContent = bookmarked ? '★' : '☆';
-        button.classList.toggle('is-bookmarked', bookmarked);
-        button.setAttribute('aria-label', bookmarked ? 'Remove bookmark' : 'Bookmark item');
-        button.setAttribute('title', bookmarked ? 'Remove bookmark' : 'Bookmark item');
-      });
-    }
-
-    function toggleRecentBookmark(id, item = null) {
-      if (!id) return;
-      if (bookmarkedRecentIds.has(id)) {
-        bookmarkedRecentIds.delete(id);
-        bookmarkedRecentSnapshots.delete(id);
-      } else {
-        bookmarkedRecentIds.add(id);
-        const snapshot = bookmarkSnapshotFromItem(item) || bookmarkedRecentSnapshots.get(id) || { id, event: null, source: '', updated_at: Date.now() };
-        bookmarkedRecentSnapshots.set(id, snapshot);
-      }
-      persistRecentBookmarks();
-      updateBookmarkButtons(id);
-      scheduleRecentListsRender();
-    }
+    const recentPauseContainers = new Map([
+      ['nostrToLibp2p', nostrToLibp2pRecentEl],
+      ['libp2pToNostr', libp2pToNostrRecentEl],
+      ['seenRelay', seenRelayRecentEl],
+      ['seenLibp2p', seenLibp2pRecentEl],
+    ]);
 
     function scheduleRecentListsRender() {
       if (recentListsRenderScheduled) return;
