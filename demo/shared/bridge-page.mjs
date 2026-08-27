@@ -321,8 +321,6 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
                 <span class="mono">${escapeHtml(label)}</span>
                 <span class="muted">${escapeHtml(suffix)}</span>
               </span>
-            </summary>
-            <div class="bridge-recent-actions">
               <button
                 type="button"
                 class="bridge-recent-bookmark${isRecentBookmarked(item?.id) ? ' is-bookmarked' : ''}"
@@ -330,7 +328,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
                 aria-label="${escapeHtml(isRecentBookmarked(item?.id) ? 'Remove bookmark' : 'Bookmark item')}"
                 title="${escapeHtml(isRecentBookmarked(item?.id) ? 'Remove bookmark' : 'Bookmark item')}"
               >${isRecentBookmarked(item?.id) ? '★' : '☆'}</button>
-            </div>
+            </summary>
             <div class="bridge-event-detail bridge-recent-detail">
               <div class="small muted" style="margin-bottom:8px;">${escapeHtml(item?.event?.kind != null ? `kind ${item.event.kind}` : 'Nostr event')}</div>
               <div class="mono" style="margin-bottom:8px;">${escapeHtml(item?.event?.id || 'n/a')}</div>
@@ -342,9 +340,14 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         `;
       }).join('');
       container.querySelectorAll('[data-bookmark-id]').forEach((button) => {
-        button.addEventListener('click', (event) => {
+        const stop = (event) => {
           event.preventDefault();
           event.stopPropagation();
+        };
+        button.addEventListener('pointerdown', stop);
+        button.addEventListener('mousedown', stop);
+        button.addEventListener('click', (event) => {
+          stop(event);
           const id = button.getAttribute('data-bookmark-id');
           toggleRecentBookmark(id);
         });

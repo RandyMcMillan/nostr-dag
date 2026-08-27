@@ -382,6 +382,7 @@ button:hover, a.button:hover { background:var(--button-hover); }
 .bridge-recent-summary {
   display:flex;
   justify-content:space-between;
+  align-items:center;
   gap:10px;
   width:100%;
   padding:8px 10px;
@@ -398,12 +399,6 @@ button:hover, a.button:hover { background:var(--button-hover); }
   gap:8px;
   min-width:0;
   flex:1 1 auto;
-}
-
-.bridge-recent-actions {
-  display:flex;
-  justify-content:flex-end;
-  padding:0 10px 8px;
 }
 
 .bridge-recent-summary:active {
