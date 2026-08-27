@@ -25,7 +25,8 @@ trap cleanup EXIT INT TERM
 cd "$PROJECT_DIR"
 
 echo "Building..."
-cargo build --release --bin relay --bin federation --features relay 2>&1 | grep -E "Compiling|Finished" || true
+cargo build --release --bin relay --features relay 2>&1 | grep -E "Compiling|Finished" || true
+cargo build --release --bin federation --features native 2>&1 | grep -E "Compiling|Finished" || true
 
 echo ""
 echo "Reading federation config from $CONFIG_FILE..."
@@ -62,9 +63,10 @@ for i in "${!SECRETS[@]}"; do
     RELAY_URL="$RELAY_URL" \
     FEDERATION_PUBKEYS="$FEDERATION_PUBKEYS" \
     RUST_LOG=federation=info \
-    cargo run --release -q --bin federation &
+    cargo run --release -q --bin federation --features native &
     PIDS+=($!)
-    echo "  Started daemon $((i+1)) (pid ${PIDS[-1]}, pubkey ${PUBKEYS[$i]:0:8}...)"
+    LAST_PID="${PIDS[$((${#PIDS[@]} - 1))]}"
+    echo "  Started daemon $((i+1)) (pid ${LAST_PID}, pubkey ${PUBKEYS[$i]:0:8}...)"
 done
 
 echo ""
