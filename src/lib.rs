@@ -1,4 +1,6 @@
 mod bridge_roundtrip;
+#[cfg(feature = "native")]
+mod bridge_native;
 mod dag;
 mod error;
 mod event;
@@ -19,6 +21,12 @@ pub mod p2p;
 
 pub use assets::{ICON_CIRCLE_BITCOIN_SVG, ICON_CIRCLE_WHITE_SVG};
 pub use assets::FAVICON_ICO;
+#[cfg(feature = "native")]
+pub use bridge_native::{
+    build_bridge_envelope, collect_bridge_relay_hints, serialize_bridge_envelope,
+    unwrap_bridge_envelope, BridgeEnvelope, BridgeEnvelopeMeta, BridgeRoundTripMetrics,
+    BRIDGE_PROTOCOL, BRIDGE_PROTOCOL_VERSION,
+};
 pub use bridge_roundtrip::{
     extract_bridge_round_trip_start_ms, stamp_bridge_round_trip_tag, BRIDGE_RTT_TAG,
 };
