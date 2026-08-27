@@ -4,7 +4,7 @@ default:
     just --list
 
 build:
-    CARGO_TARGET_DIR=target cargo build --features native
+    TARGET_DIR="${CARGO_TARGET_DIR:-$(cargo metadata --format-version 1 --no-deps | grep -o '"target_directory":"[^"]*"' | cut -d'"' -f4)}"; CARGO_TARGET_DIR="$TARGET_DIR" cargo build --features native
 
 test:
     just test-native
@@ -15,16 +15,16 @@ test-all:
     just test-js
 
 test-native:
-    CARGO_TARGET_DIR=target cargo test --features native
+    TARGET_DIR="${CARGO_TARGET_DIR:-$(cargo metadata --format-version 1 --no-deps | grep -o '"target_directory":"[^"]*"' | cut -d'"' -f4)}"; CARGO_TARGET_DIR="$TARGET_DIR" cargo test --features native
 
 test-js:
     node --test test/*.test.mjs
 
 build-relay:
-    CARGO_TARGET_DIR=target cargo build --release --bin relay --bin federation --features relay
+    TARGET_DIR="${CARGO_TARGET_DIR:-$(cargo metadata --format-version 1 --no-deps | grep -o '"target_directory":"[^"]*"' | cut -d'"' -f4)}"; CARGO_TARGET_DIR="$TARGET_DIR" cargo build --release --bin relay --bin federation --features relay
 
 build-server:
-    CARGO_TARGET_DIR=target cargo build --bin nostr-dag-server --features native
+    TARGET_DIR="${CARGO_TARGET_DIR:-$(cargo metadata --format-version 1 --no-deps | grep -o '"target_directory":"[^"]*"' | cut -d'"' -f4)}"; CARGO_TARGET_DIR="$TARGET_DIR" cargo build --bin nostr-dag-server --features native
 
 ensure-wasm-target:
     rm -rf ./site
@@ -32,7 +32,7 @@ ensure-wasm-target:
 
 wasm: ensure-wasm-target
     if ! command -v wasm-pack >/dev/null 2>&1; then cargo install wasm-pack --locked; fi
-    if [ "$(uname -s)" = Darwin ] && command -v brew >/dev/null 2>&1 && brew --prefix llvm >/dev/null 2>&1 && [ -x "$(brew --prefix llvm)/bin/clang" ] && [ -x "$(brew --prefix llvm)/bin/llvm-ar" ]; then LLVM_PATH=$(brew --prefix llvm); CC="$LLVM_PATH/bin/clang"; AR="$LLVM_PATH/bin/llvm-ar"; fi; if [ -z "${CC:-}" ]; then CC=$(command -v clang || xcrun --sdk macosx --find clang); AR=$(command -v llvm-ar || xcrun --sdk macosx --find llvm-ar || command -v ar); fi; CARGO_TARGET_DIR=target CC="$CC" AR="$AR" wasm-pack build --target web --release --out-dir site/pkg -- --no-default-features --features wasm
+    if [ "$(uname -s)" = Darwin ] && command -v brew >/dev/null 2>&1 && brew --prefix llvm >/dev/null 2>&1 && [ -x "$(brew --prefix llvm)/bin/clang" ] && [ -x "$(brew --prefix llvm)/bin/llvm-ar" ]; then LLVM_PATH=$(brew --prefix llvm); CC="$LLVM_PATH/bin/clang"; AR="$LLVM_PATH/bin/llvm-ar"; fi; if [ -z "${CC:-}" ]; then CC=$(command -v clang || xcrun --sdk macosx --find clang); AR=$(command -v llvm-ar || xcrun --sdk macosx --find llvm-ar || command -v ar); fi; TARGET_DIR="${CARGO_TARGET_DIR:-$(cargo metadata --format-version 1 --no-deps | grep -o '"target_directory":"[^"]*"' | cut -d'"' -f4)}"; CARGO_TARGET_DIR="$TARGET_DIR" CC="$CC" AR="$AR" wasm-pack build --target web --release --out-dir site/pkg -- --no-default-features --features wasm
 
 site: wasm
     mkdir -p site
@@ -54,7 +54,7 @@ demo:
     ./demo/run.sh
 
 server: build-server site
-    CARGO_TARGET_DIR=target cargo run --bin nostr-dag-server --features native
+    TARGET_DIR="${CARGO_TARGET_DIR:-$(cargo metadata --format-version 1 --no-deps | grep -o '"target_directory":"[^"]*"' | cut -d'"' -f4)}"; CARGO_TARGET_DIR="$TARGET_DIR" "$TARGET_DIR/debug/nostr-dag-server"
 
 clean:
     cargo clean

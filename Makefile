@@ -5,7 +5,9 @@ WASM_PACK ?= wasm-pack
 WASM_TARGET ?= wasm32-unknown-unknown
 GH ?= gh
 BRANCH ?= $(shell git branch --show-current)
-CARGO_TARGET_DIR ?= target
+ifndef CARGO_TARGET_DIR
+CARGO_TARGET_DIR := $(shell cargo metadata --format-version 1 --no-deps | grep -o '"target_directory":"[^"]*"' | cut -d'"' -f4)
+endif
 
 .PHONY: help build test test-all test-native test-js build-relay build-server ensure-wasm-target wasm site demo server clean deploy
 
@@ -85,7 +87,7 @@ demo:
 	./demo/run.sh
 
 server: build-server site
-	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) $(CARGO) run --bin nostr-dag-server --features native
+	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) $(CARGO_TARGET_DIR)/debug/nostr-dag-server
 
 clean:
 	$(CARGO) clean
