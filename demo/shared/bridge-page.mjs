@@ -73,6 +73,8 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     let defaultRelayRenderScheduled = false;
     let relayRenderScheduled = false;
     let peerRenderScheduled = false;
+    let recentListsRenderScheduled = false;
+    let recentListsRenderPending = false;
     let rawEventLogCount = 0;
     let rawEventLogSuppressed = false;
     const metrics = {
@@ -139,7 +141,6 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     const bridgeVerificationQueue = [];
     const bridgeVerificationSeen = new Map();
     const bridgeVerificationBackoff = new Map();
-    let recentListsRenderScheduled = false;
 
     const sharedFooterLogBuffer = window.__sharedFooterLogBuffer || [];
     window.__sharedFooterLogBuffer = sharedFooterLogBuffer;
@@ -196,11 +197,20 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
 
     function scheduleRecentListsRender() {
       if (recentListsRenderScheduled) return;
+      if (hasOpenRecentListItem()) {
+        recentListsRenderPending = true;
+        return;
+      }
       recentListsRenderScheduled = true;
       queueMicrotask(() => {
         recentListsRenderScheduled = false;
+        recentListsRenderPending = false;
         renderRecentLists();
       });
+    }
+
+    function hasOpenRecentListItem() {
+      return [...recentListOpenState.values()].some((openSet) => openSet && openSet.size > 0);
     }
 
     function renderRecentList(container, items, onSelect, key) {
@@ -256,6 +266,9 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
           }
           openSet.delete(item.id);
           recentListOpenState.set(key, openSet);
+          if (!hasOpenRecentListItem() && recentListsRenderPending) {
+            scheduleRecentListsRender();
+          }
         });
       });
     }
@@ -1355,7 +1368,6 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       const failures = results.filter((result) => result.status === 'rejected');
       metrics.relayPublishesAttempted += results.length;
       metrics.relayPublishesSucceeded += successes.length;
-      metrics.libp2pToNostr += successes.length;
       refreshMetrics();
       window.__sharedFooter?.log('bridge', `${direction} ${event.kind} ${event.id} via ${publishRelays.join(', ')}`, 'info', 'available');
       window.__sharedFooter?.log('bridge', `publish responses ${event.id}: ${successes.length}/${results.length} ok`, failures.length ? 'warn' : 'info', failures.length ? 'checking' : 'available');
@@ -1388,7 +1400,6 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       const failed = results.filter((result) => result.status === 'rejected');
       metrics.relayPublishesAttempted += results.length;
       metrics.relayPublishesSucceeded += results.length - failed.length;
-      metrics.libp2pToNostr += results.length - failed.length;
       refreshMetrics();
       if (failed.length) {
         for (const result of failed) {
@@ -1448,6 +1459,8 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       }
       window.__sharedFooter?.log('bridge', `libp2p→nostr ${direction} ${event.kind} ${event.id}`, 'trace', 'checking');
       pushRecent(recentLibp2pToNostr, { id: event.id, source: relayHints?.[0] || 'libp2p', event });
+      metrics.libp2pToNostr += 1;
+      refreshMetrics();
       // Persist event from libp2p, recording all relay hints as known sources.
       try {
         const db = await getDagDb();
