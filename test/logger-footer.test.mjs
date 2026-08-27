@@ -87,3 +87,19 @@ test('logger footer Safari stub keeps level API parity', async () => {
     }
   }
 });
+
+test('logger footer keeps available status from being downgraded by checking logs', async () => {
+  globalThis.requestAnimationFrame = (cb) => cb();
+  globalThis.localStorage = { getItem() { return null; }, setItem() {} };
+
+  const source = await readFile(new URL('../demo/shared/logger-footer.js', import.meta.url), 'utf8');
+  const { createLoggerFooter } = await import(`data:text/javascript;charset=utf-8,${encodeURIComponent(source)}`);
+  const root = createFakeRoot();
+  const footer = createLoggerFooter(root);
+
+  footer.setState('available', 'ready');
+  assert.match(root.nodes.statusEl.className, /status-available/);
+
+  footer.setState('checking', 'query relay');
+  assert.match(root.nodes.statusEl.className, /status-available/);
+});
