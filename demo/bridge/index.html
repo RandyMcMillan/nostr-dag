@@ -60,7 +60,7 @@
       </div>
       <div class="small muted" style="margin-top:10px;">Bridge Status above is the current runtime state, not a counter.</div>
       <div class="bridge-stats">
-        <details class="bridge-stat">
+        <details class="bridge-stat" data-stat-key="nostrToLibp2p">
           <summary class="bridge-stat-summary">
             <div class="bridge-stat-title">Nostr → libp2p</div>
             <div class="bridge-stat-desc"><b id="nostrToLibp2pCount">0</b><span>Nostr events the bridge forwarded into the libp2p pubsub path.</span></div>
@@ -84,7 +84,7 @@
             </div>
           </div>
         </details>
-        <details class="bridge-stat">
+        <details class="bridge-stat" data-stat-key="libp2pToNostr">
           <summary class="bridge-stat-summary">
             <div class="bridge-stat-title">libp2p → Nostr</div>
             <div class="bridge-stat-desc"><b id="libp2pToNostrCount">0</b><span>Events the bridge received from libp2p and published back to Nostr relays.</span></div>
@@ -108,7 +108,7 @@
             </div>
           </div>
         </details>
-        <details class="bridge-stat">
+        <details class="bridge-stat" data-stat-key="seenRelay">
           <summary class="bridge-stat-summary">
             <div class="bridge-stat-title">Seen Nostr</div>
             <div class="bridge-stat-desc"><b id="seenRelayCount">0</b><span>Unique event IDs first seen from Nostr relays.</span></div>
@@ -132,7 +132,7 @@
             </div>
           </div>
         </details>
-        <details class="bridge-stat">
+        <details class="bridge-stat" data-stat-key="seenLibp2p">
           <summary class="bridge-stat-summary">
             <div class="bridge-stat-title">Seen libp2p</div>
             <div class="bridge-stat-desc"><b id="seenLibp2pCount">0</b><span>Unique event IDs first seen from libp2p messages.</span></div>
@@ -156,7 +156,7 @@
             </div>
           </div>
         </details>
-        <details class="bridge-stat">
+        <details class="bridge-stat" data-stat-key="relayPublishes">
           <summary class="bridge-stat-summary">
             <div class="bridge-stat-title">Relay publishes</div>
             <div class="bridge-stat-desc"><b id="relayPublishCount">0/0</b><span>Successful publishes over total publish attempts to relays.</span></div>
