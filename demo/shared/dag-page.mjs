@@ -38,7 +38,7 @@ export function bootstrapDagChrome({
       title: 'Logger',
       initialState: 'idle',
       initialTitle: 'starting...',
-      initialLevel: 'none',
+      initialLevel: 'info',
     },
     footerMode: 'after-paint',
   });
