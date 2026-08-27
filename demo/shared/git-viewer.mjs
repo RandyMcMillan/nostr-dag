@@ -29,7 +29,7 @@ export function loadRepoCache(storageKey = DEFAULT_REPO_CACHE_KEY) {
   }
 }
 
-export function saveRepoCache(storageKey = DEFAULT_REPO_CACHE_KEY, cache) {
+export function saveRepoCache(cache, storageKey = DEFAULT_REPO_CACHE_KEY) {
   try {
     window.localStorage.setItem(storageKey, JSON.stringify(cache));
   } catch {
@@ -37,10 +37,10 @@ export function saveRepoCache(storageKey = DEFAULT_REPO_CACHE_KEY, cache) {
   }
 }
 
-export function cacheRepoData(storageKey = DEFAULT_REPO_CACHE_KEY, repoName, data) {
+export function cacheRepoData(repoName, data, storageKey = DEFAULT_REPO_CACHE_KEY) {
   const cache = loadRepoCache(storageKey);
   cache[repoName] = data;
-  saveRepoCache(storageKey, cache);
+  saveRepoCache(cache, storageKey);
 }
 
 export function emptyRepoData() {
