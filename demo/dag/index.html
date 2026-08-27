@@ -408,6 +408,7 @@
           const { node, bootstrapPeers } = await createSharedLibp2pStack({
             bootstrapPeers: DEFAULT_BOOTSTRAP_PEERS,
             onLog(level, text, state) {
+              if (String(text || '').includes('peer connected:')) return;
               window.__sharedFooter?.log('libp2p', text, level, state);
             },
             onStatus(state, peerId) {
