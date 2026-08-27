@@ -62,6 +62,9 @@ html {
 .status-available { color: var(--status-available); }
 .status-unavailable { color: var(--status-unavailable); }
 
+#bridgeStatus { background: transparent; padding: 0; }
+#bridgeStatus .status-dot { box-shadow: none; }
+
 button, a.button {
   background:var(--button-bg);
   color:var(--button-fg);
