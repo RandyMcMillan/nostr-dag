@@ -7,7 +7,7 @@
  * Eight object stores (tables):
  *   events       — every raw Nostr event seen, verbatim
  *   tags         — one row per tag field, normalised out of the JSON array
- *   relays       — every unique relay URL seen, with cached NIP-11 info
+ *   relays       — every unique relay URL seen, with cached NIP-11 info and ping time
  *   users        — every pubkey seen
  *   user_relays  — which relays a user lists (kind 10002 / kind 3)
  *   event_relays — which relays an event was published to / seen on
@@ -139,11 +139,32 @@ export class DagDb {
    * @param {object} nip11
    */
   async setRelayNip11(url, nip11, nowMs = Date.now()) {
+    await this.setRelayInfo(url, { nip11_json: nip11, nip11_fetched_at: nowMs, error: null }, nowMs);
+  }
+
+  /**
+   * Store a measured ping time for a relay.
+   * @param {string} url
+   * @param {number} pingMs
+   * @param {number} [nowMs]
+   */
+  async setRelayPing(url, pingMs, nowMs = Date.now()) {
+    await this.setRelayInfo(url, { ping_ms: pingMs, ping_fetched_at: nowMs, ping_error: null }, nowMs);
+  }
+
+  /**
+   * Store the full relay metadata payload.
+   * @param {string} url
+   * @param {object} info
+   * @param {number} [nowMs]
+   */
+  async setRelayInfo(url, info, nowMs = Date.now()) {
     const { store } = txStore(this._db, 'relays', 'readwrite');
     const existing = await promisifyRequest(store.get(url));
-    if (existing) {
-      await promisifyRequest(store.put({ ...existing, nip11_json: nip11, nip11_fetched_at: nowMs, error: null }));
-    }
+    const next = existing
+      ? { ...existing, ...info, last_seen_at: nowMs }
+      : { url, first_seen_at: nowMs, last_seen_at: nowMs, nip11_json: null, nip11_fetched_at: null, error: null, ...info };
+    await promisifyRequest(store.put(next));
   }
 
   /**
