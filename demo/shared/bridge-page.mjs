@@ -180,7 +180,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       }
       const renderedCount = Number(container.dataset.renderedCount || '0');
       if (!items.length) {
-        container.innerHTML = '<div class="muted">No recent events yet.</div>';
+        container.innerHTML = renderedCount > 0 ? '' : '<div class="muted">No recent events yet.</div>';
         container.dataset.renderedCount = '0';
         return;
       }

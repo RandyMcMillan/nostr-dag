@@ -333,8 +333,6 @@ button:hover, a.button:hover { background:var(--button-hover); }
 .bridge-detail-list {
   display:grid;
   gap:6px;
-  max-height:140px;
-  overflow:auto;
   padding-right:4px;
 }
 
@@ -376,8 +374,6 @@ button:hover, a.button:hover { background:var(--button-hover); }
 }
 
 .bridge-event-detail {
-  max-height:220px;
-  overflow:auto;
   margin-top:10px;
   padding:10px;
   border:1px solid var(--border);
