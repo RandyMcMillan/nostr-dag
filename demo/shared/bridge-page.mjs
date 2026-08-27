@@ -158,6 +158,13 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       return loadPanelStateSnapshot();
     }
 
+    const recentPauseContainers = new Map([
+      ['nostrToLibp2p', nostrToLibp2pRecentEl],
+      ['libp2pToNostr', libp2pToNostrRecentEl],
+      ['seenRelay', seenRelayRecentEl],
+      ['seenLibp2p', seenLibp2pRecentEl],
+    ]);
+
     function persistPanelState() {
       return persistPanelStateSnapshot({
         peerListEl,
@@ -328,13 +335,6 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     function escapeJson(value) {
       return escapeHtml(JSON.stringify(value, null, 2));
     }
-
-    const recentPauseContainers = new Map([
-      ['nostrToLibp2p', nostrToLibp2pRecentEl],
-      ['libp2pToNostr', libp2pToNostrRecentEl],
-      ['seenRelay', seenRelayRecentEl],
-      ['seenLibp2p', seenLibp2pRecentEl],
-    ]);
 
     function scheduleRecentListsRender() {
       if (recentListsRenderScheduled) return;
