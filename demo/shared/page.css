@@ -285,6 +285,19 @@ button:hover, a.button:hover { background:var(--button-hover); }
   background:var(--surface);
 }
 
+.bridge-stat-link {
+  color:inherit;
+  text-decoration:none;
+  cursor:pointer;
+  transition:border-color .2s ease, background-color .2s ease, transform .2s ease;
+}
+
+.bridge-stat-link:hover {
+  border-color:var(--accent);
+  background:rgba(251,146,60,.08);
+  transform:translateY(-1px);
+}
+
 .bridge-stat dt {
   font-weight:700;
   color:var(--fg);
@@ -301,6 +314,28 @@ button:hover, a.button:hover { background:var(--button-hover); }
 .bridge-stat dd b {
   color:var(--fg);
   min-width:4ch;
+}
+
+.bridge-stat-details {
+  display:grid;
+  gap:12px;
+  margin-top:14px;
+}
+
+.bridge-stat-detail {
+  scroll-margin-top:96px;
+}
+
+.bridge-stat-detail-grid {
+  display:grid;
+  grid-template-columns: 140px 1fr;
+  gap:12px;
+  margin-top:12px;
+}
+
+.bridge-detail-list {
+  display:grid;
+  gap:6px;
 }
 
 .bridge-peer {

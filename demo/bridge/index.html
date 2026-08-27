@@ -59,30 +59,88 @@
         <div id="bridgeStatus" class="status status-checking"><span class="status-dot"></span><span>starting…</span></div>
       </div>
       <div class="small muted" style="margin-top:10px;">Bridge Status above is the current runtime state, not a counter.</div>
-      <dl class="bridge-stats">
-        <div class="bridge-stat">
+      <div class="bridge-stats">
+        <a class="bridge-stat bridge-stat-link" href="#nostr-to-libp2p-detail">
           <dt>Nostr → libp2p</dt>
           <dd><b id="nostrToLibp2pCount">0</b><span>Nostr events the bridge forwarded into the libp2p pubsub path.</span></dd>
-        </div>
-        <div class="bridge-stat">
+        </a>
+        <a class="bridge-stat bridge-stat-link" href="#libp2p-to-nostr-detail">
           <dt>libp2p → Nostr</dt>
           <dd><b id="libp2pToNostrCount">0</b><span>Events the bridge received from libp2p and published back to Nostr relays.</span></dd>
-        </div>
-        <div class="bridge-stat">
+        </a>
+        <a class="bridge-stat bridge-stat-link" href="#seen-nostr-detail">
           <dt>Seen Nostr</dt>
           <dd><b id="seenRelayCount">0</b><span>Unique event IDs first seen from Nostr relays.</span></dd>
-        </div>
-        <div class="bridge-stat">
+        </a>
+        <a class="bridge-stat bridge-stat-link" href="#seen-libp2p-detail">
           <dt>Seen libp2p</dt>
           <dd><b id="seenLibp2pCount">0</b><span>Unique event IDs first seen from libp2p messages.</span></dd>
-        </div>
-        <div class="bridge-stat">
+        </a>
+        <a class="bridge-stat bridge-stat-link" href="#relay-publishes-detail">
           <dt>Relay publishes</dt>
           <dd><b id="relayPublishCount">0/0</b><span>Successful publishes over total publish attempts to relays.</span></dd>
-        </div>
-      </dl>
+        </a>
+      </div>
       <div class="small muted" style="margin-top:10px;">Bridge peer will also report to <code>/peers</code> when running on localhost.</div>
       <p class="small muted" style="margin-bottom:0;">Events are forwarded as JSON envelopes over libp2p pubsub and published back to the configured WSS relays when received from the swarm.</p>
+    </div>
+
+    <div class="bridge-stat-details">
+      <section class="panel bridge-stat-detail" id="nostr-to-libp2p-detail">
+        <h2 style="margin:0 0 6px;">Nostr → libp2p</h2>
+        <div class="small muted">Nostr events the bridge forwarded into the libp2p pubsub path.</div>
+        <div class="bridge-stat-detail-grid">
+          <div><div class="small muted">Count</div><div class="mono" id="nostrToLibp2pDetailCount">0</div></div>
+          <div>
+            <div class="small muted">Recent events</div>
+            <div id="nostrToLibp2pRecent" class="bridge-detail-list"></div>
+          </div>
+        </div>
+      </section>
+      <section class="panel bridge-stat-detail" id="libp2p-to-nostr-detail">
+        <h2 style="margin:0 0 6px;">libp2p → Nostr</h2>
+        <div class="small muted">Events the bridge received from libp2p and published back to Nostr relays.</div>
+        <div class="bridge-stat-detail-grid">
+          <div><div class="small muted">Count</div><div class="mono" id="libp2pToNostrDetailCount">0</div></div>
+          <div>
+            <div class="small muted">Recent events</div>
+            <div id="libp2pToNostrRecent" class="bridge-detail-list"></div>
+          </div>
+        </div>
+      </section>
+      <section class="panel bridge-stat-detail" id="seen-nostr-detail">
+        <h2 style="margin:0 0 6px;">Seen Nostr</h2>
+        <div class="small muted">Unique event IDs first seen from Nostr relays.</div>
+        <div class="bridge-stat-detail-grid">
+          <div><div class="small muted">Count</div><div class="mono" id="seenRelayDetailCount">0</div></div>
+          <div>
+            <div class="small muted">Recent IDs</div>
+            <div id="seenRelayRecent" class="bridge-detail-list mono"></div>
+          </div>
+        </div>
+      </section>
+      <section class="panel bridge-stat-detail" id="seen-libp2p-detail">
+        <h2 style="margin:0 0 6px;">Seen libp2p</h2>
+        <div class="small muted">Unique event IDs first seen from libp2p messages.</div>
+        <div class="bridge-stat-detail-grid">
+          <div><div class="small muted">Count</div><div class="mono" id="seenLibp2pDetailCount">0</div></div>
+          <div>
+            <div class="small muted">Recent IDs</div>
+            <div id="seenLibp2pRecent" class="bridge-detail-list mono"></div>
+          </div>
+        </div>
+      </section>
+      <section class="panel bridge-stat-detail" id="relay-publishes-detail">
+        <h2 style="margin:0 0 6px;">Relay publishes</h2>
+        <div class="small muted">Successful publishes over total publish attempts to relays.</div>
+        <div class="bridge-stat-detail-grid">
+          <div><div class="small muted">Count</div><div class="mono" id="relayPublishDetailCount">0/0</div></div>
+          <div>
+            <div class="small muted">Status</div>
+            <div id="relayPublishDetailStatus" class="bridge-detail-list"></div>
+          </div>
+        </div>
+      </section>
     </div>
 
     <details class="panel bridge-collapsible">
