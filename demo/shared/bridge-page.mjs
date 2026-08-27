@@ -8,6 +8,8 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     import { createSharedLibp2pStack } from './libp2p-stack.mjs';
     import { getNetworkUnixTime, initSharedNetworkTime } from './network-time.mjs';
     import { createListContainerController } from './list-container.mjs';
+    import { createPeersListController } from './peers-list.mjs';
+    import { createRelaysListController } from './relays-list.mjs';
     // Persistent IndexedDB store for all Nostr events and relationships
     // seen by the bridge (events, tags, relays, users, DAG edges, peer acks).
     import { getDagDb } from './dag-db.mjs';
@@ -756,6 +758,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     }
 
     function relayRowHtml(relay, info, source, loading) {
+      return relaysListController.relayRowHtml(relay, info, source, loading);
       const hasInfo = Boolean(info && !info.error);
       const gitCapable = hasInfo && supportsNip34GitKinds(info);
       const fields = hasInfo ? [
@@ -1215,6 +1218,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     }
 
     function renderDefaultRelays() {
+      return relaysListController.renderDefaultRelays();
       const entries = sortRelaysByPing(DEFAULT_RELAYS).filter((relay) => relayPingSortValue(relayInfoForUrl(relay)) < Number.POSITIVE_INFINITY);
       defaultRelayCountEl.textContent = String(entries.length);
       window.__sharedFooter?.log('bridge', `render default relays (${entries.length})`, 'trace', 'checking');
@@ -1230,6 +1234,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     }
 
     function renderRelays() {
+      return relaysListController.renderRelays();
       const defaultRelays = sortRelaysByPing([...new Set(DEFAULT_RELAYS)]).filter((relay) => relayPingSortValue(relayInfoForUrl(relay)) < Number.POSITIVE_INFINITY);
       const learnedRelays = sortRelaysByPing([...new Set([...relayCatalog.values()].flatMap((entry) => entry.relays || []))]).filter((relay) => relayPingSortValue(relayInfoForUrl(relay)) < Number.POSITIVE_INFINITY);
       const visibleRelays = learnedRelays.filter((relay) => {
@@ -1260,10 +1265,12 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
 
     // Keep one merged peer registry in the browser so the bridge works on Pages and localhost.
     function peerKey(peer) {
+      return peersListController.peerKey(peer);
       return `${peer.source || 'browser'}:${peer.path || '/'}:${peer.peer_id}:${peer.kind || 'unknown'}`;
     }
 
     function upsertPeer(source, peer) {
+      return peersListController.upsertPeer(source, peer);
       if (!peer?.peer_id) return;
       const key = peerKey({
         source,
@@ -1286,10 +1293,12 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     }
 
     function allPeers() {
+      return peersListController.allPeers();
       return [...localPeers.values(), ...remotePeers.values()].sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0));
     }
 
     function renderPeers() {
+      return peersListController.renderPeers();
       const peers = allPeers();
       peerCountEl.textContent = String(peers.length);
       if (!peers.length) {
@@ -1453,6 +1462,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     }
 
     function recordRelayInfo(event) {
+      return relaysListController.recordRelayInfo(event);
       if (!event?.pubkey) return;
       const urls = extractRelayUrlsFromEvent(event);
       if (!urls.size) return;
@@ -1557,6 +1567,44 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         return 'no detail';
       }
     }
+
+    const peersListController = createPeersListController({
+      peerListEl,
+      peerCountEl,
+      localPeers,
+      remotePeers,
+      loadPanelState,
+      persistPanelState,
+      scheduleBridgeCachePersist,
+      formatPeerDetail,
+      sanitizePeerDetail,
+    });
+
+    const relaysListController = createRelaysListController({
+      defaultRelays: DEFAULT_RELAYS,
+      relayCatalog,
+      relayInfoInFlight,
+      relayInfoForUrl,
+      relayPingSortValue,
+      sortRelaysByPing,
+      relayListEl,
+      relayCountEl,
+      defaultRelayListEl,
+      defaultRelayCountEl,
+      normalizeRelayUrl,
+      scheduleBridgeCachePersist,
+      scheduleRelayDiscovery,
+      scheduleBridgePresenceBroadcast,
+      refreshRelayInfo,
+      currentRelayUrls,
+      prioritizeRelayUrls,
+      yieldToBrowser,
+      relayInfoCatalog,
+      getDagDb,
+      createNostrRelay,
+      measureRelayPing,
+      windowLog: (...args) => window.__sharedFooter?.log(...args),
+    });
 
     function markSeen(source, event) {
       if (!event?.id) return false;
