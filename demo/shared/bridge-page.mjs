@@ -1361,6 +1361,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     }
 
     const bootBridge = async () => {
+      refreshMetrics();
       restoreBridgeCache();
       scheduleRelayDiscovery(DEFAULT_RELAYS);
       scheduleRelayDiscovery(relays);
