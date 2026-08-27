@@ -1858,7 +1858,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
 
         const measuredCount = measuredRelayCount(relaysSnapshot);
         const statusCount = measuredCount > 0 ? `${measuredCount} measured` : `${relaysSnapshot.length} known`;
-        setStatus(`bridging ${statusCount} relays on ${topic}`, 'available');
+        setStatus('', 'available');
         window.__sharedFooter?.log('bridge', `bridge ready on topic ${topic}`, 'info', 'available');
         window.__sharedFooter?.log('bridge', `relay snapshot known=${relaysSnapshot.length} measured=${measuredCount}`, 'debug', 'available');
         for (const relay of relaysSnapshot) {
