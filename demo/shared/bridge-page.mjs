@@ -117,6 +117,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     const peerListEl = document.getElementById('peerList');
     const peerPanelEl = peerListEl?.closest?.('details.bridge-collapsible') || null;
     const relayPanelEl = relayListEl?.closest?.('details.bridge-collapsible') || null;
+    const statPanelEls = [...document.querySelectorAll('details.bridge-stat[data-stat-key]')];
 
     [
       ['nostrToLibp2p', nostrToLibp2pRecentEl, recentNostrToLibp2p],
@@ -136,6 +137,8 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
 
     restoreRecentListUiState();
     restorePanelState();
+    restoreStatPanelState();
+    statPanelEls.forEach((panel) => panel.addEventListener('toggle', persistPanelState));
     peerPanelEl?.addEventListener('toggle', persistPanelState);
     relayPanelEl?.addEventListener('toggle', persistPanelState);
     renderRecentLists();
@@ -297,10 +300,17 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         const openPeerKeys = [...peerListEl.querySelectorAll('details[open][data-peer-key]')]
           .map((el) => el.getAttribute('data-peer-key'))
           .filter(Boolean);
+        const statPanels = {};
+        statPanelEls.forEach((panel) => {
+          const key = panel.getAttribute('data-stat-key');
+          if (!key) return;
+          statPanels[key] = Boolean(panel.open);
+        });
         window.localStorage.setItem(PANEL_STATE_KEY, JSON.stringify({
           peersOpen: Boolean(peerPanelEl?.open),
           relaysOpen: Boolean(relayPanelEl?.open),
           openPeerKeys,
+          statPanels,
         }));
       } catch {
         // best effort only
@@ -311,6 +321,18 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       const snapshot = loadPanelState();
       if (peerPanelEl) peerPanelEl.open = Boolean(snapshot.peersOpen);
       if (relayPanelEl) relayPanelEl.open = Boolean(snapshot.relaysOpen);
+    }
+
+    function restoreStatPanelState() {
+      const snapshot = loadPanelState();
+      const statPanels = snapshot.statPanels && typeof snapshot.statPanels === 'object' ? snapshot.statPanels : {};
+      statPanelEls.forEach((panel) => {
+        const key = panel.getAttribute('data-stat-key');
+        if (!key) return;
+        if (Object.prototype.hasOwnProperty.call(statPanels, key)) {
+          panel.open = Boolean(statPanels[key]);
+        }
+      });
     }
 
     function restoreRecentListUiState() {
