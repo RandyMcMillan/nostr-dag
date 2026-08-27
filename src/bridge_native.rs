@@ -148,7 +148,7 @@ pub fn unwrap_bridge_envelope(message: &str) -> Option<BridgeEnvelope> {
 pub fn collect_bridge_relay_hints(payload: &serde_json::Value) -> Vec<String> {
     let mut hints = Vec::new();
     let mut seen = HashSet::new();
-    collect_bridge_relay_hints_inner(payload, &mut hints, &mut seen);
+    collect_bridge_relay_hints_inner(payload, &mut hints, &mut seen, true);
     hints
 }
 
@@ -156,6 +156,7 @@ fn collect_bridge_relay_hints_inner(
     payload: &serde_json::Value,
     found: &mut Vec<String>,
     seen: &mut HashSet<String>,
+    top_level: bool,
 ) {
     match payload {
         serde_json::Value::String(value) => {
@@ -166,13 +167,19 @@ fn collect_bridge_relay_hints_inner(
         }
         serde_json::Value::Array(items) => {
             for item in items {
-                collect_bridge_relay_hints_inner(item, found, seen);
+                collect_bridge_relay_hints_inner(item, found, seen, false);
             }
         }
         serde_json::Value::Object(map) => {
-            for key in ["relay_hints", "relayHints", "relays", "relayTargets"] {
-                if let Some(value) = map.get(key) {
-                    collect_bridge_relay_hints_inner(value, found, seen);
+            if top_level {
+                for key in ["relay_hints", "relayHints", "relays", "relayTargets"] {
+                    if let Some(value) = map.get(key) {
+                        collect_bridge_relay_hints_inner(value, found, seen, false);
+                    }
+                }
+            } else {
+                for value in map.values() {
+                    collect_bridge_relay_hints_inner(value, found, seen, false);
                 }
             }
         }
