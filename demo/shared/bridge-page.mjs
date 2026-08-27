@@ -15,6 +15,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     const decoder = new TextDecoder();
     const CACHE_KEY = 'nostr-dag-bridge-cache-v2';
     const SIGNER_KEY = 'nostr-dag-bridge-signer-v1';
+    const BOOKMARKS_KEY = 'nostr-dag-bridge-bookmarks-v1';
     const BRIDGE_PROTOCOL = 'nostr-dag-bridge';
     const BRIDGE_PROTOCOL_VERSION = 1;
     const DEFAULT_RELAYS = [
@@ -61,6 +62,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       ['seenRelay', new Set()],
       ['seenLibp2p', new Set()],
     ]);
+    const bookmarkedRecentIds = new Set(loadRecentBookmarks());
     const relayCatalog = new Map();
     const relayInfoCatalog = new Map();
     const relayInfoInFlight = new Map();
@@ -195,6 +197,51 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       return escapeHtml(JSON.stringify(value, null, 2));
     }
 
+    function loadRecentBookmarks() {
+      try {
+        const raw = window.localStorage.getItem(BOOKMARKS_KEY);
+        const parsed = raw ? JSON.parse(raw) : [];
+        return Array.isArray(parsed) ? parsed.filter((value) => typeof value === 'string' && value) : [];
+      } catch {
+        return [];
+      }
+    }
+
+    function persistRecentBookmarks() {
+      try {
+        window.localStorage.setItem(BOOKMARKS_KEY, JSON.stringify([...bookmarkedRecentIds]));
+      } catch {
+        // best effort only
+      }
+    }
+
+    function isRecentBookmarked(id) {
+      return Boolean(id && bookmarkedRecentIds.has(id));
+    }
+
+    function updateBookmarkButtons(id) {
+      const bookmarked = isRecentBookmarked(id);
+      document.querySelectorAll('[data-bookmark-id]').forEach((button) => {
+        if (button.getAttribute('data-bookmark-id') !== id) return;
+        button.textContent = bookmarked ? '★' : '☆';
+        button.classList.toggle('is-bookmarked', bookmarked);
+        button.setAttribute('aria-label', bookmarked ? 'Remove bookmark' : 'Bookmark item');
+        button.setAttribute('title', bookmarked ? 'Remove bookmark' : 'Bookmark item');
+      });
+    }
+
+    function toggleRecentBookmark(id) {
+      if (!id) return;
+      if (bookmarkedRecentIds.has(id)) {
+        bookmarkedRecentIds.delete(id);
+      } else {
+        bookmarkedRecentIds.add(id);
+      }
+      persistRecentBookmarks();
+      updateBookmarkButtons(id);
+      scheduleRecentListsRender();
+    }
+
     function scheduleRecentListsRender() {
       if (recentListsRenderScheduled) return;
       if (hasOpenRecentListItem()) {
@@ -236,9 +283,20 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         return `
           <details class="bridge-recent-event"${item?.id && openItems.has(item.id) ? ' open' : ''}>
             <summary class="bridge-recent-summary">
-              <span class="mono">${escapeHtml(label)}</span>
-              <span class="muted">${escapeHtml(suffix)}</span>
+              <span class="bridge-recent-summary-main">
+                <span class="mono">${escapeHtml(label)}</span>
+                <span class="muted">${escapeHtml(suffix)}</span>
+              </span>
             </summary>
+            <div class="bridge-recent-actions">
+              <button
+                type="button"
+                class="bridge-recent-bookmark${isRecentBookmarked(item?.id) ? ' is-bookmarked' : ''}"
+                data-bookmark-id="${escapeHtml(item?.id || '')}"
+                aria-label="${escapeHtml(isRecentBookmarked(item?.id) ? 'Remove bookmark' : 'Bookmark item')}"
+                title="${escapeHtml(isRecentBookmarked(item?.id) ? 'Remove bookmark' : 'Bookmark item')}"
+              >${isRecentBookmarked(item?.id) ? '★' : '☆'}</button>
+            </div>
             <div class="bridge-event-detail bridge-recent-detail">
               <div class="small muted" style="margin-bottom:8px;">${escapeHtml(item?.event?.kind != null ? `kind ${item.event.kind}` : 'Nostr event')}</div>
               <div class="mono" style="margin-bottom:8px;">${escapeHtml(item?.event?.id || 'n/a')}</div>
@@ -249,6 +307,14 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
           </details>
         `;
       }).join('');
+      container.querySelectorAll('[data-bookmark-id]').forEach((button) => {
+        button.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const id = button.getAttribute('data-bookmark-id');
+          toggleRecentBookmark(id);
+        });
+      });
       container.querySelectorAll('details.bridge-recent-event').forEach((details, index) => {
         details.addEventListener('toggle', () => {
           const item = visibleItems[index] || null;

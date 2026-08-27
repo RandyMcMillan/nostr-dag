@@ -392,6 +392,20 @@ button:hover, a.button:hover { background:var(--button-hover); }
   user-select:none;
 }
 
+.bridge-recent-summary-main {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  min-width:0;
+  flex:1 1 auto;
+}
+
+.bridge-recent-actions {
+  display:flex;
+  justify-content:flex-end;
+  padding:0 10px 8px;
+}
+
 .bridge-recent-summary:active {
   background:rgba(251,146,60,.12);
 }
@@ -409,6 +423,31 @@ button:hover, a.button:hover { background:var(--button-hover); }
 .bridge-recent-event[open] .bridge-recent-summary::after {
   content:'▾';
   color:var(--accent);
+}
+
+.bridge-recent-bookmark {
+  border:1px solid var(--border);
+  background:transparent;
+  color:var(--muted);
+  border-radius:999px;
+  width:28px;
+  height:28px;
+  padding:0;
+  line-height:1;
+  flex:0 0 auto;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+}
+
+.bridge-recent-bookmark.is-bookmarked {
+  color:var(--accent);
+  border-color:var(--accent);
+  background:rgba(251,146,60,.12);
+}
+
+.bridge-recent-bookmark:active {
+  transform:translateY(1px);
 }
 
 .bridge-recent-detail {
