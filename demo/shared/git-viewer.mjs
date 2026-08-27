@@ -1,5 +1,7 @@
 import { resolveHref } from './page-path.js';
 
+const DEFAULT_REPO_CACHE_KEY = 'nostr-dag-git-repo-cache-v1';
+
 export function escapeHtml(value) {
   return String(value)
     .replace(/&/g, '&amp;')
@@ -16,7 +18,7 @@ export function buildSelectOptions(items, selectedValue, placeholder) {
   return `<option value="">${placeholder}</option>${options}`;
 }
 
-export function loadRepoCache(storageKey) {
+export function loadRepoCache(storageKey = DEFAULT_REPO_CACHE_KEY) {
   try {
     const raw = window.localStorage.getItem(storageKey);
     if (!raw) return {};
@@ -27,7 +29,7 @@ export function loadRepoCache(storageKey) {
   }
 }
 
-export function saveRepoCache(storageKey, cache) {
+export function saveRepoCache(storageKey = DEFAULT_REPO_CACHE_KEY, cache) {
   try {
     window.localStorage.setItem(storageKey, JSON.stringify(cache));
   } catch {
@@ -35,7 +37,7 @@ export function saveRepoCache(storageKey, cache) {
   }
 }
 
-export function cacheRepoData(storageKey, repoName, data) {
+export function cacheRepoData(storageKey = DEFAULT_REPO_CACHE_KEY, repoName, data) {
   const cache = loadRepoCache(storageKey);
   cache[repoName] = data;
   saveRepoCache(storageKey, cache);
