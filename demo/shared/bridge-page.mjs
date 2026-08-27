@@ -7,6 +7,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     import { measureRelayPing } from './relay-ping.mjs';
     import { createSharedLibp2pStack } from './libp2p-stack.mjs';
     import { getNetworkUnixTime, initSharedNetworkTime } from './network-time.mjs';
+    import { createListContainerController } from './list-container.mjs';
     // Persistent IndexedDB store for all Nostr events and relationships
     // seen by the bridge (events, tags, relays, users, DAG edges, peer acks).
     import { getDagDb } from './dag-db.mjs';
@@ -52,28 +53,10 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     const recentSeenRelay = [];
     const recentSeenLibp2p = [];
     const recentListState = new Map([
-      ['nostrToLibp2p', { query: '', sort: 'oldest' }],
-      ['libp2pToNostr', { query: '', sort: 'oldest' }],
-      ['seenRelay', { query: '', sort: 'oldest' }],
-      ['seenLibp2p', { query: '', sort: 'oldest' }],
-    ]);
-    const recentListOpenState = new Map([
-      ['nostrToLibp2p', new Set()],
-      ['libp2pToNostr', new Set()],
-      ['seenRelay', new Set()],
-      ['seenLibp2p', new Set()],
-    ]);
-    const recentListPausedState = new Map([
-      ['nostrToLibp2p', false],
-      ['libp2pToNostr', false],
-      ['seenRelay', false],
-      ['seenLibp2p', false],
-    ]);
-    const pendingRecentItems = new Map([
-      ['nostrToLibp2p', []],
-      ['libp2pToNostr', []],
-      ['seenRelay', []],
-      ['seenLibp2p', []],
+      ['nostrToLibp2p', { query: '', sort: 'oldest', openIds: new Set(), paused: false }],
+      ['libp2pToNostr', { query: '', sort: 'oldest', openIds: new Set(), paused: false }],
+      ['seenRelay', { query: '', sort: 'oldest', openIds: new Set(), paused: false }],
+      ['seenLibp2p', { query: '', sort: 'oldest', openIds: new Set(), paused: false }],
     ]);
     const recentListControllers = new Map();
     const bookmarkedRecentIds = new Set(loadRecentBookmarks());
@@ -134,11 +117,18 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       ['seenRelay', seenRelayRecentEl, recentSeenRelay],
       ['seenLibp2p', seenLibp2pRecentEl, recentSeenLibp2p],
     ].forEach(([key, container, items]) => {
-      recentListControllers.set(key, createRecentListController(key, container, items));
+      recentListControllers.set(key, createListContainerController({
+        items,
+        state: recentListState.get(key),
+        scheduleRender: scheduleRecentListsRender,
+        persistState: persistRecentListState,
+        renderFn: () => renderRecentList(container, items, () => {}, key),
+      }));
     });
 
     restoreRecentListUiState();
     renderRecentLists();
+    syncRecentListPauseState();
     scheduleRecentListsRender();
 
     document.querySelectorAll('[data-list-search]').forEach((input) => {
@@ -231,42 +221,6 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       return escapeHtml(JSON.stringify(value, null, 2));
     }
 
-    function createRecentListController(key, container, items) {
-      return {
-        key,
-        container,
-        items,
-        queue(value) {
-          if (!value?.id) return;
-          if (isRecentListPaused(key)) {
-            const pending = pendingRecentItems.get(key);
-            if (pending) pending.push(value);
-            return;
-          }
-          const index = items.findIndex((entry) => entry?.id === value.id);
-          if (index !== -1) items.splice(index, 1);
-          items.push(value);
-          scheduleRecentListsRender();
-        },
-        pause() {
-          recentListPausedState.set(key, true);
-          persistRecentListState();
-        },
-        resume() {
-          recentListPausedState.set(key, false);
-          persistRecentListState();
-          flushPendingRecentItems(key);
-          scheduleRecentListsRender();
-        },
-        render() {
-          renderRecentList(container, items, () => {}, key);
-        },
-        flush() {
-          flushPendingRecentItems(key);
-        },
-      };
-    }
-
     function loadRecentBookmarks() {
       try {
         const raw = window.localStorage.getItem(BOOKMARKS_KEY);
@@ -294,7 +248,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
           snapshot[key] = {
             query: String(state.query || ''),
             sort: String(state.sort || 'oldest'),
-            open: [...(recentListOpenState.get(key) || new Set())],
+            open: [...(state.openIds || new Set())],
           };
         }
         window.localStorage.setItem(RECENT_LIST_STATE_KEY, JSON.stringify(snapshot));
@@ -309,11 +263,9 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         if (snapshot && typeof snapshot === 'object') {
           state.query = String(snapshot.query || '');
           state.sort = String(snapshot.sort || 'oldest');
-          recentListOpenState.set(key, new Set());
+          state.openIds = new Set(Array.isArray(snapshot.open) ? snapshot.open.filter((value) => typeof value === 'string' && value) : []);
         }
-        recentListPausedState.set(key, false);
-        const pending = pendingRecentItems.get(key);
-        if (pending) pending.length = 0;
+        state.paused = false;
       }
       document.querySelectorAll('[data-list-search]').forEach((input) => {
         const key = input.getAttribute('data-list-search');
@@ -325,6 +277,12 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         if (!key || !recentListState.has(key)) return;
         select.value = recentListState.get(key).sort || 'oldest';
       });
+    }
+
+    function syncRecentListPauseState() {
+      for (const state of recentListState.values()) {
+        state.paused = state.openIds.size > 0;
+      }
     }
 
     function persistRecentBookmarks() {
@@ -362,26 +320,6 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       scheduleRecentListsRender();
     }
 
-    function flushPendingRecentItems(key) {
-      const pending = pendingRecentItems.get(key);
-      const list = getRecentListByKey(key);
-      if (!pending || !pending.length || !list) return;
-      for (const value of pending) {
-        const index = list.findIndex((entry) => entry?.id === value.id);
-        if (index !== -1) list.splice(index, 1);
-        list.push(value);
-      }
-      pending.length = 0;
-    }
-
-    function getRecentListByKey(key) {
-      if (key === 'nostrToLibp2p') return recentNostrToLibp2p;
-      if (key === 'libp2pToNostr') return recentLibp2pToNostr;
-      if (key === 'seenRelay') return recentSeenRelay;
-      if (key === 'seenLibp2p') return recentSeenLibp2p;
-      return null;
-    }
-
     function scheduleRecentListsRender() {
       if (recentListsRenderScheduled) return;
       recentListsRenderScheduled = true;
@@ -391,14 +329,11 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       });
     }
 
-    function isRecentListPaused(key) {
-      return Boolean(recentListPausedState.get(key));
-    }
-
     function renderRecentList(container, items, onSelect, key) {
       if (!container) return;
-      if (isRecentListPaused(key)) return;
-      const openItems = recentListOpenState.get(key) || new Set();
+      const state = recentListState.get(key);
+      if (!state || state.paused) return;
+      const openItems = state.openIds || new Set();
       const visibleItems = getRecentItems(key, items);
       if (!visibleItems.length) {
         const query = (recentListState.get(key)?.query || '').trim();
@@ -457,23 +392,21 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       container.querySelectorAll('details.bridge-recent-event').forEach((details, index) => {
         details.addEventListener('toggle', () => {
           const item = visibleItems[index] || null;
-          const openSet = recentListOpenState.get(key) || new Set();
+          const state = recentListState.get(key);
           const controller = recentListControllers.get(key) || null;
           if (!item?.id) return;
           if (details.open) {
-            openSet.clear();
-            openSet.add(item.id);
+            state.openIds.clear();
+            state.openIds.add(item.id);
             container.querySelectorAll('details.bridge-recent-event[open]').forEach((other) => {
               if (other !== details) other.open = false;
             });
-            recentListOpenState.set(key, openSet);
             controller?.pause();
             persistRecentListState();
             onSelect(item);
             return;
           }
-          openSet.delete(item.id);
-          recentListOpenState.set(key, openSet);
+          state.openIds.delete(item.id);
           persistRecentListState();
           controller?.resume();
         });
