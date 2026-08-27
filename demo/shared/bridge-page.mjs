@@ -4,6 +4,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     import { scheduleAfterPaint, yieldToBrowser } from './async-lifecycle.mjs';
     import { createSharedHeader } from './page-header.mjs';
     import { resolveHref } from './page-path.js';
+    import { measureRelayPing } from './relay-ping.mjs';
     import { createSharedLibp2pStack } from './libp2p-stack.mjs';
     import { getNetworkUnixTime, initSharedNetworkTime } from './network-time.mjs';
     // Persistent IndexedDB store for all Nostr events and relationships
@@ -425,6 +426,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         info.name || '',
         info.description || '',
         info.version ? `v${info.version}` : '',
+        Number.isFinite(Number(info.ping_ms)) ? `${Math.round(Number(info.ping_ms))} ms` : '',
       ].filter(Boolean) : [];
       const learnedFrom = source && source !== 'default'
         ? `<div class="bridge-relay-learned small muted">Learned from ${escapeHtml(source)}</div>`
@@ -441,6 +443,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
               <div class="bridge-relay-meta">
                 ${gitCapable ? '<span class="bridge-pill bridge-pill-git" aria-label="Supports NIP-34 git kinds" title="Supports NIP-34 git kinds"><span aria-hidden="true">⎇</span></span>' : ''}
                 ${info?.error ? `<span class="bridge-pill">NIP-11 unavailable</span>` : hasInfo ? '<span class="bridge-pill bridge-pill-ok" aria-label="NIP-11 loaded"><span class="bridge-pill-dot" aria-hidden="true"></span></span>' : loading ? '<span class="bridge-pill">NIP-11 loading</span>' : ''}
+                ${Number.isFinite(Number(info?.ping_ms)) ? `<span class="bridge-pill bridge-pill-relay" title="Measured relay ping">${escapeHtml(`${Math.round(Number(info.ping_ms))} ms`)}</span>` : ''}
               </div>
             </div>
           </div>
@@ -469,6 +472,20 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       return [...new Set(urls.map((url) => normalizeRelayUrl(url) || url))]
         .map((url) => relayInfoForUrl(url))
         .filter(Boolean);
+    }
+
+    function relayPingSortValue(info) {
+      const value = Number(info?.ping_ms);
+      return Number.isFinite(value) && value > 0 ? value : Number.POSITIVE_INFINITY;
+    }
+
+    function sortRelaysByPing(relays) {
+      return [...relays].sort((a, b) => {
+        const pingA = relayPingSortValue(relayInfoForUrl(a));
+        const pingB = relayPingSortValue(relayInfoForUrl(b));
+        if (pingA !== pingB) return pingA - pingB;
+        return a.localeCompare(b);
+      });
     }
 
     async function persistBridgeCache() {
@@ -545,6 +562,9 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         url,
         fetch_url: data.fetch_url || '',
         fetched_at: data.fetched_at || 0,
+        ping_ms: Number.isFinite(Number(data.ping_ms)) ? Number(data.ping_ms) : null,
+        ping_fetched_at: data.ping_fetched_at || 0,
+        ping_error: data.ping_error || '',
         name: data.name || '',
         description: data.description || '',
         pubkey: data.pubkey || '',
@@ -595,12 +615,35 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       const fetchUrl = nip11FetchUrl(relayUrl);
       const proxyUrl = nip11ProxyUrl(relayUrl);
       if (!normalized) return null;
-      if (relayInfoCatalog.has(normalized)) return relayInfoCatalog.get(normalized);
+      const cached = relayInfoCatalog.get(normalized) || null;
+      if (cached && cached.ping_ms !== null && cached.ping_fetched_at && !cached.error) return cached;
       if (relayInfoInFlight.has(normalized)) return relayInfoInFlight.get(normalized);
       window.__sharedFooter?.log('bridge', `fetch nip11 ${normalized}`, 'trace', 'checking');
 
       const request = (async () => {
         try {
+          if (cached && !cached.error) {
+            const pingMs = cached.ping_ms !== null && cached.ping_fetched_at
+              ? cached.ping_ms
+              : await measureRelayPing(normalized);
+            const record = createNostrRelay(normalized, {
+              ...cached,
+              ping_ms: pingMs,
+              ping_fetched_at: pingMs === null ? cached.ping_fetched_at || 0 : Date.now(),
+              ping_error: pingMs === null ? (cached.ping_error || 'unreachable') : '',
+            });
+            relayInfoCatalog.set(normalized, record);
+            if (pingMs !== null) {
+              try {
+                const db = await getDagDb();
+                await db.setRelayInfo(normalized, record);
+              } catch {
+                // best effort only
+              }
+            }
+            return record;
+          }
+
           const candidates = [proxyUrl, fetchUrl].filter(Boolean);
           let lastError = null;
           for (const candidate of candidates) {
@@ -615,12 +658,22 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
               window.__sharedFooter?.log('bridge', `nip11 raw ${normalized} via ${candidate}\n${raw}`, 'trace', response.ok ? 'available' : 'unavailable');
               if (!response.ok) throw new Error(`${response.status} ${response.statusText}\n${raw}`);
               const data = JSON.parse(raw || '{}');
+              const pingMs = await measureRelayPing(normalized);
               const record = createNostrRelay(normalized, {
                 ...data,
                 fetch_url: candidate,
                 fetched_at: Date.now(),
+                ping_ms: pingMs,
+                ping_fetched_at: pingMs === null ? 0 : Date.now(),
+                ping_error: pingMs === null ? 'unreachable' : '',
               });
               relayInfoCatalog.set(normalized, record);
+              try {
+                const db = await getDagDb();
+                await db.setRelayInfo(normalized, record);
+              } catch {
+                // best effort only
+              }
               window.__sharedFooter?.log('bridge', `fetch nip11 ${normalized} ok ${record.name || record.version || 'loaded'}`, 'trace', 'available');
               return record;
             } catch (error) {
@@ -632,9 +685,16 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
           const record = createNostrRelay(normalized, {
             fetch_url: fetchUrl,
             fetched_at: Date.now(),
+            ping_error: lastError?.message || 'unable to fetch NIP-11',
             error: error?.message || String(error),
           });
           relayInfoCatalog.set(normalized, record);
+          try {
+            const db = await getDagDb();
+            await db.setRelayInfo(normalized, record);
+          } catch {
+            // best effort only
+          }
           window.__sharedFooter?.log('bridge', `fetch nip11 ${normalized} failed ${record.error}`, 'trace', 'unavailable');
           return record;
         } finally {
@@ -661,9 +721,13 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     }
 
     function renderDefaultRelays() {
-      const entries = [...DEFAULT_RELAYS].sort();
+      const entries = sortRelaysByPing(DEFAULT_RELAYS).filter((relay) => relayPingSortValue(relayInfoForUrl(relay)) < Number.POSITIVE_INFINITY);
       defaultRelayCountEl.textContent = String(entries.length);
       window.__sharedFooter?.log('bridge', `render default relays (${entries.length})`, 'trace', 'checking');
+      if (!entries.length) {
+        defaultRelayListEl.innerHTML = '<div class="small muted">No relays have a measured ping yet.</div>';
+        return;
+      }
       defaultRelayListEl.innerHTML = entries.map((relay) => {
         const info = relayInfoForUrl(relay);
         const loading = relayInfoInFlight.has(normalizeRelayUrl(relay) || relay);
@@ -672,17 +736,17 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     }
 
     function renderRelays() {
-      const defaultRelays = [...new Set(DEFAULT_RELAYS)];
-      const learnedRelays = [...new Set([...relayCatalog.values()].flatMap((entry) => entry.relays || []))].sort();
+      const defaultRelays = sortRelaysByPing([...new Set(DEFAULT_RELAYS)]).filter((relay) => relayPingSortValue(relayInfoForUrl(relay)) < Number.POSITIVE_INFINITY);
+      const learnedRelays = sortRelaysByPing([...new Set([...relayCatalog.values()].flatMap((entry) => entry.relays || []))]).filter((relay) => relayPingSortValue(relayInfoForUrl(relay)) < Number.POSITIVE_INFINITY);
       const visibleRelays = learnedRelays.filter((relay) => {
         const info = relayInfoForUrl(relay);
-        return Boolean(info && !info.error && !defaultRelays.includes(relay));
+        return Boolean(info && !info.error && !defaultRelays.includes(relay) && Number(info.ping_ms) > 0);
       });
-      const combinedRelays = [...defaultRelays, ...visibleRelays];
+      const combinedRelays = sortRelaysByPing([...defaultRelays, ...visibleRelays]);
       relayCountEl.textContent = String(combinedRelays.length);
       window.__sharedFooter?.log('bridge', `render accumulated relays (${combinedRelays.length})`, 'trace', 'checking');
       if (!combinedRelays.length) {
-        relayListEl.innerHTML = '<div class="small muted">No relays with loaded NIP-11 yet.</div>';
+        relayListEl.innerHTML = '<div class="small muted">No relays have a measured ping yet.</div>';
         return;
       }
 
