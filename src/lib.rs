@@ -1,10 +1,10 @@
-mod bridge_roundtrip;
+mod assets;
 #[cfg(feature = "native")]
 mod bridge_native;
+mod bridge_roundtrip;
 mod dag;
 mod error;
 mod event;
-mod assets;
 pub mod nip34;
 pub mod quorum;
 #[cfg(feature = "native")]
@@ -18,9 +18,11 @@ pub mod git_wasm;
 
 #[cfg(any(feature = "p2p", feature = "p2p-wasm"))]
 pub mod p2p;
+#[cfg(feature = "p2p")]
+pub mod p2p_node;
 
-pub use assets::{ICON_CIRCLE_BITCOIN_SVG, ICON_CIRCLE_WHITE_SVG};
 pub use assets::FAVICON_ICO;
+pub use assets::{ICON_CIRCLE_BITCOIN_SVG, ICON_CIRCLE_WHITE_SVG};
 #[cfg(feature = "native")]
 pub use bridge_native::{
     build_bridge_envelope, collect_bridge_relay_hints, serialize_bridge_envelope,
@@ -36,20 +38,20 @@ pub use event::{
     create_ack_event, create_attest_event, create_join_event, create_seal_event, parents_of,
     DAG_EVENT_KIND, PIP_ATTEST_KIND, PIP_JOIN_KIND, PIP_SEAL_KIND,
 };
-pub use quorum::{AttestResult, BlobQuorum, JoinResult};
 pub use nip34::{
     git_remote_helper_url, git_remote_transport_url, normalize_nostr_clone_url,
     normalize_p2p_clone_url, nostr_to_p2p_clone_url, p2p_to_nostr_clone_url, parse_nostr_clone_url,
     parse_p2p_clone_url, Nip34Error, NostrRemote,
 };
+pub use quorum::{AttestResult, BlobQuorum, JoinResult};
 
 #[cfg(feature = "wasm")]
 mod wasm {
     use crate::bridge_roundtrip::{
         extract_bridge_round_trip_start_ms, stamp_bridge_round_trip_tag,
     };
-    use wasm_bindgen::prelude::*;
     use serde_wasm_bindgen::{from_value, to_value};
+    use wasm_bindgen::prelude::*;
 
     use crate::dag::{Dag, InsertResult};
 
@@ -82,8 +84,8 @@ mod wasm {
         /// Returns a JSON string with the result: `{"type":"Inserted","id":"..."}`,
         /// `{"type":"Buffered","id":"...","missing":[...]}`, or `{"type":"Duplicate"}`.
         pub fn insert(&mut self, event_json: &str) -> Result<String, JsValue> {
-            let event: nostr::Event = serde_json::from_str(event_json)
-                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            let event: nostr::Event =
+                serde_json::from_str(event_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
 
             let result = self.inner.insert(event);
             let json = match result {
@@ -91,8 +93,7 @@ mod wasm {
                     format!(r#"{{"type":"Inserted","id":"{}"}}"#, id.to_hex())
                 }
                 InsertResult::Buffered { event_id, missing } => {
-                    let missing_json: Vec<String> =
-                        missing.iter().map(|id| id.to_hex()).collect();
+                    let missing_json: Vec<String> = missing.iter().map(|id| id.to_hex()).collect();
                     format!(
                         r#"{{"type":"Buffered","id":"{}","missing":{}}}"#,
                         event_id.to_hex(),
@@ -127,17 +128,17 @@ mod wasm {
         tags: JsValue,
         started_at_ms: i64,
     ) -> Result<JsValue, JsValue> {
-        let tags: Vec<nostr::Tag> = from_value(tags).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let tags: Vec<nostr::Tag> =
+            from_value(tags).map_err(|e| JsValue::from_str(&e.to_string()))?;
         let stamped = stamp_bridge_round_trip_tag(&tags, started_at_ms);
         to_value(&stamped).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     /// Read the bridge RTT marker from a Nostr event and return the start timestamp in ms.
     #[wasm_bindgen(js_name = extractBridgeRoundTripStartMs)]
-    pub fn extract_bridge_round_trip_start_ms_js(
-        event: JsValue,
-    ) -> Result<Option<i64>, JsValue> {
-        let event: nostr::Event = from_value(event).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    pub fn extract_bridge_round_trip_start_ms_js(event: JsValue) -> Result<Option<i64>, JsValue> {
+        let event: nostr::Event =
+            from_value(event).map_err(|e| JsValue::from_str(&e.to_string()))?;
         Ok(extract_bridge_round_trip_start_ms(&event))
     }
 }

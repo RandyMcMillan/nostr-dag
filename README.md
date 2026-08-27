@@ -56,7 +56,7 @@ src/
     keygen.rs          Demo key + startup command generator
     nostr-dag-server.rs  Local static/API server
     git-info.rs        CLI git info helper
-    p2p-node.rs        Standalone libp2p node
+    p2p-node.rs        Standalone native libp2p peer CLI
 
 demo/
   index.html           Main browser frontend (DAG + bridge)
@@ -101,6 +101,9 @@ just server
 
 # Start relay + 5 federation daemons
 just demo
+
+# Start the standalone native peer CLI
+cargo run --features p2p --bin p2p-node
 
 # Or use Make equivalents
 make build / test / wasm / site / server / demo
