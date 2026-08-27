@@ -25,20 +25,38 @@
   <footer id="pageFooter"></footer>
 
   <script type="module">
-    import { createSharedHeader } from '../shared/page-header.mjs';
+    import { bootstrapDemoPageChrome } from '../shared/page-shell.mjs';
     import { scheduleAfterPaint } from '../shared/async-lifecycle.mjs';
-    import { createLoggerFooter } from '../shared/logger.js';
     import { remoteTagNames } from '../shared/git-refs.mjs';
     import { createGitProgressReporter } from '../shared/git-progress.mjs';
     import { cloneWithSingleBranchFallback } from '../shared/git-clone.mjs';
-    import { initSharedNetworkTime } from '../shared/network-time.mjs';
     import { resolveHref } from '../shared/page-path.js';
     import git from 'https://cdn.jsdelivr.net/npm/isomorphic-git@1.25.0/+esm';
     import http from 'https://cdn.jsdelivr.net/npm/isomorphic-git@1.25.0/http/web/+esm';
     import LightningFS from 'https://cdn.jsdelivr.net/npm/@isomorphic-git/lightning-fs@4.6.0/+esm';
 
     const fs = new LightningFS('git-viewer');
-    const footer = createLoggerFooter(document.getElementById('pageFooter'), { title: 'Logger', initialState: 'idle', initialTitle: 'starting...', initialLevel: 'none' });
+    const { footer, networkTime } = bootstrapDemoPageChrome({
+      headerRoot: document.getElementById('sharedHeader'),
+      footerRoot: document.getElementById('pageFooter'),
+      headerOptions: {
+        title: 'nostr-dag',
+        logoHref: resolveHref('../git/', window.location.href),
+        iconHref: resolveHref('../shared/favicon.ico', window.location.href),
+        subtitleHtml: '',
+        navItems: [
+          { label: 'dag', href: resolveHref('../dag/', window.location.href) },
+          { label: 'Bridge', href: resolveHref('../bridge/', window.location.href) },
+        ],
+      },
+      footerOptions: {
+        title: 'Logger',
+        initialState: 'idle',
+        initialTitle: 'starting...',
+        initialLevel: 'none',
+      },
+      footerMode: 'after-paint',
+    });
     footer.setLevel('none');
     const statusEl = document.getElementById('status');
     const viewEl = document.getElementById('view');
@@ -52,18 +70,6 @@
       { name:'discv5', url:'https://github.com/ChainSafe/discv5', dir:'/repos/discv5' },
       { name:'lightning-fs', url:'https://github.com/isomorphic-git/lightning-fs', dir:'/repos/lightning-fs' },
     ];
-
-    window.__sharedHeaderApi = createSharedHeader(document.getElementById('sharedHeader'), {
-      title: 'nostr-dag',
-      logoHref: resolveHref('../git/', window.location.href),
-      iconHref: resolveHref('../shared/favicon.ico', window.location.href),
-      subtitleHtml: '',
-      navItems: [
-        { label: 'dag', href: resolveHref('../dag/', window.location.href) },
-        { label: 'Bridge', href: resolveHref('../bridge/', window.location.href) },
-      ],
-    });
-    const networkTime = initSharedNetworkTime({ headerApi: window.__sharedHeaderApi });
 
     function isSafariMobile() {
       const ua = globalThis.navigator?.userAgent || '';

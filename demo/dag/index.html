@@ -105,21 +105,22 @@
   </main>
 
   <script type="module">
-    import { createSharedHeader } from '../shared/page-header.mjs';
-    import { initSharedNetworkTime } from '../shared/network-time.mjs';
+    import { bootstrapDemoPageChrome } from '../shared/page-shell.mjs';
     import { resolveHref } from '../shared/page-path.js';
 
-    window.__sharedHeaderApi = createSharedHeader(document.getElementById('sharedHeader'), {
-      title: 'nostr-dag',
-      logoHref: resolveHref('../git/', window.location.href),
-      iconHref: resolveHref('../shared/favicon.ico', window.location.href),
-      subtitleHtml: '',
-      navItems: [
-        { label: 'dag', href: resolveHref('./', window.location.href), current: true },
-        { label: 'Bridge', href: resolveHref('../bridge/', window.location.href) },
-      ],
+    bootstrapDemoPageChrome({
+      headerRoot: document.getElementById('sharedHeader'),
+      headerOptions: {
+        title: 'nostr-dag',
+        logoHref: resolveHref('../git/', window.location.href),
+        iconHref: resolveHref('../shared/favicon.ico', window.location.href),
+        subtitleHtml: '',
+        navItems: [
+          { label: 'dag', href: resolveHref('./', window.location.href), current: true },
+          { label: 'Bridge', href: resolveHref('../bridge/', window.location.href) },
+        ],
+      },
     });
-    initSharedNetworkTime({ headerApi: window.__sharedHeaderApi });
   </script>
 
   <script type="module">

@@ -2,11 +2,11 @@
 import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     import { finalizeEvent, generateSecretKey, getPublicKey, verifyEvent } from 'https://esm.sh/nostr-tools@2.10.4/pure';
     import { scheduleAfterPaint, yieldToBrowser } from './async-lifecycle.mjs';
-    import { createSharedHeader } from './page-header.mjs';
+    import { bootstrapDemoPageChrome } from './page-shell.mjs';
     import { resolveHref } from './page-path.js';
     import { measureRelayPing } from './relay-ping.mjs';
     import { createSharedLibp2pStack } from './libp2p-stack.mjs';
-    import { getNetworkUnixTime, initSharedNetworkTime } from './network-time.mjs';
+    import { getNetworkUnixTime } from './network-time.mjs';
     import { BRIDGE_PROTOCOL, BRIDGE_PROTOCOL_VERSION, buildBridgeEnvelope, collectBridgeRelayHints, unwrapBridgeEnvelope } from './bridge-protocol.mjs';
     import { createListContainerController } from './list-container.mjs';
     import { createPeersListController } from './peers-list.mjs';
@@ -31,8 +31,10 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       'wss://nostr.wine',
     ];
 
-    if (!window.__bridgeChromeInitialized) {
-      window.__sharedHeaderApi = createSharedHeader(document.getElementById('sharedHeader'), {
+    const { networkTime } = bootstrapDemoPageChrome({
+      headerRoot: document.getElementById('sharedHeader'),
+      footerRoot: document.getElementById('sharedFooter'),
+      headerOptions: {
         title: 'nostr-dag',
         logoHref: resolveHref('../', window.location.href),
         iconHref: resolveHref('../shared/favicon.ico', window.location.href),
@@ -41,10 +43,17 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
           { label: 'Git viewer', href: resolveHref('../git/', window.location.href) },
           { label: 'Bridge', href: resolveHref('./', window.location.href), current: true },
         ],
-      });
-      window.__bridgeChromeInitialized = true;
-    }
-    const networkTime = initSharedNetworkTime();
+      },
+      footerOptions: {
+        title: 'Logger',
+        initialState: 'idle',
+        initialTitle: 'bridge starting...',
+        initialLevel: 'none',
+        maxEntries: 5000,
+      },
+      footerMode: 'raf',
+      closeFooter: true,
+    });
 
     const pool = new SimplePool();
     const seenRelay = new Set();
