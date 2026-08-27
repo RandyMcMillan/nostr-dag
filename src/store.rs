@@ -105,7 +105,7 @@ impl EventStore {
 
             -- Parent→child links that form the DAG (from 'e' tags).
             CREATE TABLE IF NOT EXISTS dag_edges (
-                parent_id  TEXT    NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+                parent_id  TEXT    NOT NULL,
                 child_id   TEXT    NOT NULL REFERENCES events(id) ON DELETE CASCADE,
                 depth      INTEGER NOT NULL DEFAULT 0,  -- computed depth of child_id
                 PRIMARY KEY (parent_id, child_id)
@@ -531,6 +531,29 @@ mod tests {
         );
         // 'r' tag should have created a relay row.
         assert!(store.relay_count().unwrap() >= 1);
+    }
+
+    #[test]
+    fn upsert_event_allows_missing_parent() {
+        let store = mem();
+        let child_id = "bbbb";
+        let missing_parent_id = "aaaa";
+
+        let tags = vec![vec!["e".to_string(), missing_parent_id.to_string()]];
+        store
+            .upsert_event(
+                child_id, "pubkey1", 21000, 2_000, "", "sig2", "{}", &tags, None, 2_000,
+            )
+            .unwrap();
+
+        assert_eq!(
+            store.parents_of(child_id).unwrap(),
+            vec![missing_parent_id.to_string()]
+        );
+        assert_eq!(
+            store.children_of(missing_parent_id).unwrap(),
+            vec![child_id.to_string()]
+        );
     }
 
     #[test]
