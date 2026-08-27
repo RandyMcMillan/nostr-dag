@@ -9,7 +9,6 @@ import { webSockets } from "https://esm.sh/@libp2p/websockets";
 import { webRTC, webRTCDirect } from "https://esm.sh/@libp2p/webrtc";
 import { noise } from "https://esm.sh/@chainsafe/libp2p-noise";
 import { yamux } from "https://esm.sh/@chainsafe/libp2p-yamux";
-import { isSafari } from './browser-detect.mjs';
 
 export const DEFAULT_BOOTSTRAP_PEERS = [
   "/ip4/104.131.131.82/tcp/4001/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ",
@@ -183,6 +182,7 @@ export async function createSharedLibp2pStack({
   includeWebRTC = true,
   includeWebRTCDirect = true,
   includeCircuitRelay = true,
+  preferWebSocketsOnly = false,
   // When the WASM P2pNode is available (loaded via pkg/nostr_dag.js) and
   // `useWasmP2p` is true (default), use it instead of the JS libp2p stack.
   // Set to false to force the pure-JS fallback.
@@ -271,9 +271,8 @@ export async function createSharedLibp2pStack({
   emitLog(onLog, "trace", "shared libp2p stack configuring transports and services", "checking");
   emitLog(onLog, "trace", "transports: webSockets, webRTC, webRTCDirect, circuitRelayTransport", "checking");
   emitLog(onLog, "trace", "services: identify, autoNAT, dcutr, pubsub", "checking");
-  const safari = isSafari();
-  if (safari) {
-    emitLog(onLog, "info", "Safari detected; starting with websocket-only libp2p fallback", "checking");
+  if (preferWebSocketsOnly) {
+    emitLog(onLog, "info", "starting with websocket-only libp2p fallback", "checking");
   }
 
   const buildTransportConfig = ({ webRTC: useWebRTC, webRTCDirect: useWebRTCDirect, circuitRelay: useCircuitRelay }) => ({
@@ -291,9 +290,9 @@ export async function createSharedLibp2pStack({
     },
   });
 
-  const configs = safari ? [
+  const configs = preferWebSocketsOnly ? [
     {
-      name: "Safari webSockets only",
+      name: "webSockets only",
       ...buildTransportConfig({
         webRTC: false,
         webRTCDirect: false,
@@ -301,7 +300,7 @@ export async function createSharedLibp2pStack({
       }),
     },
     {
-      name: "Safari no webRTCDirect",
+      name: "no webRTCDirect",
       ...buildTransportConfig({
         webRTC: includeWebRTC,
         webRTCDirect: false,
@@ -309,7 +308,7 @@ export async function createSharedLibp2pStack({
       }),
     },
     {
-      name: "Safari full browser stack",
+      name: "full browser stack",
       ...buildTransportConfig({
         webRTC: includeWebRTC,
         webRTCDirect: includeWebRTCDirect,
