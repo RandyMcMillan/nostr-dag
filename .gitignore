@@ -4,3 +4,5 @@ Cargo.lock
 /site/
 
 nostr-dag.db
+nostr-dag.db-shm
+nostr-dag.db-wal
