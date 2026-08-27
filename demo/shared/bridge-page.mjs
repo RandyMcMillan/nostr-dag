@@ -122,6 +122,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         state: recentListState.get(key),
         scheduleRender: scheduleRecentListsRender,
         persistState: persistRecentListState,
+        onChange: scheduleBridgeCachePersist,
         renderFn: () => renderRecentList(container, items, () => {}, key),
       }));
     });
@@ -907,6 +908,13 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
           relayInfoCatalog: [...relayInfoCatalog.entries()],
           localPeers: [...localPeers.values()],
           remotePeers: [...remotePeers.values()],
+          metrics: { ...metrics },
+          seenRelayIds: [...seenRelay],
+          seenLibp2pIds: [...seenLibp2p],
+          recentNostrToLibp2p: recentNostrToLibp2p,
+          recentLibp2pToNostr: recentLibp2pToNostr,
+          recentSeenRelay: recentSeenRelay,
+          recentSeenLibp2p: recentSeenLibp2p,
         };
         window.localStorage.setItem(CACHE_KEY, JSON.stringify(payload));
         window.__sharedFooter?.log('bridge', 'bridge cache persisted', 'trace', 'available');
@@ -959,6 +967,40 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
             remotePeers.set(peerKey(peer), peer);
           }
         }
+        if (payload.metrics && typeof payload.metrics === 'object') {
+          metrics.nostrToLibp2p = Number(payload.metrics.nostrToLibp2p || 0);
+          metrics.libp2pToNostr = Number(payload.metrics.libp2pToNostr || 0);
+          metrics.relayPublishesAttempted = Number(payload.metrics.relayPublishesAttempted || 0);
+          metrics.relayPublishesSucceeded = Number(payload.metrics.relayPublishesSucceeded || 0);
+        }
+        if (Array.isArray(payload.seenRelayIds)) {
+          seenRelay.clear();
+          for (const id of payload.seenRelayIds) {
+            if (typeof id === 'string' && id) seenRelay.add(id);
+          }
+        }
+        if (Array.isArray(payload.seenLibp2pIds)) {
+          seenLibp2p.clear();
+          for (const id of payload.seenLibp2pIds) {
+            if (typeof id === 'string' && id) seenLibp2p.add(id);
+          }
+        }
+        seenProcessed.clear();
+        for (const id of seenRelay) seenProcessed.add(id);
+        for (const id of seenLibp2p) seenProcessed.add(id);
+        if (Array.isArray(payload.recentNostrToLibp2p)) {
+          recentNostrToLibp2p.splice(0, recentNostrToLibp2p.length, ...payload.recentNostrToLibp2p.filter((item) => item && typeof item === 'object' && item.id));
+        }
+        if (Array.isArray(payload.recentLibp2pToNostr)) {
+          recentLibp2pToNostr.splice(0, recentLibp2pToNostr.length, ...payload.recentLibp2pToNostr.filter((item) => item && typeof item === 'object' && item.id));
+        }
+        if (Array.isArray(payload.recentSeenRelay)) {
+          recentSeenRelay.splice(0, recentSeenRelay.length, ...payload.recentSeenRelay.filter((item) => item && typeof item === 'object' && item.id));
+        }
+        if (Array.isArray(payload.recentSeenLibp2p)) {
+          recentSeenLibp2p.splice(0, recentSeenLibp2p.length, ...payload.recentSeenLibp2p.filter((item) => item && typeof item === 'object' && item.id));
+        }
+        refreshMetrics();
         window.__sharedFooter?.log('bridge', `restored cached bridge state (${relayCatalog.size} relay groups, ${localPeers.size + remotePeers.size} peers)`, 'info', 'available');
         return true;
       } catch {
@@ -1469,6 +1511,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       seenProcessed.add(event.id);
       pushRecent(source === 'libp2p' ? 'seenLibp2p' : 'seenRelay', source === 'libp2p' ? recentSeenLibp2p : recentSeenRelay, { id: event.id, source, event });
       refreshMetrics();
+      scheduleBridgeCachePersist();
       return !alreadyProcessed;
     }
 
@@ -1481,6 +1524,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       await node.services.pubsub.publish(topic, encoder.encode(JSON.stringify(payload)));
       metrics.nostrToLibp2p += direction === 'nostr->libp2p' ? 1 : 0;
       refreshMetrics();
+      scheduleBridgeCachePersist();
       window.__sharedFooter?.log('bridge', `${direction} ${event.kind} ${event.id}`, 'trace', 'available');
     }
 
@@ -1500,6 +1544,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       metrics.relayPublishesAttempted += results.length;
       metrics.relayPublishesSucceeded += successes.length;
       refreshMetrics();
+      scheduleBridgeCachePersist();
       window.__sharedFooter?.log('bridge', `${direction} ${event.kind} ${event.id} via ${publishRelays.join(', ')}`, 'info', 'available');
       window.__sharedFooter?.log('bridge', `publish responses ${event.id}: ${successes.length}/${results.length} ok`, failures.length ? 'warn' : 'info', failures.length ? 'checking' : 'available');
       scheduleBridgeVerification(event, publishRelays, direction);
@@ -1532,6 +1577,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       metrics.relayPublishesAttempted += results.length;
       metrics.relayPublishesSucceeded += results.length - failed.length;
       refreshMetrics();
+      scheduleBridgeCachePersist();
       if (failed.length) {
         for (const result of failed) {
           window.__sharedFooter?.log('bridge', `presence publish failed: ${result.reason?.message || result.reason || 'unknown error'}`, 'warn', 'unavailable');
@@ -1718,6 +1764,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     const bootBridge = async () => {
       refreshMetrics();
       restoreBridgeCache();
+      renderRecentLists();
       scheduleRelayDiscovery(DEFAULT_RELAYS);
       scheduleRelayDiscovery(relays);
       scheduleDefaultRelayRender();

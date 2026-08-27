@@ -3,6 +3,7 @@ export function createListContainerController({
   state,
   scheduleRender,
   persistState,
+  onChange = () => {},
   renderFn = () => {},
 }) {
   const pending = [];
@@ -23,11 +24,13 @@ export function createListContainerController({
       if (!value?.id) return;
       if (state.paused) {
         pending.push(value);
+        onChange();
         return;
       }
       const index = items.findIndex((entry) => entry?.id === value.id);
       if (index !== -1) items.splice(index, 1);
       items.push(value);
+      onChange();
       scheduleRender();
     },
     pause() {
@@ -40,6 +43,7 @@ export function createListContainerController({
       state.paused = false;
       persistState();
       flush();
+      onChange();
       scheduleRender();
     },
     render() {
