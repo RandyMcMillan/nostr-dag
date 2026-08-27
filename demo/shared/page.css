@@ -366,6 +366,20 @@ button:hover, a.button:hover { background:var(--button-hover); }
   justify-content:center;
 }
 
+.bridge-pill-detail {
+  background:rgba(148,163,184,.12);
+  border-color:rgba(148,163,184,.35);
+  color:var(--fg);
+  min-width:52px;
+  justify-content:center;
+}
+
+.bridge-pill-loading,
+.bridge-pill-error {
+  min-width:112px;
+  justify-content:center;
+}
+
 .bridge-pill-git {
   background:rgba(249,115,22,.14);
   border-color:rgba(249,115,22,.35);
@@ -395,13 +409,19 @@ button:hover, a.button:hover { background:var(--button-hover); }
   gap:12px;
 }
 
+.bridge-relay-summary {
+  display:block;
+  min-height:1.4em;
+  margin-top:4px;
+}
+
 .bridge-relay-link {
   display:block;
   color:inherit;
   text-decoration:none;
 }
 
-.bridge-relay-link:hover {
+.bridge-relay-link:active {
   border-color:var(--accent);
   background:rgba(255,255,255,.03);
 }
