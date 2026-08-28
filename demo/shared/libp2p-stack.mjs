@@ -353,6 +353,8 @@ export async function createSharedLibp2pStack({
 
   let node = null;
   let lastError = null;
+  const allowLocalDial = peers.some((addr) => /127\.0\.0\.1|localhost|::1/.test(addr))
+    || ["localhost", "127.0.0.1", "::1"].includes(globalThis.location?.hostname || "");
   for (const config of configs) {
     try {
       emitLog(onLog, "trace", `constructing libp2p node (${config.name})`, "checking");
@@ -373,6 +375,11 @@ export async function createSharedLibp2pStack({
             emitSelf: true,
           }),
         },
+        ...(allowLocalDial ? {
+          connectionGater: {
+            denyDialMultiaddr: async () => false,
+          },
+        } : {}),
         ...(privateKey ? { privateKey } : {}),
         peerDiscovery: peers.length ? [
           bootstrap({
