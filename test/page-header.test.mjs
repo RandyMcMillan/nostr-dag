@@ -3,6 +3,7 @@ import test from 'node:test';
 
 test('shared header renders nav and active state', async () => {
   const { createSharedHeader } = await import(new URL(`../demo/shared/page-header.mjs?test=${Date.now()}`, import.meta.url));
+  const { APP_NAME, APP_VERSION } = await import(new URL(`../demo/shared/app-version.mjs?test=${Date.now()}`, import.meta.url));
   const root = {
     className: '',
     classList: {
@@ -30,4 +31,5 @@ test('shared header renders nav and active state', async () => {
   assert.match(root.innerHTML, /href="\.\//);
   assert.match(root.innerHTML, /aria-current="page"/);
   assert.match(root.innerHTML, /Git viewer/);
+  assert.ok(root.innerHTML.includes(`${APP_NAME}@${APP_VERSION}`));
 });

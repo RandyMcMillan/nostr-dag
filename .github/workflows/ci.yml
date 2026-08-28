@@ -78,6 +78,9 @@ jobs:
       - name: Install wasm-pack
         run: cargo install wasm-pack --locked
 
+      - name: Generate build version module
+        run: cargo check --quiet
+
       - name: Run JS tests
         run: node --test test/*.test.mjs
 

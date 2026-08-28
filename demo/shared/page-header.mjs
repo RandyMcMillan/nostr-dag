@@ -1,4 +1,5 @@
 import { scheduleAfterPaint } from './async-lifecycle.mjs';
+import { APP_NAME, APP_VERSION } from './app-version.mjs';
 
 function escapeHtml(value) {
   return String(value)
@@ -21,7 +22,8 @@ export function createSharedHeader(root, options = {}) {
     };
   }
 
-  const title = options.title || 'nostr-dag';
+  const title = options.title || APP_NAME;
+  const brandedTitle = title === APP_NAME ? `${title}@${APP_VERSION}` : title;
   const subtitleHtml = options.subtitleHtml || '';
   const logoHref = options.logoHref || '#';
   const iconHref = options.iconHref || './shared/favicon.ico';
@@ -32,7 +34,7 @@ export function createSharedHeader(root, options = {}) {
     <div class="header-container">
       <nav class="header-nav" aria-label="Primary navigation">
         <div class="header-brand">
-          <a href="${escapeHtml(logoHref)}"><img class="brand-icon" src="${escapeHtml(iconHref)}" alt="" aria-hidden="true" /><span class="logo-text">${escapeHtml(title)}</span></a>
+          <a href="${escapeHtml(logoHref)}"><img class="brand-icon" src="${escapeHtml(iconHref)}" alt="" aria-hidden="true" /><span class="logo-text">${escapeHtml(brandedTitle)}</span></a>
           ${subtitleHtml ? `<div class="muted header-subtitle">${subtitleHtml}</div>` : ''}
         </div>
         <div class="header-actions">

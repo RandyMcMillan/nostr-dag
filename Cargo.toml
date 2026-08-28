@@ -5,6 +5,7 @@ edition = "2021"
 repository = "https://github.com/RandyMcMillan/nostr-dag"
 license = "MIT"
 description = "DAG-based optimistic consensus for Nostr"
+build = "build.rs"
 
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = false

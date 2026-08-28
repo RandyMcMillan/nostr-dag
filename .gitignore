@@ -6,3 +6,5 @@ Cargo.lock
 nostr-dag.db
 nostr-dag.db-shm
 nostr-dag.db-wal
+
+demo/shared/app-version.generated.mjs
