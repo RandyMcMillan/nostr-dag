@@ -1080,13 +1080,19 @@
       try {
         setRepoStatus(repo.name, 'refreshing...');
         if (route) setRepoHealth(repo.name, 'checking');
+        setRepoPing(repo.name, null);
+        const probeStart = performance.now();
         const probe = route ? probeRemoteHost(repo).catch(() => false) : null;
         await ensureRepo(repo, route);
         footer.log('git', `refreshOneRepo ensure done ${repo.name}`, 'debug');
         const data = await readRepo(repo, route);
         cacheRepoData(repo.name, data);
         footer.log('git', `refreshOneRepo read done ${repo.name}`, 'debug');
-        if (route) setRepoHealth(repo.name, (await probe) ? 'available' : 'unavailable');
+        if (route) {
+          const probeOk = await probe;
+          setRepoPing(repo.name, probeOk ? Math.round(performance.now() - probeStart) : null);
+          setRepoHealth(repo.name, probeOk ? 'available' : 'unavailable');
+        }
         renderApp(repos.map((entry) => {
           const cache = loadRepoCache();
           return entry.name === repo.name ? data : (cache[entry.name] || emptyRepoData());
@@ -1095,6 +1101,7 @@
         footer.log('git', `refreshOneRepo complete ${repo.name}`, 'debug');
       } catch (e) {
         if (route) setRepoHealth(repo.name, 'unavailable');
+        setRepoPing(repo.name, null);
         setRepoStatus(repo.name, `refresh failed: ${e.message}`);
         footer.log('git', `refresh failed: ${e.message}`, 'error', 'unavailable');
         footer.log('git', `viewer failed: ${e.message}`, 'warn', 'unavailable');
@@ -1123,13 +1130,17 @@
           const repoRoute = route.repo && repo.name === route.repo.name ? route : null;
           try {
             footer.log('git', `probing ${repo.name}`, 'trace');
+            setRepoPing(repo.name, null);
+            const probeStart = performance.now();
             const probe = probeRemoteHost(repo).catch(() => false);
             footer.log('git', `ensuring ${repo.name}`, 'debug');
             await ensureRepo(repo, repoRoute);
             footer.log('git', `reading ${repo.name}`, 'trace');
             const data = await readRepo(repo, repoRoute);
             cacheRepoData(repo.name, data);
-            setRepoHealth(repo.name, (await probe) ? 'available' : 'unavailable');
+            const probeOk = await probe;
+            setRepoPing(repo.name, probeOk ? Math.round(performance.now() - probeStart) : null);
+            setRepoHealth(repo.name, probeOk ? 'available' : 'unavailable');
             setRepoStatus(repo.name, 'ready');
             footer.log('git', `ready ${repo.name}`, 'info', 'available');
             dataByRepo.set(repo.name, data);
@@ -1143,6 +1154,7 @@
             footer.log('git', `${repo.name} failed: ${e.message}`, 'error', 'unavailable');
             setRepoStatus(repo.name, `refresh failed: ${e.message}`);
             setRepoHealth(repo.name, 'unavailable');
+            setRepoPing(repo.name, null);
           }
         }
         const cache = loadRepoCache();
