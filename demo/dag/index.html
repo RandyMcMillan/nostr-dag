@@ -125,9 +125,21 @@
     import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     import { scheduleAfterPaint, yieldToBrowser } from '../shared/async-lifecycle.mjs';
     import { stampBridgeRoundTripTag } from '../shared/bridge-roundtrip.mjs';
-    import { createSharedLibp2pStack, DEFAULT_BOOTSTRAP_PEERS } from '../shared/libp2p-stack.mjs';
     import { serializeDagBridgeEnvelope } from '../shared/cross-protocol-broadcast.mjs';
     import { getNetworkUnixTime } from '../shared/network-time.mjs';
+    // libp2p-stack loads many modules from esm.sh; use dynamic import so a network
+    // failure does not break the entire DAG page.
+    let createSharedLibp2pStack = null;
+    let DEFAULT_BOOTSTRAP_PEERS = [];
+    let deterministicPeerIdFromSeed = null;
+    try {
+      const libp2pMod = await import('../shared/libp2p-stack.mjs');
+      createSharedLibp2pStack = libp2pMod.createSharedLibp2pStack;
+      DEFAULT_BOOTSTRAP_PEERS = libp2pMod.DEFAULT_BOOTSTRAP_PEERS || [];
+      deterministicPeerIdFromSeed = libp2pMod.deterministicPeerIdFromSeed;
+    } catch (libp2pImportErr) {
+      console.warn('[dag] libp2p-stack import failed:', libp2pImportErr);
+    }
     import {
       buildAttestDraft,
       buildIssueDraft,
@@ -403,13 +415,28 @@
     // Step 13: start the optional libp2p node after the page is usable.
     async function initLibp2pNode() {
       window.__sharedFooter?.log('libp2p', 'bootstrapping libp2p node', 'debug', 'checking');
+      const seed = PARTICIPANT_KEY_LABELS[1] || 'nostr-dag-wasm';
+      // Show deterministic peer ID immediately so the UI is never blank.
+      if (deterministicPeerIdFromSeed) {
+        try {
+          const peerId = await deterministicPeerIdFromSeed(seed);
+          setLibp2pStatus(peerId);
+          window.__sharedFooter?.log('libp2p', `deterministic peer ${peerId}`, 'debug', 'checking');
+        } catch (idErr) {
+          window.__sharedFooter?.log('libp2p', `peer id calc failed: ${idErr.message}`, 'warn', 'checking');
+        }
+      }
+      if (!createSharedLibp2pStack) {
+        window.__sharedFooter?.log('libp2p', 'libp2p stack unavailable (import failed)', 'warn', 'unavailable');
+        return;
+      }
       try {
         // The DAG page is a bridge: every event is published to relays and
         // mirrored onto libp2p pubsub so the bridge page can fan it back out.
         dagLibp2pNodePromise = (async () => {
           const { node, bootstrapPeers } = await createSharedLibp2pStack({
             bootstrapPeers: DEFAULT_BOOTSTRAP_PEERS,
-            deterministicKeySeed: PARTICIPANT_KEY_LABELS[1] || 'nostr-dag-wasm',
+            deterministicKeySeed: seed,
             onLog(level, text, state) {
               if (String(text || '').includes('peer connected:')) return;
               window.__sharedFooter?.log('libp2p', text, level, state);
@@ -428,7 +455,6 @@
         })();
         await dagLibp2pNodePromise;
       } catch (e) {
-        setLibp2pStatus('');
         window.__sharedFooter?.log('libp2p', `bootstrap failed: ${e.message}`, 'error', 'unavailable');
       }
     }
