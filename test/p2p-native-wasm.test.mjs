@@ -441,6 +441,7 @@ function createStaticServer(bareRepoBundleBytes = null, bareRepoRelayUrls = []) 
       window.__bareRepoReconstructionSource = '';
       window.__bareRepoReconstructedSha256 = '';
       window.__bareRepoReconstructedBytes = 0;
+      window.__bareRepoReconstructedBundleB64 = '';
 
       const DEFAULT_RELAYS = ${JSON.stringify(bareRepoRelayUrls.length ? bareRepoRelayUrls : ['wss://nos.lol'])};
       const relayPool = new SimplePool();
@@ -540,6 +541,15 @@ function createStaticServer(bareRepoBundleBytes = null, bareRepoRelayUrls = []) 
         return out;
       };
 
+      const bytesToBase64 = (bytes) => {
+        let binary = '';
+        const chunkSize = 0x8000;
+        for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+          binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+        }
+        return btoa(binary);
+      };
+
       function createTransferCollector(rootId, expectedTotalSlices, expectedTotalBytes) {
         const manifest = { rootId, totalSlices: expectedTotalSlices, totalBytes: expectedTotalBytes, eventId: '' };
         const slices = new Map();
@@ -560,6 +570,7 @@ function createStaticServer(bareRepoBundleBytes = null, bareRepoRelayUrls = []) 
           window.__bareRepoReconstructionSource = source;
           window.__bareRepoReconstructedSha256 = sha256;
           window.__bareRepoReconstructedBytes = bytes.length;
+          window.__bareRepoReconstructedBundleB64 = bytesToBase64(bytes);
           resolve({
             source,
             sha256,
@@ -697,16 +708,25 @@ function createStaticServer(bareRepoBundleBytes = null, bareRepoRelayUrls = []) 
 
         const publishTransferEvent = async (event) => {
           const bridgePayload = encodeBridgeMessage(event, 'nostr->libp2p', [], { topic: '${BRIDGE_TOPIC}' });
-          await Promise.all([
+          const operations = [
             node.services.pubsub.publish('${BRIDGE_TOPIC}', new TextEncoder().encode(bridgePayload)),
-            Promise.allSettled(DEFAULT_RELAYS.map((relay) => relayPool.publish([relay], event))),
-          ]);
+          ];
+          if (!relayQueryStop) {
+            operations.push(Promise.allSettled(DEFAULT_RELAYS.map((relay) => relayPool.publish([relay], event))));
+          }
+          await Promise.all(operations);
         };
 
         let relayQueryStop = false;
         let relayQueryWake = null;
+        let relayQueryCloser = null;
         const stopRelayQuery = () => {
           relayQueryStop = true;
+          try {
+            relayQueryCloser?.close?.('reconstruction complete');
+          } catch {
+            // best effort only
+          }
           if (relayQueryWake) {
             relayQueryWake();
             relayQueryWake = null;
@@ -727,11 +747,24 @@ function createStaticServer(bareRepoBundleBytes = null, bareRepoRelayUrls = []) 
                 lastLoggedRemaining = remainingSeconds;
                 console.log('[native-wasm:bare:trace] relay query countdown ' + remainingSeconds + 's remaining');
               }
-              const events = await relayPool.querySync(
-                DEFAULT_RELAYS,
-                { ids: queryIds, limit: queryIds.length },
-                { maxWait: 2000, label: 'bare-repo-transfer' },
-              );
+              const events = [];
+              await new Promise((resolve) => {
+                relayQueryCloser = relayPool.subscribeEose(
+                  DEFAULT_RELAYS,
+                  { ids: queryIds, limit: queryIds.length },
+                  {
+                    maxWait: 2000,
+                    label: 'bare-repo-transfer',
+                    onevent(event) {
+                      events.push(event);
+                    },
+                    onclose() {
+                      relayQueryCloser = null;
+                      resolve();
+                    },
+                  },
+                );
+              });
               for (const event of events || []) {
                 if (!event?.id || seenIds.has(event.id)) continue;
                 seenIds.add(event.id);
@@ -769,10 +802,12 @@ function createStaticServer(bareRepoBundleBytes = null, bareRepoRelayUrls = []) 
           const sliceEvent = sliceEvents[index];
           const slice = slices[index];
           console.log('[native-wasm:bare:trace] signing slice ' + slice.seq + '/' + slice.totalSlices);
+          if (relayQueryStop || window.__bareRepoReconstructed) break;
           console.log('[native-wasm:bare:trace] broadcasting slice event ' + sliceEvent.id);
           await publishTransferEvent(sliceEvent);
           console.log('[native-wasm:bare:trace] slice broadcast complete ' + slice.seq);
           window.__bareRepoSentKinds.push(sliceEvent.kind);
+          if (relayQueryStop || window.__bareRepoReconstructed) break;
         }
         window.__bareRepoSentSliceCount = sliceEvents.length;
         window.__bareRepoPublished = true;
@@ -1283,6 +1318,7 @@ test('native peer and wasm peer exchange a real bare-repo nip-pip blob in Chromi
       reconstructionSource: window.__bareRepoReconstructionSource || '',
       reconstructedSha256: window.__bareRepoReconstructedSha256 || '',
       reconstructedBytes: window.__bareRepoReconstructedBytes || 0,
+      reconstructedBundleB64: window.__bareRepoReconstructedBundleB64 || '',
       error: window.__p2pError || '',
     }));
 
@@ -1298,6 +1334,15 @@ test('native peer and wasm peer exchange a real bare-repo nip-pip blob in Chromi
     assert.ok(['relay', 'libp2p'].includes(result.reconstructionSource), 'browser should reconstruct from relay or libp2p');
     assert.equal(result.reconstructedSha256, bareRepoSha256, 'reconstructed bundle sha256 should match the source bundle');
     assert.equal(result.reconstructedBytes, bareRepo.bundleBytes.length, 'reconstructed byte length should match the source bundle');
+    assert.ok(result.reconstructedBundleB64, 'browser should expose the reconstructed bundle bytes');
+
+    const reconstructedBundlePath = path.join(bareRepo.work, 'reconstructed.bundle');
+    const reconstructedCloneDir = path.join(bareRepo.work, 'reconstructed-clone');
+    writeFileSync(reconstructedBundlePath, Buffer.from(result.reconstructedBundleB64, 'base64'));
+    gitRun(['clone', reconstructedBundlePath, reconstructedCloneDir], bareRepo.work);
+    const clonedHead = gitRun(['rev-parse', 'HEAD'], reconstructedCloneDir);
+    assert.equal(clonedHead, bareRepo.head, 'cloned repo head should match the source repo head');
+    console.log(`[native-wasm:test] cloned reconstructed bundle to disk ${reconstructedCloneDir}`);
     console.log(
       `[native-wasm:test] live bare-repo success peerId=${result.peerId} source=${result.reconstructionSource} manifest=${result.sentManifestId} slices=${result.sentSliceCount}`,
     );
