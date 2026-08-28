@@ -117,19 +117,49 @@ function normalizeRelayUrl(url) {
   }
 }
 
-function relayProbeHttpUrl(relayUrl) {
-  const value = normalizeRelayUrl(relayUrl);
-  if (!value) return '';
-  try {
-    const parsed = new URL(value);
-    if (parsed.hostname.endsWith('.onion')) return '';
-    if (parsed.protocol === 'ws:') parsed.protocol = 'http:';
-    if (parsed.protocol === 'wss:') parsed.protocol = 'https:';
-    if (!['http:', 'https:'].includes(parsed.protocol)) return '';
-    return parsed.toString().replace(/\/$/, '');
-  } catch {
-    return '';
-  }
+function probeRelayHandshake(relayUrl) {
+  return new Promise((resolve) => {
+    const wsUrl = normalizeRelayUrl(relayUrl);
+    if (!wsUrl || wsUrl.includes('.onion')) {
+      resolve(false);
+      return;
+    }
+    const WebSocketCtor = globalThis.WebSocket;
+    if (typeof WebSocketCtor !== 'function') {
+      resolve(false);
+      return;
+    }
+    let settled = false;
+    let socket = null;
+    const finish = (ok) => {
+      if (settled) return;
+      settled = true;
+      try {
+        socket?.close?.();
+      } catch {
+        // best effort only
+      }
+      resolve(ok);
+    };
+    try {
+      socket = new WebSocketCtor(wsUrl);
+      const timeout = setTimeout(() => finish(false), 10_000);
+      socket.addEventListener('open', () => {
+        clearTimeout(timeout);
+        finish(true);
+      });
+      socket.addEventListener('error', () => {
+        clearTimeout(timeout);
+        finish(false);
+      });
+      socket.addEventListener('close', () => {
+        clearTimeout(timeout);
+        finish(false);
+      });
+    } catch {
+      finish(false);
+    }
+  });
 }
 
 async function crawlRelayCandidates() {
@@ -208,48 +238,6 @@ async function crawlRelayCandidates() {
 
   return [...found];
 }
-
-function probeRelayHandshake(relayUrl) {
-  return new Promise((resolve) => {
-    const probeUrl = relayProbeHttpUrl(relayUrl);
-    if (!probeUrl) {
-      resolve(false);
-      return;
-    }
-    const child = spawn(
-      'curl',
-      [
-        '-i',
-        '-sS',
-        '-m',
-        '10',
-        '-H', 'Connection: Upgrade',
-        '-H', 'Upgrade: websocket',
-        '-H', 'Sec-WebSocket-Version: 13',
-        '-H', 'Sec-WebSocket-Key: x3JJHMbDL1EzLkh9GBhXDw==',
-        `${probeUrl}/`,
-      ],
-      { stdio: ['ignore', 'pipe', 'pipe'] },
-    );
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (chunk) => {
-      stdout += chunk.toString('utf8');
-    });
-    child.stderr.on('data', (chunk) => {
-      stderr += chunk.toString('utf8');
-    });
-    child.on('error', () => resolve(false));
-    child.on('close', (code) => {
-      const ok = /101 Switching Protocols/i.test(stdout);
-      if (!ok && stderr) {
-        console.log(`[native-wasm:test] relay probe failed ${relayUrl}: ${stderr.trim()}`);
-      }
-      resolve(ok);
-    });
-  });
-}
-
 async function discoverHealthyRelays() {
   const candidates = await crawlRelayCandidates();
   const uniqueCandidates = [...new Set(candidates)];
