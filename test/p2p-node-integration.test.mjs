@@ -7,6 +7,7 @@ const WASM_LIKE_BOOTSTRAP =
   '/dns4/example.com/tcp/443/wss/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN';
 const NATIVE_LIKE_BOOTSTRAP =
   '/ip4/127.0.0.1/tcp/4001/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN';
+const DETERMINISTIC_NATIVE_PEER_ID = '12D3KooWSL8rLNFrwVGVBJbHWxXQfFTfVtYnozURrqBFYBMfrniH';
 
 function runNativePeer(bootstrap = WASM_LIKE_BOOTSTRAP, extraCommands = []) {
   return new Promise((resolve, reject) => {
@@ -102,6 +103,7 @@ test('native p2p node publishes a nip-pip blob on demand', async () => {
   const result = await runNativePeer(WASM_LIKE_BOOTSTRAP, ['/pip hello nip-pip network']);
 
   assert.equal(result.code, 0, `stderr:\n${result.stderr}\nstdout:\n${result.stdout}`);
+  assert.match(result.stdout, new RegExp(`READY peer_id=${DETERMINISTIC_NATIVE_PEER_ID}\\b`));
   assert.match(result.stdout, /PIP publishing root_id=/);
   assert.match(result.stdout, /PIP manifest event=/);
   assert.match(result.stdout, /PIP publish attempted root_id=/);
