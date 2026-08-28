@@ -98,6 +98,7 @@ function createStaticServer() {
 <html>
   <head>
     <meta charset="utf-8">
+    <link rel="icon" href="/site/favicon.ico">
     <title>waiting</title>
   </head>
   <body>
@@ -175,6 +176,14 @@ function createStaticServer() {
 </html>`;
           res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
           res.end(html);
+          return;
+        }
+
+        if (url.pathname === '/favicon.ico') {
+          const faviconPath = path.join(REPO_ROOT, 'site', 'favicon.ico');
+          const body = await readFile(faviconPath);
+          res.writeHead(200, { 'content-type': 'image/x-icon' });
+          res.end(body);
           return;
         }
 
