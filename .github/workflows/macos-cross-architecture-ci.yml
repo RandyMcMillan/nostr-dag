@@ -1,0 +1,120 @@
+name: macOS Cross-Architecture CI
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+    inputs:
+      runner_target:
+        description: 'Select runner architecture to build'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - 'all'
+          - 'arm64-only'
+          - 'x86_64-only'
+      enable_debug:
+        description: 'Enable verbose logging / debug outputs'
+        required: false
+        default: false
+        type: boolean
+      custom_cargo_args:
+        description: 'Additional flags for cargo build (e.g. --release)'
+        required: false
+        default: '--release'
+        type: string
+
+jobs:
+  build-macos:
+    name: Build on ${{ matrix.runner }} (${{ matrix.target-arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Active Runners
+          - runner: macos-latest
+            target-arch: arm64
+          - runner: macos-26
+            target-arch: arm64
+          - runner: macos-26-intel
+            target-arch: x86_64
+          - runner: macos-15
+            target-arch: arm64
+          - runner: macos-15-intel
+            target-arch: x86_64
+
+          # Deprecated / Legacy Standard Runners
+          - runner: macos-14
+            target-arch: arm64
+          - runner: macos-13
+            target-arch: x86_64
+          - runner: macos-12
+            target-arch: x86_64
+
+          # Larger Runners (Org / Enterprise)
+          - runner: macos-26-large
+            target-arch: x86_64
+          - runner: macos-26-xlarge
+            target-arch: arm64
+          - runner: macos-15-large
+            target-arch: x86_64
+          - runner: macos-15-xlarge
+            target-arch: arm64
+
+    if: |
+      github.event_name != 'workflow_dispatch' ||
+      github.event.inputs.runner_target == 'all' ||
+      (github.event.inputs.runner_target == 'arm64-only' && matrix.target-arch == 'arm64') ||
+      (github.event.inputs.runner_target == 'x86_64-only' && matrix.target-arch == 'x86_64')
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Display Dispatch Inputs & Host Architecture
+        run: |
+          echo "=== Workflow Dispatch Options ==="
+          echo "Runner Target Input: ${{ inputs.runner_target }}"
+          echo "Debug Mode Input:   ${{ inputs.enable_debug }}"
+          echo "Cargo Flags Input:  ${{ inputs.custom_cargo_args }}"
+          echo ""
+          echo "=== OS & Architecture Details ==="
+          sw_vers
+          echo "Kernel architecture: $(uname -m)"
+          echo "Machine processor:   $(uname -p)"
+
+      - name: Verify Architecture Expectation
+        run: |
+          EXPECTED="${{ matrix.target-arch }}"
+          ACTUAL="$(uname -m)"
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "Error: Expected $EXPECTED but running on $ACTUAL"
+            exit 1
+          else
+            echo "Successfully running on $ACTUAL as expected."
+          fi
+
+      - name: Print Build Environment Tools
+        run: |
+          echo "Xcode Version:"
+          xcode-select -p
+          xcodebuild -version
+
+          echo "Compiler path:"
+          which clang
+          clang --version
+
+      - name: Run Cargo Build
+        run: |
+          if [ "${{ inputs.enable_debug }}" = "true" ]; then
+            set -x
+            export RUST_BACKTRACE=1
+          fi
+
+          CARGO_FLAGS="${{ inputs.custom_cargo_args || '--release' }}"
+          echo "Executing: cargo build $CARGO_FLAGS"
+          cargo build $CARGO_FLAGS
