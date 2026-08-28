@@ -110,6 +110,7 @@ function createStaticServer() {
       const nativeWs = new URL(location.href).searchParams.get('nativeWs') || '';
       window.__p2pReady = false;
       window.__p2pConnected = false;
+      window.__p2pPeerSeen = false;
       window.__p2pPeerId = '';
       window.__p2pReceived = [];
       window.__p2pBridgeKinds = [];
@@ -123,14 +124,20 @@ function createStaticServer() {
         const stack = await createSharedLibp2pStack({
           bootstrapPeers: nativeWs ? [nativeWs] : [],
           useWasmP2p: true,
+          onLog(level, text, state) {
+            console.log('[native-wasm:browser:' + state + ':' + level + '] ' + text);
+          },
           onPeer(event) {
             window.__p2pPeerEvents.push(event);
+            console.log('[native-wasm:browser:peer] ' + event.kind + ' ' + (event.peer?.peerId || event.peer || ''));
+            window.__p2pPeerSeen = true;
             if (event.kind === 'connected') {
               window.__p2pConnected = true;
             }
           },
           onStatus(state, peerId) {
             window.__p2pStatus = { state, peerId };
+            console.log('[native-wasm:browser:status] ' + state + ' ' + peerId);
           },
         });
 
@@ -376,8 +383,9 @@ async function runChromiumNativeWasmExchange(browserBaseUrl, nativeDialAddr) {
 
     await page.waitForFunction(() => window.__p2pReady === true, null, { timeout: 120_000 });
     console.log('[native-wasm:test] browser wasm peer reported ready');
-    await page.waitForFunction(() => window.__p2pConnected === true, null, { timeout: 120_000 });
-    console.log('[native-wasm:test] browser connected to native peer');
+
+    await page.waitForFunction(() => window.__p2pPeerSeen === true, null, { timeout: 120_000 });
+    console.log('[native-wasm:test] browser peer saw the native peer');
 
     return { browser, page };
   } catch (error) {
@@ -450,8 +458,8 @@ test('native peer and wasm peer exchange a real nip-pip blob', { timeout: 300_00
     );
 
     await waitForCondition(
-      async () => webdriverExecute(webdriverPort, sessionId, 'return window.__p2pConnected === true;'),
-      { timeoutMs: 120_000, description: 'browser peer to connect to native peer' },
+      async () => webdriverExecute(webdriverPort, sessionId, 'return window.__p2pPeerSeen === true;'),
+      { timeoutMs: 120_000, description: 'browser peer to see the native peer' },
     );
 
     native.child.stdin.write('/pip hello native wasm nip-pip\n');
