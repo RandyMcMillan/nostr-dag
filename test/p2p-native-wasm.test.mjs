@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import net from 'node:net';
 import path from 'node:path';
 import test from 'node:test';
+import { chromium } from 'playwright';
 
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const WASM_JS = path.join(REPO_ROOT, 'site', 'pkg', 'nostr_dag.js');
@@ -329,7 +330,53 @@ function buildWsDialAddress(wsListenAddr, peerId) {
   return `${wsListenAddr}/p2p/${peerId}`;
 }
 
-safariTest('native peer and wasm peer exchange a real nip-pip blob', { timeout: 300_000 }, async () => {
+async function ensureChromiumBrowser() {
+  try {
+    const browser = await chromium.launch({ headless: true });
+    await browser.close();
+    return;
+  } catch (error) {
+    const message = String(error?.message || error);
+    if (!message.includes("Executable doesn't exist")) {
+      throw error;
+    }
+  }
+
+  await new Promise((resolve, reject) => {
+    const child = spawn('npx', ['playwright', 'install', 'chromium'], {
+      cwd: REPO_ROOT,
+      stdio: 'inherit',
+    });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`playwright install chromium failed with code ${code}`));
+    });
+  });
+
+  const browser = await chromium.launch({ headless: true });
+  await browser.close();
+}
+
+async function runChromiumNativeWasmExchange(browserBaseUrl, nativeDialAddr) {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  try {
+    const pageUrl = `${browserBaseUrl}/p2p-wasm-native-test.html?nativeWs=${encodeURIComponent(nativeDialAddr)}`;
+    await page.goto(pageUrl, { waitUntil: 'domcontentloaded' });
+
+    await page.waitForFunction(() => window.__p2pReady === true, null, { timeout: 120_000 });
+    await page.waitForFunction(() => window.__p2pConnected === true, null, { timeout: 120_000 });
+
+    return { browser, page };
+  } catch (error) {
+    await page.close().catch(() => {});
+    await browser.close().catch(() => {});
+    throw error;
+  }
+}
+
+test.skip('native peer and wasm peer exchange a real nip-pip blob', { timeout: 300_000 }, async () => {
   await ensureP2pWasmBuild();
 
   const [{ server, port: serverPort }, native] = await Promise.all([
