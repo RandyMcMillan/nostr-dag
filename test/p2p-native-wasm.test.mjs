@@ -1264,9 +1264,11 @@ test('native peer and wasm peer exchange a real nip-pip blob', { timeout: 300_00
 
   await ensureP2pWasmBuild();
 
+  const bootstrap = await startBootstrapPeer();
+  const bootstrapDialAddr = buildWsDialAddress(bootstrap.wsListenAddr, bootstrap.peerId);
   const [{ server, port: serverPort }, native] = await Promise.all([
     createStaticServer(),
-    startNativePeer(),
+    startNativePeer({ bootstrapPeers: bootstrapDialAddr }),
   ]);
 
   const webdriverPort = await getFreePort();
@@ -1328,6 +1330,8 @@ test('native peer and wasm peer exchange a real nip-pip blob', { timeout: 300_00
       { timeoutMs: 120_000, description: 'browser peer id to match the deterministic seed' },
     );
 
+    console.log('[native-wasm:test] waiting 3 seconds before publishing /pip');
+    await new Promise((resolve) => setTimeout(resolve, 3000));
     native.child.stdin.write('/pip hello native wasm nip-pip\n');
 
     await waitForCondition(
@@ -1358,6 +1362,7 @@ test('native peer and wasm peer exchange a real nip-pip blob', { timeout: 300_00
     assert.ok(result.receivedCount >= 2, 'browser should receive at least manifest and slice messages');
   } finally {
     await cleanup();
+    bootstrap.child.kill('SIGTERM');
     if (sessionId) {
       await webdriverDeleteSession(webdriverPort, sessionId).catch(() => {});
     }
@@ -1369,9 +1374,11 @@ test('native peer and wasm peer exchange a real nip-pip blob in Chromium', { tim
   await ensureP2pWasmBuild();
   await ensureChromiumBrowser();
 
+  const bootstrap = await startBootstrapPeer();
+  const bootstrapDialAddr = buildWsDialAddress(bootstrap.wsListenAddr, bootstrap.peerId);
   const [{ server, port: serverPort }, native] = await Promise.all([
     createStaticServer(),
-    startNativePeer(),
+    startNativePeer({ bootstrapPeers: bootstrapDialAddr }),
   ]);
 
   const browserBaseUrl = `http://127.0.0.1:${serverPort}`;
@@ -1381,6 +1388,8 @@ test('native peer and wasm peer exchange a real nip-pip blob in Chromium', { tim
 
   try {
     console.log('[native-wasm:test] sending /pip command to native peer');
+    console.log('[native-wasm:test] waiting 3 seconds before publishing /pip');
+    await new Promise((resolve) => setTimeout(resolve, 3000));
     native.child.stdin.write('/pip hello native wasm nip-pip\n');
 
     await page.waitForFunction(
@@ -1411,6 +1420,7 @@ test('native peer and wasm peer exchange a real nip-pip blob in Chromium', { tim
     await page.close().catch(() => {});
     await browser.close().catch(() => {});
     native.child.kill('SIGTERM');
+    bootstrap.child.kill('SIGTERM');
     server.close();
   }
 });
