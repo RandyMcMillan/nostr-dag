@@ -40,6 +40,12 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import {
+  finalizeEvent,
+  generateSecretKey,
+  getPublicKey,
+  verifyEvent,
+} from 'nostr-tools/pure';
 
 // ---------------------------------------------------------------------------
 // PIP constants (mirrors src/p2p.rs)
@@ -69,6 +75,19 @@ const DEPTH_LEVELS = 10;
  */
 function sha256Hex(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
+}
+
+function makeSignedTransferEvent(secretKey, kind, content, tags = []) {
+  const unsigned = {
+    kind,
+    created_at: Math.floor(Date.now() / 1000),
+    pubkey: getPublicKey(secretKey),
+    content,
+    tags,
+  };
+  const event = finalizeEvent(unsigned, secretKey);
+  assert.equal(verifyEvent(event), true, 'transfer event signature must verify');
+  return event;
 }
 
 function gitRun(args, cwd, extra = {}) {
@@ -237,14 +256,35 @@ function reconstruct(slices) {
 }
 
 function encodePayloadAsTransferEvents(rootId, payload, sliceSize) {
+  const secretKey = generateSecretKey();
   const slices = packetize(rootId, payload, sliceSize);
-  const manifest = buildManifestEnvelope({
-    rootId,
-    totalBytes: payload.length,
-    totalSlices: slices.length,
-  });
-  const sliceEvents = slices.map((slice) => buildSliceEnvelope(slice, manifest.id ?? 'manifest-id'));
-  return { manifest, sliceEvents, slices };
+  const manifestEvent = makeSignedTransferEvent(
+    secretKey,
+    MANIFEST_KIND,
+    JSON.stringify({
+      protocol: TRANSFER_PROTOCOL,
+      version: TRANSFER_VERSION,
+      type: 'manifest',
+      root_id: rootId,
+      total_bytes: payload.length,
+      total_slices: slices.length,
+    }),
+  );
+  const sliceEvents = slices.map((slice) => makeSignedTransferEvent(
+    secretKey,
+    SLICE_KIND,
+    JSON.stringify({
+      protocol: TRANSFER_PROTOCOL,
+      version: TRANSFER_VERSION,
+      type: 'slice',
+      root_id: slice.rootId,
+      seq: slice.seq,
+      total_slices: slice.totalSlices,
+      data: [...slice.data],
+    }),
+    [['e', manifestEvent.id]],
+  ));
+  return { manifestEvent, sliceEvents, slices };
 }
 
 /**
@@ -268,70 +308,37 @@ function buildManifestEnvelope(manifest) {
   };
 }
 
-/**
- * Build a PIP transfer-slice envelope (kind 39079).
- *
- * The slice data is base64-encoded so it is safe inside a JSON string,
- * mirroring the Rust implementation which base64-encodes slice bytes.
- *
- * @param {{ rootId: string, seq: number, totalSlices: number, data: Uint8Array }} slice
- * @param {string} manifestId  event-id of the manifest event (for `e` tag)
- * @returns {object}
- */
-function buildSliceEnvelope(slice, manifestId) {
-  const dataB64 = Buffer.from(slice.data).toString('base64');
-  return {
-    kind: SLICE_KIND,
-    content: JSON.stringify({
-      protocol:     TRANSFER_PROTOCOL,
-      version:      TRANSFER_VERSION,
-      type:         'slice',
-      root_id:      slice.rootId,
-      seq:          slice.seq,
-      total_slices: slice.totalSlices,
-      data:         dataB64,
-    }),
-    tags: [['e', manifestId]],
-  };
-}
-
-/**
- * Parse a PIP manifest or slice envelope.
- *
- * @param {object} envelope
- * @returns {{ type: 'manifest', manifest: object } | { type: 'slice', slice: object }}
- */
-function parseEnvelope(envelope) {
-  const payload = JSON.parse(envelope.content);
+function parseTransferEvent(event) {
+  const payload = JSON.parse(event.content);
   assert.equal(payload.protocol, TRANSFER_PROTOCOL, 'protocol mismatch');
-  assert.equal(payload.version,  TRANSFER_VERSION,  'version mismatch');
+  assert.equal(payload.version, TRANSFER_VERSION, 'version mismatch');
 
-  if (envelope.kind === MANIFEST_KIND) {
+  if (event.kind === MANIFEST_KIND) {
     assert.equal(payload.type, 'manifest', 'expected manifest type');
     return {
       type: 'manifest',
       manifest: {
-        rootId:      payload.root_id,
-        totalBytes:  payload.total_bytes,
+        rootId: payload.root_id,
+        totalBytes: payload.total_bytes,
         totalSlices: payload.total_slices,
       },
     };
   }
 
-  if (envelope.kind === SLICE_KIND) {
+  if (event.kind === SLICE_KIND) {
     assert.equal(payload.type, 'slice', 'expected slice type');
     return {
       type: 'slice',
       slice: {
-        rootId:      payload.root_id,
-        seq:         payload.seq,
+        rootId: payload.root_id,
+        seq: payload.seq,
         totalSlices: payload.total_slices,
-        data:        new Uint8Array(Buffer.from(payload.data, 'base64')),
+        data: new Uint8Array(payload.data),
       },
     };
   }
 
-  throw new Error(`unsupported kind: ${envelope.kind}`);
+  throw new Error(`unsupported kind: ${event.kind}`);
 }
 
 // ---------------------------------------------------------------------------
