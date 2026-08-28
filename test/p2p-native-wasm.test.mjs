@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { access, readFile } from 'node:fs/promises';
-import { constants as fsConstants } from 'node:fs';
-import { spawn } from 'node:child_process';
+import { constants as fsConstants, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { tmpdir } from 'node:os';
 import net from 'node:net';
 import path from 'node:path';
 import test from 'node:test';
@@ -13,6 +14,10 @@ const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const WASM_JS = path.join(REPO_ROOT, 'site', 'pkg', 'nostr_dag.js');
 const WASM_WASM = path.join(REPO_ROOT, 'site', 'pkg', 'nostr_dag_bg.wasm');
 const BRIDGE_TOPIC = 'nostr-dag-bridge';
+const TRANSFER_PROTOCOL = 'nostr-dag-transfer';
+const TRANSFER_VERSION = 1;
+const TRANSFER_MANIFEST_KIND = 39078;
+const TRANSFER_SLICE_KIND = 39079;
 
 const SAFARI_CAPABILITIES = {
   alwaysMatch: {
@@ -85,6 +90,48 @@ function contentTypeFor(filePath) {
   if (filePath.endsWith('.wasm')) return 'application/wasm';
   if (filePath.endsWith('.js')) return 'text/javascript; charset=utf-8';
   return 'application/octet-stream';
+}
+
+function gitRun(args, cwd) {
+  const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
+  if (result.status !== 0) {
+    throw new Error(
+      `git ${args.join(' ')} failed in ${cwd}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+    );
+  }
+  return result.stdout.trim();
+}
+
+function createBareRepoBundle() {
+  const work = mkdtempSync(path.join(tmpdir(), 'nostr-dag-bare-'));
+  const srcDir = path.join(work, 'src-repo');
+  mkdirSync(srcDir);
+
+  const depth = 10;
+  try {
+    gitRun(['init', '-b', 'main'], srcDir);
+    gitRun(['config', 'user.email', 'pip-test@nostr-dag'], srcDir);
+    gitRun(['config', 'user.name', 'PIP Test'], srcDir);
+
+    for (let level = 0; level < depth; level++) {
+      const file = path.join(srcDir, `level-${String(level).padStart(3, '0')}.txt`);
+      writeFileSync(
+        file,
+        `PIP git-bare transfer depth level ${level}\nroot_id: live-bare-repo\ndepth: ${depth}\nlevel: ${level}\n`,
+      );
+      gitRun(['add', '-A'], srcDir);
+      gitRun(['commit', '-m', `depth level ${level}: add level-${String(level).padStart(3, '0')}.txt`], srcDir);
+    }
+
+    const head = gitRun(['rev-parse', 'HEAD'], srcDir);
+    const bundlePath = path.join(work, 'live.bundle');
+    gitRun(['bundle', 'create', bundlePath, 'main'], srcDir);
+    const bundleBytes = new Uint8Array(readFileSync(bundlePath));
+    return { work, srcDir, head, bundleBytes, bundlePath };
+  } catch (error) {
+    rmSync(work, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 function createStaticServer() {
