@@ -492,6 +492,13 @@ pub fn decode_bridge_message(message: &str) -> Result<nostr::Event, TransferErro
 mod transfer_tests {
     use super::*;
 
+    fn print_report(title: &str, lines: &[String]) {
+        println!("[PIP] === {title} ===");
+        for line in lines {
+            println!("[PIP]   {line}");
+        }
+    }
+
     #[test]
     fn packetize_and_reconstruct_payload_roundtrip() {
         let original = b"nostr dag p2p transfer payload";
@@ -1016,26 +1023,23 @@ mod git_bare_pip_tests {
         fs::create_dir_all(&src_dir).unwrap();
 
         let original_head = build_repo_with_depth(&src_dir, DEPTH_LEVELS);
-        println!("[PIP] created source repo at {}", src_dir.display());
+        println!("[PIP] === created source repo ===");
+        println!("[PIP]   path {}", src_dir.display());
         print_tree(&src_dir, "source repo");
 
         let bundle_path = work.path().join("verbose.bundle");
         let bundle_bytes = create_bundle(&src_dir, &bundle_path);
         let reference_sha256 = sha256_hex(&bundle_bytes);
-        println!(
-            "[PIP] created bundle size={} sha256={}",
-            bundle_bytes.len(),
-            reference_sha256
-        );
-        println!("[PIP] created HEAD {}", original_head);
+        println!("[PIP] === created bundle ===");
+        println!("[PIP]   size {} bytes", bundle_bytes.len());
+        println!("[PIP]   sha256 {reference_sha256}");
+        println!("[PIP]   head {original_head}");
 
         let slice_size = 64usize;
         let root_id = "git-bare-pip-verbose";
-        println!(
-            "[PIP] broadcast root_id={} slice_size={}",
-            root_id,
-            slice_size
-        );
+        println!("[PIP] === broadcast settings ===");
+        println!("[PIP]   root_id {root_id}");
+        println!("[PIP]   slice_size {slice_size}");
 
         let keys = nostr::Keys::generate();
         let (manifest_event, slice_events) = encode_payload_as_transfer_events(
@@ -1045,20 +1049,18 @@ mod git_bare_pip_tests {
             slice_size,
         )
         .expect("encode payload as transfer events");
-        println!(
-            "[PIP] encoded bare repo into manifest={} slices={}",
-            manifest_event.id,
-            slice_events.len()
-        );
-        println!(
-            "[PIP] manifest event:\n{}",
-            serde_json::to_string_pretty(&manifest_event).unwrap()
-        );
+        println!("[PIP] === encoded bare repo ===");
+        println!("[PIP]   manifest {}", manifest_event.id);
+        println!("[PIP]   slices {}", slice_events.len());
+        println!("[PIP] manifest event:");
+        for line in serde_json::to_string_pretty(&manifest_event).unwrap().lines() {
+            println!("[PIP]   {line}");
+        }
         for (index, event) in slice_events.iter().enumerate() {
-            println!(
-                "[PIP] slice event seq={index}:\n{}",
-                serde_json::to_string_pretty(event).unwrap()
-            );
+            println!("[PIP] slice event seq={index}:");
+            for line in serde_json::to_string_pretty(event).unwrap().lines() {
+                println!("[PIP]   {line}");
+            }
         }
 
         let mut received_slices = Vec::new();
@@ -1068,16 +1070,15 @@ mod git_bare_pip_tests {
                 other => panic!("expected slice event, got {other:?}"),
             }
         }
-        println!("[PIP] received manifest root_id={}", root_id);
-        println!("[PIP] received slices={}", received_slices.len());
+        println!("[PIP] === received transfer payload ===");
+        println!("[PIP]   manifest root_id {root_id}");
+        println!("[PIP]   received slices {}", received_slices.len());
 
         let reconstructed = reconstruct_payload(&received_slices).unwrap();
         let reconstructed_sha256 = sha256_hex(&reconstructed);
-        println!(
-            "[PIP] reconstructed size={} sha256={}",
-            reconstructed.len(),
-            reconstructed_sha256
-        );
+        println!("[PIP] === reconstructed bundle ===");
+        println!("[PIP]   size {} bytes", reconstructed.len());
+        println!("[PIP]   sha256 {reconstructed_sha256}");
         assert_eq!(reference_sha256, reconstructed_sha256);
 
         let reconstructed_bundle_path = work.path().join("verbose.reconstructed.bundle");
@@ -1087,7 +1088,8 @@ mod git_bare_pip_tests {
         let restored_head = unbundle_and_get_head(&reconstructed_bundle_path, &dst_dir);
         print_tree(&dst_dir, "bare repo");
         assert_eq!(original_head, restored_head);
-        println!("[PIP] bare repo restored HEAD {restored_head}");
+        println!("[PIP] === bare repo restored ===");
+        println!("[PIP]   head {restored_head}");
     }
 }
 
@@ -1245,6 +1247,13 @@ pub mod native {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        fn print_report(title: &str, lines: &[String]) {
+            println!("[PIP] === {title} ===");
+            for line in lines {
+                println!("[PIP]   {line}");
+            }
+        }
         use crate::p2p::deterministic_native_nostr_keys;
 
         /// Two nodes discover each other via mDNS and exchange a message.
