@@ -203,6 +203,7 @@ function createStaticServer(bareRepoBundleBytes = null) {
         const { node } = stack;
         window.__p2pPeerId = node.peerId.toString();
         window.__p2pPeerIdMatchesExpected = window.__p2pPeerId === window.__expectedPeerId;
+        window.__p2pReady = true;
         node.services.pubsub.addEventListener('message', (evt) => {
           const text = new TextDecoder().decode(evt.detail.data);
           window.__p2pReceived.push(text);
@@ -222,6 +223,163 @@ function createStaticServer(bareRepoBundleBytes = null) {
         window.__p2pReady = true;
         status.textContent = 'ready';
         document.title = 'ready';
+      } catch (error) {
+        window.__p2pError = String(error?.message || error);
+        window.__p2pErrors.push(window.__p2pError);
+        status.textContent = window.__p2pError;
+        document.title = 'error';
+      }
+    </script>
+  </body>
+</html>`;
+          res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+          res.end(html);
+          return;
+        }
+
+        if (url.pathname === '/p2p-bare-repo-test.html') {
+          const nativeWs = url.searchParams.get('nativeWs') || '';
+          const bundleUrl = url.searchParams.get('bundleUrl') || '/p2p-bare-repo.bundle';
+          const html = `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <link rel="icon" href="/site/favicon.ico">
+    <title>waiting</title>
+  </head>
+  <body>
+    <pre id="status">starting</pre>
+    <script type="module">
+      import initWasm, * as wasmPkg from '/site/pkg/nostr_dag.js';
+      import { createSharedLibp2pStack, deterministicPeerIdFromSeed } from '/demo/shared/libp2p-stack.mjs';
+      import { encodeBridgeMessage } from '/demo/shared/bridge-protocol.mjs';
+      import { finalizeEvent, generateSecretKey, getPublicKey, verifyEvent } from 'https://esm.sh/nostr-tools@2.25.0/pure';
+
+      const status = document.getElementById('status');
+      const nativeWs = new URL(location.href).searchParams.get('nativeWs') || '';
+      const bundleUrl = new URL(location.href).searchParams.get('bundleUrl') || '/p2p-bare-repo.bundle';
+      window.__p2pReady = false;
+      window.__p2pConnected = false;
+      window.__p2pPeerSeen = false;
+      window.__p2pPeerId = '';
+      window.__p2pReceived = [];
+      window.__p2pBridgeKinds = [];
+      window.__p2pPeerEvents = [];
+      window.__p2pErrors = [];
+      window.__bareRepoPublished = false;
+      window.__bareRepoSentKinds = [];
+      window.__bareRepoSentManifestId = '';
+      window.__bareRepoSentSliceCount = 0;
+      window.__bareRepoSha256 = '';
+
+      const packetize = (rootId, payload, maxSliceBytes) => {
+        const chunkSize = Math.max(1, maxSliceBytes);
+        const totalSlices = Math.max(1, Math.ceil(payload.length / chunkSize));
+        if (payload.length === 0) {
+          return [{ rootId, seq: 0, totalSlices: 1, data: new Uint8Array(0) }];
+        }
+        const slices = [];
+        for (let seq = 0; seq < totalSlices; seq++) {
+          const start = seq * chunkSize;
+          const end = Math.min(start + chunkSize, payload.length);
+          slices.push({ rootId, seq, totalSlices, data: payload.slice(start, end) });
+        }
+        return slices;
+      };
+
+      const encodeTransferEvent = (secretKey, kind, content, tags = []) => finalizeEvent({
+        kind,
+        created_at: Math.floor(Date.now() / 1000),
+        pubkey: getPublicKey(secretKey),
+        content,
+        tags,
+      }, secretKey);
+
+      try {
+        await initWasm('/site/pkg/nostr_dag_bg.wasm');
+        window.__nostrDagWasm = wasmPkg;
+        window.__expectedPeerId = await deterministicPeerIdFromSeed('nostr-dag-wasm');
+
+        const stack = await createSharedLibp2pStack({
+          bootstrapPeers: nativeWs ? [nativeWs] : [],
+          useWasmP2p: true,
+          onLog(level, text, state) {
+            console.log('[native-wasm:bare:' + state + ':' + level + '] ' + text);
+          },
+          onPeer(event) {
+            window.__p2pPeerEvents.push(event);
+            window.__p2pPeerSeen = true;
+            if (event.kind === 'connected') {
+              window.__p2pConnected = true;
+            }
+          },
+          onStatus(state, peerId) {
+            window.__p2pStatus = { state, peerId };
+            console.log('[native-wasm:bare:status] ' + state + ' ' + peerId);
+          },
+        });
+
+        const { node } = stack;
+        window.__p2pPeerId = node.peerId.toString();
+        window.__p2pPeerIdMatchesExpected = window.__p2pPeerId === window.__expectedPeerId;
+        node.services.pubsub.addEventListener('message', (evt) => {
+          const text = new TextDecoder().decode(evt.detail.data);
+          window.__p2pReceived.push(text);
+          try {
+            const parsed = JSON.parse(text);
+            const kind = parsed?.event?.kind;
+            if (kind !== undefined) {
+              window.__p2pBridgeKinds.push(kind);
+            }
+          } catch (error) {
+            window.__p2pErrors.push(String(error));
+          }
+          status.textContent = \`received \${window.__p2pBridgeKinds.join(',')}\`;
+        });
+
+        const response = await fetch(bundleUrl);
+        if (!response.ok) {
+          throw new Error('failed to fetch bare repo bundle: ' + response.status);
+        }
+        const bundleBytes = new Uint8Array(await response.arrayBuffer());
+        const rootId = 'live-bare-repo';
+        const sliceSize = 256;
+        const slices = packetize(rootId, bundleBytes, sliceSize);
+        const secretKey = generateSecretKey();
+        const manifestEvent = encodeTransferEvent(secretKey, ${TRANSFER_MANIFEST_KIND}, JSON.stringify({
+          protocol: '${TRANSFER_PROTOCOL}',
+          version: ${TRANSFER_VERSION},
+          type: 'manifest',
+          root_id: rootId,
+          total_bytes: bundleBytes.length,
+          total_slices: slices.length,
+        }));
+        if (!verifyEvent(manifestEvent)) {
+          throw new Error('manifest event signature failed verification');
+        }
+        window.__bareRepoSentManifestId = manifestEvent.id;
+        await node.broadcast(encodeBridgeMessage(manifestEvent, 'nostr->libp2p', [], { topic: '${BRIDGE_TOPIC}' }));
+        window.__bareRepoSentKinds.push(manifestEvent.kind);
+        for (const slice of slices) {
+          const sliceEvent = encodeTransferEvent(secretKey, ${TRANSFER_SLICE_KIND}, JSON.stringify({
+            protocol: '${TRANSFER_PROTOCOL}',
+            version: ${TRANSFER_VERSION},
+            type: 'slice',
+            root_id: slice.rootId,
+            seq: slice.seq,
+            total_slices: slice.totalSlices,
+            data: [...slice.data],
+          }), [['e', manifestEvent.id]]);
+          if (!verifyEvent(sliceEvent)) {
+            throw new Error('slice event signature failed verification');
+          }
+          await node.broadcast(encodeBridgeMessage(sliceEvent, 'nostr->libp2p', [], { topic: '${BRIDGE_TOPIC}' }));
+          window.__bareRepoSentKinds.push(sliceEvent.kind);
+        }
+        window.__bareRepoSentSliceCount = slices.length;
+        window.__bareRepoPublished = true;
+        status.textContent = 'published';
+        document.title = 'published';
       } catch (error) {
         window.__p2pError = String(error?.message || error);
         window.__p2pErrors.push(window.__p2pError);
