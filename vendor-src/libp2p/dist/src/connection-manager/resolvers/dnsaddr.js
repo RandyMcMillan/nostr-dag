@@ -1,0 +1,65 @@
+import { dns, RecordType } from '@multiformats/dns';
+import { multiaddr } from '@multiformats/multiaddr';
+class DNSAddrResolver {
+    dns;
+    canResolve(ma) {
+        return ma.getComponents().some(({ name }) => name === 'dnsaddr');
+    }
+    async resolve(ma, options) {
+        const hostname = ma.getComponents()
+            .find(component => component.name === 'dnsaddr')
+            ?.value;
+        if (hostname == null) {
+            return [ma];
+        }
+        const resolver = this.getDNS(options);
+        let result;
+        try {
+            result = await resolver.query(`_dnsaddr.${hostname}`, {
+                signal: options?.signal,
+                types: [
+                    RecordType.TXT
+                ]
+            });
+        }
+        catch (err) {
+            const noAnswers = err.name === 'DNSQueryFailedError' &&
+                Array.isArray(err.errors) &&
+                err.errors.length > 0 &&
+                err.errors.every((e) => e.name === 'EmptyDNSAnswerError');
+            if (noAnswers) {
+                return [];
+            }
+            throw err;
+        }
+        const peerId = ma.getComponents()
+            .find(component => component.name === 'p2p')
+            ?.value;
+        const output = [];
+        for (const answer of result.Answer) {
+            const addr = answer.data
+                .replace(/["']/g, '')
+                .trim()
+                .split('=')[1];
+            if (addr == null) {
+                continue;
+            }
+            if (peerId != null && !addr.includes(peerId)) {
+                continue;
+            }
+            output.push(multiaddr(addr));
+        }
+        return output;
+    }
+    getDNS(options) {
+        if (options.dns != null) {
+            return options.dns;
+        }
+        if (this.dns == null) {
+            this.dns = dns();
+        }
+        return this.dns;
+    }
+}
+export const dnsaddrResolver = new DNSAddrResolver();
+//# sourceMappingURL=dnsaddr.js.map
