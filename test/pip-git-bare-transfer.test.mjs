@@ -638,12 +638,12 @@ test('PIP git-bare verbose bare-repo roundtrip', () => {
     logTree(bareDir, 'restored bare repo');
 
     const restoredHead = gitRun(
-      ['-c', 'safe.bareRepository=all', 'rev-parse', 'HEAD'],
+      ['-c', 'safe.bareRepository=all', 'rev-parse', '--verify', 'refs/heads/main'],
       bareDir,
       { env: { GIT_DIR: bareDir } },
     );
     assert.equal(restoredHead, originalHead);
-    console.log(`restored bare repo HEAD ${restoredHead}`);
+    console.log(`restored bare repo refs/heads/main ${restoredHead}`);
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
