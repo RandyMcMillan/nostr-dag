@@ -17,20 +17,20 @@ test-all:
     just test-js
 
 test-native:
-    TARGET_DIR="${CARGO_TARGET_DIR:-$(cargo metadata --format-version 1 --no-deps | grep -o '"target_directory":"[^"]*"' | cut -d'"' -f4)}"; CARGO_TARGET_DIR="$TARGET_DIR" cargo test --features native
+    TARGET_DIR="${CARGO_TARGET_DIR:-$(cargo metadata --format-version 1 --no-deps | grep -o '"target_directory":"[^"]*"' | cut -d'"' -f4)}"; CARGO_TARGET_DIR="$TARGET_DIR" RUST_BACKTRACE=full RUST_TEST_THREADS=1 CARGO_TERM_VERBOSE=true cargo test --features native -- --nocapture
 
 test-js:
-    node --test test/*.test.mjs
+    NODE_OPTIONS=--trace-uncaught node --test test/*.test.mjs
 
 test-p2p:
-    node --test test/p2p-node-integration.test.mjs test/p2p-native-wasm.test.mjs
+    NODE_OPTIONS=--trace-uncaught node --test test/p2p-node-integration.test.mjs test/p2p-native-wasm.test.mjs
 
 test-p2p-native-wasm:
-    node --test test/p2p-native-wasm.test.mjs
+    NODE_OPTIONS=--trace-uncaught node --test test/p2p-native-wasm.test.mjs
 
 test-pip-bare-repo:
-    TARGET_DIR="${CARGO_TARGET_DIR:-$(cargo metadata --format-version 1 --no-deps | grep -o '"target_directory":"[^"]*"' | cut -d'"' -f4)}"; CARGO_TARGET_DIR="$TARGET_DIR" cargo test --features p2p git_bare_pip_transfer_verbose_trace -- --nocapture
-    node --test --test-name-pattern "bare-repo" test/p2p-native-wasm.test.mjs
+    TARGET_DIR="${CARGO_TARGET_DIR:-$(cargo metadata --format-version 1 --no-deps | grep -o '"target_directory":"[^"]*"' | cut -d'"' -f4)}"; CARGO_TARGET_DIR="$TARGET_DIR" RUST_BACKTRACE=full RUST_TEST_THREADS=1 CARGO_TERM_VERBOSE=true cargo test --features p2p git_bare_pip_transfer_verbose_trace -- --nocapture
+    NODE_OPTIONS=--trace-uncaught node --test --test-name-pattern "bare-repo" test/p2p-native-wasm.test.mjs
 
 build-relay:
     TARGET_DIR="${CARGO_TARGET_DIR:-$(cargo metadata --format-version 1 --no-deps | grep -o '"target_directory":"[^"]*"' | cut -d'"' -f4)}"; CARGO_TARGET_DIR="$TARGET_DIR" cargo build --release --bin relay --bin federation --features relay

@@ -41,20 +41,20 @@ test: test-native test-js
 test-all: test-native test-js
 
 test-native:
-	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) $(CARGO) test --features native
+	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) RUST_BACKTRACE=full RUST_TEST_THREADS=1 CARGO_TERM_VERBOSE=true $(CARGO) test --features native -- --nocapture
 
 test-js:
-	node --test test/*.test.mjs
+	NODE_OPTIONS=--trace-uncaught node --test test/*.test.mjs
 
 test-p2p:
-	node --test test/p2p-node-integration.test.mjs test/p2p-native-wasm.test.mjs
+	NODE_OPTIONS=--trace-uncaught node --test test/p2p-node-integration.test.mjs test/p2p-native-wasm.test.mjs
 
 test-p2p-native-wasm:
-	node --test test/p2p-native-wasm.test.mjs
+	NODE_OPTIONS=--trace-uncaught node --test test/p2p-native-wasm.test.mjs
 
 test-pip-bare-repo:
-	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) $(CARGO) test --features p2p git_bare_pip_transfer_verbose_trace -- --nocapture
-	node --test --test-name-pattern "bare-repo" test/p2p-native-wasm.test.mjs
+	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) RUST_BACKTRACE=full RUST_TEST_THREADS=1 CARGO_TERM_VERBOSE=true $(CARGO) test --features p2p git_bare_pip_transfer_verbose_trace -- --nocapture
+	NODE_OPTIONS=--trace-uncaught node --test --test-name-pattern "bare-repo" test/p2p-native-wasm.test.mjs
 
 build-relay:
 	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) $(CARGO) build --release --bin relay --bin federation --features relay
