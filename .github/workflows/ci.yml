@@ -47,6 +47,18 @@ jobs:
       - name: Install Node dependencies
         run: npm ci
 
+      - name: Install Rust stable
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add wasm32-unknown-unknown
+
+      - name: Install clang for wasm C dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang lld
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
+
       - name: Run JS tests
         run: node --test test/*.test.mjs
 
