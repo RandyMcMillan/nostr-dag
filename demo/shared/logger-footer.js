@@ -433,6 +433,7 @@ export function createLoggerFooter(root, options = {}) {
   let formatterWorker = options.enableWorkerFormatting === false ? null : createFormatterWorker();
   let formatterWorkerBusy = false;
   let formatterWorkerJobId = 0;
+  let currentState = normalizeState(initialState);
 
   function persistState() {
     savePersistedFooterState(storageKey, { open, level });
@@ -790,6 +791,10 @@ export function createLoggerFooter(root, options = {}) {
 
   function setState(state, text) {
     const nextState = state || normalizeState(text);
+    if (currentState === 'available' && (nextState === 'checking' || nextState === 'idle')) {
+      return;
+    }
+    currentState = nextState;
     statusEl.className = `status status-${nextState}`;
     statusEl.title = text || initialTitle;
   }
