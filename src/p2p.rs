@@ -1107,6 +1107,12 @@ pub mod wasm_node {
         on_message: Option<Function>,
     }
 
+    #[derive(Debug, Clone)]
+    enum ControlMessage {
+        Broadcast(String),
+        Dial(String),
+    }
+
     #[wasm_bindgen]
     impl P2pNode {
         /// Create a new node with a freshly generated Ed25519 identity.
@@ -1144,25 +1150,39 @@ pub mod wasm_node {
         /// Publish a message on the nostr-dag gossipsub topic.
         /// Returns a Promise that resolves once the publish completes.
         pub async fn broadcast(&self, msg: String) -> Result<(), JsValue> {
-            // For the WASM node the publish happens inside the swarm loop.
-            // We use a channel stored in thread-local storage.
-            OUTBOUND_TX.with(|cell| {
+            CONTROL_TX.with(|cell| {
                 let mut borrow = cell.borrow_mut();
                 if let Some(tx) = borrow.as_mut() {
-                    let _ = tx.try_send(msg);
+                    let _ = tx.try_send(ControlMessage::Broadcast(msg));
                 }
             });
             Ok(())
         }
+
+        /// Dial a peer multiaddr from the running WASM swarm.
+        pub async fn dial(&self, addr: String) -> Result<(), JsValue> {
+            CONTROL_TX.with(|cell| {
+                let mut borrow = cell.borrow_mut();
+                if let Some(tx) = borrow.as_mut() {
+                    let _ = tx.try_send(ControlMessage::Dial(addr));
+                }
+            });
+            Ok(())
+        }
+
+        /// Return the local peer id as a string.
+        pub fn peer_id(&self) -> String {
+            self.local_key.public().to_peer_id().to_string()
+        }
     }
 
-    // Thread-local channel used to hand messages from `broadcast` into the
+    // Thread-local channel used to hand commands from JavaScript into the
     // swarm event loop.
     use futures::channel::{mpsc as fmpsc, oneshot};
     use std::cell::RefCell;
 
     thread_local! {
-        static OUTBOUND_TX: RefCell<Option<fmpsc::Sender<String>>> = RefCell::new(None);
+        static CONTROL_TX: RefCell<Option<fmpsc::Sender<ControlMessage>>> = RefCell::new(None);
     }
 
     async fn run_swarm(
@@ -1188,8 +1208,8 @@ pub mod wasm_node {
         let behaviour = Behaviour { gossipsub };
         let local_peer_id = local_key.public().to_peer_id().to_string();
 
-        let (tx, mut cmd_rx) = fmpsc::channel::<String>(64);
-        OUTBOUND_TX.with(|cell| {
+        let (tx, mut cmd_rx) = fmpsc::channel::<ControlMessage>(64);
+        CONTROL_TX.with(|cell| {
             *cell.borrow_mut() = Some(tx);
         });
 
@@ -1217,11 +1237,31 @@ pub mod wasm_node {
         loop {
             futures::select! {
                 msg = cmd_rx.next() => {
-                    if let Some(text) = msg {
-                        let _ = swarm.behaviour_mut().gossipsub.publish(
-                            IdentTopic::new(NOSTR_DAG_TOPIC),
-                            text.as_bytes(),
-                        );
+                    if let Some(command) = msg {
+                        match command {
+                            ControlMessage::Broadcast(text) => {
+                                let _ = swarm.behaviour_mut().gossipsub.publish(
+                                    IdentTopic::new(NOSTR_DAG_TOPIC),
+                                    text.as_bytes(),
+                                );
+                            }
+                            ControlMessage::Dial(addr) => {
+                                match addr.parse::<libp2p::Multiaddr>() {
+                                    Ok(addr) => {
+                                        if let Err(e) = swarm.dial(addr) {
+                                            web_sys::console::error_1(
+                                                &JsValue::from_str(&format!("dial failed: {e}"))
+                                            );
+                                        }
+                                    }
+                                    Err(e) => {
+                                        web_sys::console::error_1(
+                                            &JsValue::from_str(&format!("invalid multiaddr: {e}"))
+                                        );
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 event = swarm.select_next_some() => {

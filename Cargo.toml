@@ -79,6 +79,8 @@ libp2p = { version = "0.54", optional = true, features = [
     "mdns",
     "gossipsub",
     "identify",
+    "dns",
+    "websocket",
     "ping",
     "tokio",
     "macros",

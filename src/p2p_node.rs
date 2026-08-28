@@ -654,9 +654,10 @@ mod tests {
         assert_eq!(publication.messages.len(), publication.total_slices + 1);
         assert_eq!(publication.slice_event_ids.len(), publication.total_slices);
 
-        let manifest_event = crate::bridge_native::unwrap_bridge_envelope(&publication.messages[0])
-            .expect("manifest bridge envelope");
-        match parse_transfer_event(&manifest_event).unwrap() {
+        let manifest_envelope =
+            crate::bridge_native::unwrap_bridge_envelope(&publication.messages[0])
+                .expect("manifest bridge envelope");
+        match parse_transfer_event(&manifest_envelope.event).unwrap() {
             TransferEventPayload::Manifest(manifest) => {
                 assert_eq!(manifest.root_id, "nip-pip-root");
                 assert_eq!(manifest.total_bytes, b"hello nip-pip network".len());
@@ -665,9 +666,9 @@ mod tests {
             other => panic!("unexpected manifest payload: {other:?}"),
         }
 
-        let slice_event = crate::bridge_native::unwrap_bridge_envelope(&publication.messages[1])
+        let slice_envelope = crate::bridge_native::unwrap_bridge_envelope(&publication.messages[1])
             .expect("slice bridge envelope");
-        match parse_transfer_event(&slice_event).unwrap() {
+        match parse_transfer_event(&slice_envelope.event).unwrap() {
             TransferEventPayload::Slice(slice) => {
                 assert_eq!(slice.root_id, "nip-pip-root");
                 assert_eq!(slice.total_slices, publication.total_slices);

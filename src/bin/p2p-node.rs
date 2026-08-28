@@ -90,6 +90,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             noise::Config::new,
             yamux::Config::default,
         )?
+        .with_websocket(noise::Config::new, yamux::Config::default)
+        .await?
         .with_relay_client(noise::Config::new, yamux::Config::default)?
         .with_behaviour(|_, relay| Behaviour {
             gossipsub,
@@ -103,6 +105,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .build();
 
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse::<Multiaddr>()?)?;
+    swarm.listen_on("/ip4/127.0.0.1/tcp/0/ws".parse::<Multiaddr>()?)?;
     for addr in &bootstrap_peers {
         if let Err(err) = swarm.dial(addr.clone()) {
             warn!(%addr, ?err, "bootstrap dial failed");
