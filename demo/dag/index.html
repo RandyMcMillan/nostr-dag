@@ -148,6 +148,7 @@
       DAG_CACHE_KEY as CACHE_KEY,
       DAG_FED_COUNT as FED_COUNT,
       DAG_PARTICIPANT_DISPLAY_NAMES as PARTICIPANT_DISPLAY_NAMES,
+      DAG_PARTICIPANT_KEY_LABELS as PARTICIPANT_KEY_LABELS,
       DAG_PARTICIPANT_NAMES as PARTICIPANT_NAMES,
       DAG_QUORUM_ID as QUORUM_ID,
       DAG_RELAYS as RELAYS,
@@ -408,6 +409,7 @@
         dagLibp2pNodePromise = (async () => {
           const { node, bootstrapPeers } = await createSharedLibp2pStack({
             bootstrapPeers: DEFAULT_BOOTSTRAP_PEERS,
+            deterministicKeySeed: PARTICIPANT_KEY_LABELS[1] || 'nostr-dag-wasm',
             onLog(level, text, state) {
               if (String(text || '').includes('peer connected:')) return;
               window.__sharedFooter?.log('libp2p', text, level, state);
@@ -792,7 +794,10 @@
       window.__sharedFooter?.log('demo', 'initializing participants', 'debug', 'checking');
       participants = await Promise.all(Array.from({ length: FED_COUNT }, async (_, i) => {
         const name = PARTICIPANT_NAMES[i] || `participant${i + 1}`;
-        const sk = await sha256Bytes(name);
+        const keyLabel = PARTICIPANT_KEY_LABELS[i] || name;
+        // Keep the first two demo quorum members stable across reloads so the
+        // native and wasm peers can share the same deterministic identities.
+        const sk = await sha256Bytes(keyLabel);
         const pk = getPublicKey(sk);
         const displayName = PARTICIPANT_DISPLAY_NAMES[i] || `Participant ${i + 1}`;
         const profile = createParticipantProfile({
