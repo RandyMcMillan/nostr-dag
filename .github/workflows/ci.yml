@@ -81,6 +81,9 @@ jobs:
       - name: Generate build version module
         run: cargo check --quiet
 
+      - name: Check for uncommitted generated files
+        run: git diff --exit-code || (echo "::error::Uncommitted changes detected after build. Run cargo check locally and commit generated files." && exit 1)
+
       - name: Run JS tests
         run: node --test test/*.test.mjs
 
