@@ -825,3 +825,69 @@ test('native peer and wasm peer exchange a real nip-pip blob in Chromium', { tim
     server.close();
   }
 });
+
+test('native peer and wasm peer exchange a real bare-repo nip-pip blob in Chromium', { timeout: 300_000 }, async () => {
+  await ensureP2pWasmBuild();
+  await ensureChromiumBrowser();
+
+  const bareRepo = createBareRepoBundle();
+  const [{ server, port: serverPort }, native] = await Promise.all([
+    createStaticServer(bareRepo.bundleBytes),
+    startNativePeer(),
+  ]);
+
+  const browserBaseUrl = `http://127.0.0.1:${serverPort}`;
+  const nativeDialAddr = buildWsDialAddress(native.wsListenAddr, native.peerId);
+  console.log(`[native-wasm:test] native websocket dial addr ${nativeDialAddr}`);
+  const { browser, page } = await runChromiumBareRepoExchange(
+    browserBaseUrl,
+    nativeDialAddr,
+    '/p2p-bare-repo.bundle',
+  );
+
+  try {
+    await waitForCondition(
+      async () => native.stdoutLines.some((line) => line.includes('INBOUND transfer-manifest root_id=live-bare-repo'))
+        && native.stdoutLines.some((line) => line.includes('INBOUND transfer-slice root_id=live-bare-repo')),
+      { timeoutMs: 120_000, description: 'native peer to receive bare-repo transfer events' },
+    );
+
+    const result = await page.evaluate(() => ({
+      peerId: window.__p2pPeerId || '',
+      bridgeKinds: window.__p2pBridgeKinds || [],
+      receivedCount: (window.__p2pReceived || []).length,
+      sentKinds: window.__bareRepoSentKinds || [],
+      sentManifestId: window.__bareRepoSentManifestId || '',
+      sentSliceCount: window.__bareRepoSentSliceCount || 0,
+      published: window.__bareRepoPublished || false,
+      connected: window.__p2pConnected || false,
+      error: window.__p2pError || '',
+    }));
+
+    assert.equal(result.error, '', `browser error: ${result.error}`);
+    assert.ok(result.connected, 'browser peer should connect to native peer');
+    assert.ok(result.peerId, 'browser peer id should be exposed');
+    assert.ok(result.published, 'browser should publish the bare-repo transfer');
+    assert.ok(result.sentManifestId, 'browser should sign and publish a manifest event');
+    assert.ok(result.sentSliceCount > 0, 'browser should publish at least one slice event');
+    assert.ok(result.sentKinds.includes(TRANSFER_MANIFEST_KIND), 'browser should publish a manifest event');
+    assert.ok(result.sentKinds.includes(TRANSFER_SLICE_KIND), 'browser should publish slice events');
+    assert.ok(
+      native.stdoutLines.some((line) => line.includes('INBOUND transfer-manifest root_id=live-bare-repo')),
+      'native node should receive a manifest event',
+    );
+    assert.ok(
+      native.stdoutLines.some((line) => line.includes('INBOUND transfer-slice root_id=live-bare-repo')),
+      'native node should receive a slice event',
+    );
+    console.log(
+      `[native-wasm:test] live bare-repo success peerId=${result.peerId} manifest=${result.sentManifestId} slices=${result.sentSliceCount}`,
+    );
+  } finally {
+    await page.close().catch(() => {});
+    await browser.close().catch(() => {});
+    native.child.kill('SIGTERM');
+    server.close();
+    rmSync(bareRepo.work, { recursive: true, force: true });
+  }
+});
