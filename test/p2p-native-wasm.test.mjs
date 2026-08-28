@@ -441,6 +441,10 @@ function createStaticServer(bareRepoBundleBytes = null, bareRepoRelayUrls = []) 
       window.__bareRepoReconstructedSha256 = '';
       window.__bareRepoReconstructedBytes = 0;
       window.__bareRepoReconstructedBundleB64 = '';
+      window.__bareRepoPublishAttempts = 0;
+      window.__bareRepoPublishTotal = 0;
+      window.__bareRepoPublishProgressPct = 0;
+      window.__bareRepoPublishProgressLabel = '';
 
       const DEFAULT_RELAYS = ${JSON.stringify(bareRepoRelayUrls.length ? bareRepoRelayUrls : ['wss://nos.lol'])};
       const relayPool = new SimplePool();
@@ -704,6 +708,23 @@ function createStaticServer(bareRepoBundleBytes = null, bareRepoRelayUrls = []) 
           data: [...slice.data],
         }), [['e', manifestEvent.id]]));
         transferCollector = createTransferCollector(rootId, slices.length, bundleBytes.length);
+        const totalRelays = DEFAULT_RELAYS.length;
+        const totalEvents = (sliceEvents.length + 1) * totalRelays;
+        let publishAttempts = 0;
+        let lastProgressPct = -1;
+        window.__bareRepoPublishTotal = totalEvents;
+
+        const updateProgress = (label) => {
+          publishAttempts += 1;
+          window.__bareRepoPublishAttempts = publishAttempts;
+          const progressPct = totalEvents > 0 ? Math.min(100, Math.floor((publishAttempts / totalEvents) * 100)) : 100;
+          window.__bareRepoPublishProgressPct = progressPct;
+          window.__bareRepoPublishProgressLabel = label;
+          if (progressPct !== lastProgressPct) {
+            lastProgressPct = progressPct;
+            console.log('[native-wasm:bare:trace] publish progress ' + progressPct + '% (' + publishAttempts + '/' + totalEvents + ') ' + label);
+          }
+        };
 
         const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
         let relayPublishRound = 0;
@@ -725,6 +746,8 @@ function createStaticServer(bareRepoBundleBytes = null, bareRepoRelayUrls = []) 
               const message = String(error?.message || error);
               window.__p2pErrors.push(message);
               console.log('[native-wasm:bare:warn] relay publish failed ' + eventLabel + ' relay=' + relay + ' error=' + message);
+            } finally {
+              updateProgress(eventLabel + ' ' + relay);
             }
             if (index < orderedRelays.length - 1) {
               await sleep(250);
@@ -735,7 +758,7 @@ function createStaticServer(bareRepoBundleBytes = null, bareRepoRelayUrls = []) 
         const publishTransferEvent = async (event) => {
           const bridgePayload = encodeBridgeMessage(event, 'nostr->libp2p', [], { topic: '${BRIDGE_TOPIC}' });
           await node.services.pubsub.publish('${BRIDGE_TOPIC}', new TextEncoder().encode(bridgePayload));
-          await publishRelayRoundRobin(event, String(event.kind));
+          void publishRelayRoundRobin(event, String(event.kind));
         };
 
         let relayQueryStop = false;
