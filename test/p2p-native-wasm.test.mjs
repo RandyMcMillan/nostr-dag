@@ -1101,7 +1101,11 @@ async function startBootstrapMesh() {
     bootstrapPeers: buildWsDialAddress(primary.wsListenAddr, primary.peerId),
     nativeSeedHex: '22'.repeat(32),
   });
-  return { primary, relayTarget };
+  const extraPeer = await startBootstrapPeer({
+    bootstrapPeers: [buildWsDialAddress(primary.wsListenAddr, primary.peerId), buildWsDialAddress(relayTarget.wsListenAddr, relayTarget.peerId)].join(','),
+    nativeSeedHex: '33'.repeat(32),
+  });
+  return { primary, relayTarget, extraPeer };
 }
 
 async function createSafariSession(webdriverPort) {
@@ -1386,12 +1390,13 @@ test('native peer and wasm peer exchange a real nip-pip blob in Chromium', { tim
   await ensureP2pWasmBuild();
   await ensureChromiumBrowser();
 
-  const { primary: bootstrap, relayTarget } = await startBootstrapMesh();
+  const { primary: bootstrap, relayTarget, extraPeer } = await startBootstrapMesh();
   const bootstrapDialAddr = buildWsDialAddress(bootstrap.wsListenAddr, bootstrap.peerId);
   const relayDialAddr = buildWsDialAddress(relayTarget.wsListenAddr, relayTarget.peerId);
+  const extraDialAddr = buildWsDialAddress(extraPeer.wsListenAddr, extraPeer.peerId);
   const [{ server, port: serverPort }, native] = await Promise.all([
     createStaticServer(),
-    startNativePeer({ bootstrapPeers: [bootstrapDialAddr, relayDialAddr].join(',') }),
+    startNativePeer({ bootstrapPeers: [bootstrapDialAddr, relayDialAddr, extraDialAddr].join(',') }),
   ]);
 
   const browserBaseUrl = `http://127.0.0.1:${serverPort}`;
@@ -1433,6 +1438,7 @@ test('native peer and wasm peer exchange a real nip-pip blob in Chromium', { tim
     await page.close().catch(() => {});
     await browser.close().catch(() => {});
     native.child.kill('SIGTERM');
+    extraPeer.child.kill('SIGTERM');
     relayTarget.child.kill('SIGTERM');
     bootstrap.child.kill('SIGTERM');
     server.close();
@@ -1452,12 +1458,13 @@ test('native peer and wasm peer exchange a real bare-repo nip-pip blob in Chromi
   const bareRepoBundleB64 = Buffer.from(bareRepo.bundleBytes).toString('base64');
   const bareRepoRelayUrls = await discoverHealthyRelays();
   const relayUrls = bareRepoRelayUrls.length ? bareRepoRelayUrls : ['wss://nos.lol'];
-  const { primary: bootstrap, relayTarget } = await startBootstrapMesh();
+  const { primary: bootstrap, relayTarget, extraPeer } = await startBootstrapMesh();
   const bootstrapDialAddr = buildWsDialAddress(bootstrap.wsListenAddr, bootstrap.peerId);
   const relayDialAddr = buildWsDialAddress(relayTarget.wsListenAddr, relayTarget.peerId);
+  const extraDialAddr = buildWsDialAddress(extraPeer.wsListenAddr, extraPeer.peerId);
   const [{ server, port: serverPort }, native] = await Promise.all([
     createStaticServer(bareRepo.bundleBytes, relayUrls),
-    startNativePeer({ bootstrapPeers: [bootstrapDialAddr, relayDialAddr].join(',') }),
+    startNativePeer({ bootstrapPeers: [bootstrapDialAddr, relayDialAddr, extraDialAddr].join(',') }),
   ]);
 
   const browserBaseUrl = `http://127.0.0.1:${serverPort}`;
@@ -1527,6 +1534,7 @@ test('native peer and wasm peer exchange a real bare-repo nip-pip blob in Chromi
     await page.close().catch(() => {});
     await browser.close().catch(() => {});
     native.child.kill('SIGTERM');
+    extraPeer.child.kill('SIGTERM');
     relayTarget.child.kill('SIGTERM');
     bootstrap.child.kill('SIGTERM');
     server.close();
