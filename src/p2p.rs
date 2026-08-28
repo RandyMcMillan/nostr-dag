@@ -677,7 +677,7 @@ mod git_bare_pip_tests {
                     .collect::<Vec<_>>(),
                 Err(err) => {
                     println!(
-                        "[PIP] {:indent$}{} (unreadable: {})",
+                        "{:indent$}{} (unreadable: {})",
                         "",
                         path.strip_prefix(root).unwrap_or(path).display(),
                         err,
@@ -693,7 +693,7 @@ mod git_bare_pip_tests {
                     Ok(metadata) => metadata,
                     Err(err) => {
                         println!(
-                            "[PIP] {:indent$}{} (stat error: {})",
+                            "{:indent$}{} (stat error: {})",
                             "",
                             rel.display(),
                             err,
@@ -703,11 +703,11 @@ mod git_bare_pip_tests {
                     }
                 };
                 if metadata.is_dir() {
-                    println!("[PIP] {:indent$}{}/", "", rel.display(), indent = indent);
+                    println!("{:indent$}{}/", "", rel.display(), indent = indent);
                     walk(root, &entry, indent + 2);
                 } else {
                     println!(
-                        "[PIP] {:indent$}{} ({})",
+                        "{:indent$}{} ({})",
                         "",
                         rel.display(),
                         metadata.len(),
@@ -717,7 +717,7 @@ mod git_bare_pip_tests {
             }
         }
 
-        println!("[PIP] {label} tree at {}", root.display());
+        println!("{label} tree at {}", root.display());
         walk(root, root, 2);
     }
 
@@ -850,11 +850,11 @@ mod git_bare_pip_tests {
 
         let reference_sha256 = sha256_hex(&bundle_bytes);
         println!(
-            "[PIP] bundle size: {} bytes  SHA-256: {}",
+            "bundle size: {} bytes  SHA-256: {}",
             bundle_bytes.len(),
             reference_sha256
         );
-        println!("[PIP] original HEAD: {original_head}");
+        println!("original HEAD: {original_head}");
 
         // Advertised HEAD in the bundle must match the repo HEAD.
         let bundle_head = verify_bundle_head(&bundle_path);
@@ -881,7 +881,7 @@ mod git_bare_pip_tests {
             // --- packetize ---
             let slices = packetize_payload(&root_id, &bundle_bytes, slice_size);
             let slice_count = slices.len();
-            println!("[PIP] slice_size={slice_size}  slice_count={slice_count}");
+            println!("slice_size={slice_size}  slice_count={slice_count}");
 
             let manifest = TransferManifest {
                 root_id: root_id.clone(),
@@ -940,7 +940,7 @@ mod git_bare_pip_tests {
                 reconstructed_sha256, reference_sha256,
                 "slice_size={slice_size}: SHA-256 mismatch\n  expected  {reference_sha256}\n  got       {reconstructed_sha256}"
             );
-            println!("[PIP] slice_size={slice_size}  SHA-256 VERIFIED: {reconstructed_sha256}");
+            println!("slice_size={slice_size}  SHA-256 VERIFIED: {reconstructed_sha256}");
         }
     }
 
@@ -995,7 +995,7 @@ mod git_bare_pip_tests {
         let ref_sha = sha256_hex(&bundle_bytes);
         let rec_sha = sha256_hex(&reconstructed);
         assert_eq!(ref_sha, rec_sha, "reconstructed bundle SHA-256 mismatch");
-        println!("[PIP] unbundle test SHA-256 VERIFIED: {rec_sha}");
+        println!("unbundle test SHA-256 VERIFIED: {rec_sha}");
 
         // Unbundle reconstructed bytes into a fresh bare repo.
         let dst_dir = work.path().join("dst-bare-repo");
@@ -1006,7 +1006,7 @@ mod git_bare_pip_tests {
             original_head, restored_head,
             "restored bare repo HEAD must match original\n  expected  {original_head}\n  got       {restored_head}"
         );
-        println!("[PIP] bare repo HEAD VERIFIED: {restored_head}");
+        println!("bare repo HEAD VERIFIED: {restored_head}");
     }
 
     #[test]
@@ -1016,23 +1016,23 @@ mod git_bare_pip_tests {
         fs::create_dir_all(&src_dir).unwrap();
 
         let original_head = build_repo_with_depth(&src_dir, DEPTH_LEVELS);
-        println!("[PIP] === created source repo ===");
-        println!("[PIP]   path {}", src_dir.display());
+        println!("=== created source repo ===");
+        println!("  path {}", src_dir.display());
         print_tree(&src_dir, "source repo");
 
         let bundle_path = work.path().join("verbose.bundle");
         let bundle_bytes = create_bundle(&src_dir, &bundle_path);
         let reference_sha256 = sha256_hex(&bundle_bytes);
-        println!("[PIP] === created bundle ===");
-        println!("[PIP]   size {} bytes", bundle_bytes.len());
-        println!("[PIP]   sha256 {reference_sha256}");
-        println!("[PIP]   head {original_head}");
+        println!("=== created bundle ===");
+        println!("  size {} bytes", bundle_bytes.len());
+        println!("  sha256 {reference_sha256}");
+        println!("  head {original_head}");
 
         let slice_size = 64usize;
         let root_id = "git-bare-pip-verbose";
-        println!("[PIP] === broadcast settings ===");
-        println!("[PIP]   root_id {root_id}");
-        println!("[PIP]   slice_size {slice_size}");
+        println!("=== broadcast settings ===");
+        println!("  root_id {root_id}");
+        println!("  slice_size {slice_size}");
 
         let keys = nostr::Keys::generate();
         let (manifest_event, slice_events) = encode_payload_as_transfer_events(
@@ -1042,17 +1042,17 @@ mod git_bare_pip_tests {
             slice_size,
         )
         .expect("encode payload as transfer events");
-        println!("[PIP] === encoded bare repo ===");
-        println!("[PIP]   manifest {}", manifest_event.id);
-        println!("[PIP]   slices {}", slice_events.len());
-        println!("[PIP] manifest event:");
+        println!("=== encoded bare repo ===");
+        println!("  manifest {}", manifest_event.id);
+        println!("  slices {}", slice_events.len());
+        println!("manifest event:");
         for line in serde_json::to_string_pretty(&manifest_event).unwrap().lines() {
-            println!("[PIP]   {line}");
+            println!("  {line}");
         }
         for (index, event) in slice_events.iter().enumerate() {
-            println!("[PIP] slice event seq={index}:");
+            println!("slice event seq={index}:");
             for line in serde_json::to_string_pretty(event).unwrap().lines() {
-                println!("[PIP]   {line}");
+                println!("  {line}");
             }
         }
 
@@ -1063,15 +1063,15 @@ mod git_bare_pip_tests {
                 other => panic!("expected slice event, got {other:?}"),
             }
         }
-        println!("[PIP] === received transfer payload ===");
-        println!("[PIP]   manifest root_id {root_id}");
-        println!("[PIP]   received slices {}", received_slices.len());
+        println!("=== received transfer payload ===");
+        println!("  manifest root_id {root_id}");
+        println!("  received slices {}", received_slices.len());
 
         let reconstructed = reconstruct_payload(&received_slices).unwrap();
         let reconstructed_sha256 = sha256_hex(&reconstructed);
-        println!("[PIP] === reconstructed bundle ===");
-        println!("[PIP]   size {} bytes", reconstructed.len());
-        println!("[PIP]   sha256 {reconstructed_sha256}");
+        println!("=== reconstructed bundle ===");
+        println!("  size {} bytes", reconstructed.len());
+        println!("  sha256 {reconstructed_sha256}");
         assert_eq!(reference_sha256, reconstructed_sha256);
 
         let reconstructed_bundle_path = work.path().join("verbose.reconstructed.bundle");
@@ -1081,8 +1081,8 @@ mod git_bare_pip_tests {
         let restored_head = unbundle_and_get_head(&reconstructed_bundle_path, &dst_dir);
         print_tree(&dst_dir, "bare repo");
         assert_eq!(original_head, restored_head);
-        println!("[PIP] === bare repo restored ===");
-        println!("[PIP]   head {restored_head}");
+        println!("=== bare repo restored ===");
+        println!("  head {restored_head}");
     }
 }
 
