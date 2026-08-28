@@ -5,7 +5,7 @@ use std::time::Duration;
 #[cfg(feature = "p2p")]
 use libp2p::{
     autonat, dcutr, futures::StreamExt, gossipsub::{self, IdentTopic, MessageAuthenticity},
-    identify, mdns, noise, relay,
+    identify, mdns, multiaddr::Protocol, noise, relay,
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, yamux, Multiaddr, PeerId,
 };
@@ -56,7 +56,7 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
         .count();
 
     let gossipsub_config = gossipsub::ConfigBuilder::default()
-        .heartbeat_interval(Duration::from_secs(10))
+        .heartbeat_interval(Duration::from_secs(2))
         .validation_mode(gossipsub::ValidationMode::Strict)
         .build()
         .map_err(|e| format!("gossipsub config: {e}"))?;
@@ -103,6 +103,15 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
             warn!(%addr, ?err, "bootstrap dial failed");
         } else {
             info!(%addr, "dialled bootstrap peer");
+            let mut peer_id = None;
+            for protocol in addr.iter() {
+                if let Protocol::P2p(value) = protocol {
+                    peer_id = Some(value);
+                }
+            }
+            if let Some(peer_id) = peer_id {
+                swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
+            }
         }
     }
 
@@ -142,6 +151,7 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
     let mut discovered_peers = HashSet::<PeerId>::new();
     let mut peer_topic_roles = HashMap::<PeerId, PeerTopicRole>::new();
     let mut relay_peers = HashSet::<PeerId>::new();
+    let mut subscribed_topic_peers = HashSet::<PeerId>::new();
     let mut external_addrs = Vec::<String>::new();
     let mut listen_addrs: Vec<String> = Vec::new();
 
@@ -173,6 +183,19 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                         }
                     }
                     Some(NodeCommand::PublishPipBlob(message)) => {
+                        let mut waited = 0u64;
+                        while subscribed_topic_peers.is_empty() && waited < 20 {
+                            tokio::time::sleep(Duration::from_secs(1)).await;
+                            waited += 1;
+                        }
+                        if subscribed_topic_peers.is_empty() {
+                            warn!("PIP publish proceeding without subscribed peers");
+                        } else {
+                            info!(
+                                subscribed_peers = subscribed_topic_peers.len(),
+                                "PIP publish has subscribed peers"
+                            );
+                        }
                         let root_id = format!(
                             "nip-pip-{}-{}",
                             runtime.public_key(),
@@ -216,7 +239,7 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                                                 if matches!(
                                                     err,
                                                     gossipsub::PublishError::InsufficientPeers
-                                                ) && attempt < 5 =>
+                                                ) && attempt < 20 =>
                                             {
                                                 warn!(
                                                     attempt,
@@ -336,6 +359,9 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                     })) => {
                         let role = classify_peer_topic_role_from_addrs(info.listen_addrs.clone());
                         peer_topic_roles.insert(peer_id, role);
+                        if matches!(role, PeerTopicRole::WasmLike | PeerTopicRole::NativeLike) {
+                            swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
+                        }
                         if matches!(role, PeerTopicRole::WasmLike) {
                             println!(
                                 "IDENTIFIED wasm-topic peer peer={} addrs={}",
@@ -346,6 +372,15 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                                     .collect::<Vec<_>>()
                                     .join(" | ")
                             );
+                        }
+                    }
+                    SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(gossipsub::Event::Subscribed {
+                        peer_id,
+                        topic: _,
+                    })) => {
+                        subscribed_topic_peers.insert(peer_id);
+                        if matches!(peer_topic_roles.get(&peer_id), Some(PeerTopicRole::WasmLike | PeerTopicRole::NativeLike)) {
+                            swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
                         }
                     }
                     SwarmEvent::Behaviour(BehaviourEvent::Dcutr(dcutr::Event {
