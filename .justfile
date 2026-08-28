@@ -22,6 +22,12 @@ test-native:
 test-js:
     node --test test/*.test.mjs
 
+test-p2p:
+    node --test test/p2p-node-integration.test.mjs test/p2p-native-wasm.test.mjs
+
+test-p2p-native-wasm:
+    node --test test/p2p-native-wasm.test.mjs
+
 build-relay:
     TARGET_DIR="${CARGO_TARGET_DIR:-$(cargo metadata --format-version 1 --no-deps | grep -o '"target_directory":"[^"]*"' | cut -d'"' -f4)}"; CARGO_TARGET_DIR="$TARGET_DIR" cargo build --release --bin relay --bin federation --features relay
 
