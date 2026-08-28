@@ -1137,7 +1137,7 @@ pub mod native {
 
             // Gossipsub
             let gossipsub_config = gossipsub::ConfigBuilder::default()
-                .heartbeat_interval(Duration::from_secs(10))
+                .heartbeat_interval(Duration::from_secs(2))
                 .validation_mode(gossipsub::ValidationMode::Strict)
                 .build()
                 .map_err(|e| format!("gossipsub config: {e}"))?;
