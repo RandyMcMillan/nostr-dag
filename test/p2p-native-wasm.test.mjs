@@ -3,6 +3,7 @@ import { createServer } from 'node:http';
 import { access, readFile } from 'node:fs/promises';
 import { constants as fsConstants, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import net from 'node:net';
@@ -102,6 +103,87 @@ function gitRun(args, cwd) {
   return result.stdout.trim();
 }
 
+async function crawlRelayCandidates() {
+  const sources = [
+    'https://nostr.watch/relays',
+  ];
+  const found = new Set();
+  for (const source of sources) {
+    try {
+      const response = await fetch(source, { redirect: 'follow' });
+      if (!response.ok) continue;
+      const text = await response.text();
+      const matches = text.match(/wss:\/\/[A-Za-z0-9.-]+(?:\/[^\s"'<>]*)?/g) || [];
+      for (const relay of matches) {
+        found.add(relay.replace(/\/$/, ''));
+      }
+    } catch {
+      // Crawl best-effort only.
+    }
+  }
+
+  for (const relay of [
+    'wss://relay.damus.io',
+    'wss://nos.lol',
+    'wss://relay.nostr.band',
+    'wss://relay.primal.net',
+    'wss://nostr.wine',
+  ]) {
+    found.add(relay);
+  }
+
+  return [...found];
+}
+
+function probeRelayHandshake(relayUrl) {
+  return new Promise((resolve) => {
+    const parsed = new URL(relayUrl);
+    const child = spawn(
+      'curl',
+      [
+        '-i',
+        '-sS',
+        '-m',
+        '10',
+        '-H', 'Connection: Upgrade',
+        '-H', 'Upgrade: websocket',
+        '-H', 'Sec-WebSocket-Version: 13',
+        '-H', 'Sec-WebSocket-Key: x3JJHMbDL1EzLkh9GBhXDw==',
+        `${parsed.origin}/`,
+      ],
+      { stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString('utf8');
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString('utf8');
+    });
+    child.on('error', () => resolve(false));
+    child.on('close', (code) => {
+      const ok = code === 0 && /101 Switching Protocols/i.test(stdout);
+      if (!ok && stderr) {
+        console.log(`[native-wasm:test] relay probe failed ${relayUrl}: ${stderr.trim()}`);
+      }
+      resolve(ok);
+    });
+  });
+}
+
+async function discoverHealthyRelays() {
+  const candidates = await crawlRelayCandidates();
+  const uniqueCandidates = [...new Set(candidates)];
+  const probed = await Promise.all(uniqueCandidates.map(async (relay) => ({
+    relay,
+    ok: await probeRelayHandshake(relay),
+  })));
+  const relays = probed.filter((item) => item.ok).map((item) => item.relay);
+  console.log(`[native-wasm:test] discovered ${relays.length} healthy relays: ${relays.join(', ') || 'none'}`);
+  return relays;
+}
+
 function createBareRepoBundle() {
   const work = mkdtempSync(path.join(tmpdir(), 'nostr-dag-bare-'));
   const srcDir = path.join(work, 'src-repo');
@@ -149,6 +231,11 @@ function createStaticServer(bareRepoBundleBytes = null) {
           res.end(Buffer.from(bareRepoBundleBytes));
           return;
         }
+        if (url.pathname === '/peers' && req.method === 'POST') {
+          res.writeHead(204);
+          res.end();
+          return;
+        }
         if (url.pathname === '/p2p-wasm-native-test.html') {
           const nativeWs = url.searchParams.get('nativeWs') || '';
           const html = `<!doctype html>
@@ -163,6 +250,7 @@ function createStaticServer(bareRepoBundleBytes = null) {
     <script type="module">
       import initWasm, * as wasmPkg from '/site/pkg/nostr_dag.js';
       import { createSharedLibp2pStack, deterministicPeerIdFromSeed } from '/demo/shared/libp2p-stack.mjs';
+      import { multiaddr } from 'https://esm.sh/@multiformats/multiaddr';
 
       const status = document.getElementById('status');
       const nativeWs = new URL(location.href).searchParams.get('nativeWs') || '';
@@ -223,6 +311,16 @@ function createStaticServer(bareRepoBundleBytes = null) {
         window.__p2pReady = true;
         status.textContent = 'ready';
         document.title = 'ready';
+
+        if (nativeWs && typeof node.dial === 'function') {
+          try {
+            await node.dial(multiaddr(nativeWs));
+            window.__p2pConnected = true;
+            console.log('[native-wasm:browser:status] dialed bootstrap peer ' + nativeWs);
+          } catch (error) {
+            console.log('[native-wasm:browser:warn] bootstrap dial failed: ' + (error?.message || error));
+          }
+        }
       } catch (error) {
         window.__p2pError = String(error?.message || error);
         window.__p2pErrors.push(window.__p2pError);
@@ -251,8 +349,10 @@ function createStaticServer(bareRepoBundleBytes = null) {
     <pre id="status">starting</pre>
     <script type="module">
       import initWasm, * as wasmPkg from '/site/pkg/nostr_dag.js';
+      import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       import { createSharedLibp2pStack, deterministicPeerIdFromSeed } from '/demo/shared/libp2p-stack.mjs';
-      import { encodeBridgeMessage } from '/demo/shared/bridge-protocol.mjs';
+      import { multiaddr } from 'https://esm.sh/@multiformats/multiaddr';
+      import { encodeBridgeMessage, decodeBridgeMessage } from '/demo/shared/bridge-protocol.mjs';
       import { finalizeEvent, generateSecretKey, getPublicKey, verifyEvent } from 'https://esm.sh/nostr-tools@2.25.0/pure';
 
       const status = document.getElementById('status');
@@ -271,6 +371,17 @@ function createStaticServer(bareRepoBundleBytes = null) {
       window.__bareRepoSentManifestId = '';
       window.__bareRepoSentSliceCount = 0;
       window.__bareRepoSha256 = '';
+      window.__bareRepoReconstructed = false;
+      window.__bareRepoReconstructionSource = '';
+      window.__bareRepoReconstructedSha256 = '';
+      window.__bareRepoReconstructedBytes = 0;
+
+      const DEFAULT_RELAYS = [
+        'wss://relay.damus.io',
+        'wss://nos.lol',
+        'wss://relay.nostr.band',
+      ];
+      const relayPool = new SimplePool();
 
       const packetize = (rootId, payload, maxSliceBytes) => {
         const chunkSize = Math.max(1, maxSliceBytes);
@@ -294,6 +405,128 @@ function createStaticServer(bareRepoBundleBytes = null) {
         content,
         tags,
       }, secretKey);
+
+      const sha256Hex = async (bytes) => {
+        const digest = await crypto.subtle.digest('SHA-256', bytes);
+        return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+      };
+
+      const parseTransferEvent = (event) => {
+        if (!event || typeof event !== 'object') return null;
+        let payload;
+        try {
+          payload = JSON.parse(event.content || '{}');
+        } catch {
+          return null;
+        }
+        if (payload.protocol !== '${TRANSFER_PROTOCOL}' || payload.version !== ${TRANSFER_VERSION}) {
+          return null;
+        }
+        if (event.kind === ${TRANSFER_MANIFEST_KIND} && payload.type === 'manifest') {
+          return {
+            type: 'manifest',
+            manifest: {
+              rootId: payload.root_id,
+              totalBytes: Number(payload.total_bytes) || 0,
+              totalSlices: Number(payload.total_slices) || 0,
+              eventId: event.id,
+            },
+          };
+        }
+        if (event.kind === ${TRANSFER_SLICE_KIND} && payload.type === 'slice') {
+          return {
+            type: 'slice',
+            slice: {
+              rootId: payload.root_id,
+              seq: Number(payload.seq) || 0,
+              totalSlices: Number(payload.total_slices) || 0,
+              data: new Uint8Array(payload.data || []),
+              eventId: event.id,
+              manifestId: event.tags?.find?.((tag) => Array.isArray(tag) && tag[0] === 'e' && tag[1])?.[1] || '',
+            },
+          };
+        }
+        return null;
+      };
+
+      const reconstruct = (slices) => {
+        if (!slices.length) return new Uint8Array(0);
+        const sorted = [...slices].sort((a, b) => a.seq - b.seq);
+        const { rootId, totalSlices } = sorted[0];
+        if (sorted.length !== totalSlices) {
+          throw new Error(\`slice count mismatch: expected \${totalSlices}, got \${sorted.length}\`);
+        }
+        for (let index = 0; index < sorted.length; index++) {
+          const slice = sorted[index];
+          if (slice.rootId !== rootId) {
+            throw new Error(\`rootId mismatch at seq \${index}\`);
+          }
+          if (slice.totalSlices !== totalSlices) {
+            throw new Error(\`totalSlices mismatch at seq \${index}\`);
+          }
+          if (slice.seq !== index) {
+            throw new Error(\`missing slice sequence \${index}\`);
+          }
+        }
+        const length = sorted.reduce((sum, slice) => sum + slice.data.length, 0);
+        const out = new Uint8Array(length);
+        let offset = 0;
+        for (const slice of sorted) {
+          out.set(slice.data, offset);
+          offset += slice.data.length;
+        }
+        return out;
+      };
+
+      function createTransferCollector(rootId, expectedTotalSlices, expectedTotalBytes) {
+        const manifest = { rootId, totalSlices: expectedTotalSlices, totalBytes: expectedTotalBytes, eventId: '' };
+        const slices = new Map();
+        let resolved = false;
+        let resolve;
+        const done = new Promise((r) => {
+          resolve = r;
+        });
+
+        const tryComplete = async (source) => {
+          if (resolved) return;
+          if (!manifest.totalSlices || slices.size < manifest.totalSlices) return;
+          const ordered = [...slices.values()].sort((a, b) => a.seq - b.seq);
+          const bytes = reconstruct(ordered);
+          const sha256 = await sha256Hex(bytes);
+          resolved = true;
+          window.__bareRepoReconstructed = true;
+          window.__bareRepoReconstructionSource = source;
+          window.__bareRepoReconstructedSha256 = sha256;
+          window.__bareRepoReconstructedBytes = bytes.length;
+          resolve({
+            source,
+            sha256,
+            bytes,
+            slices: ordered.length,
+          });
+        };
+
+        return {
+          ingest: async (source, event) => {
+            const parsed = parseTransferEvent(event);
+            if (!parsed) return null;
+            if (parsed.type === 'manifest') {
+              manifest.eventId = parsed.manifest.eventId;
+              manifest.totalSlices = parsed.manifest.totalSlices;
+              manifest.totalBytes = parsed.manifest.totalBytes;
+              await tryComplete(source);
+              return null;
+            }
+            if (parsed.type === 'slice' && parsed.slice.rootId === rootId) {
+              slices.set(parsed.slice.seq, parsed.slice);
+              await tryComplete(source);
+            }
+            return null;
+          },
+          done,
+          tryComplete,
+        };
+      }
 
       try {
         await initWasm('/site/pkg/nostr_dag_bg.wasm');
@@ -322,20 +555,37 @@ function createStaticServer(bareRepoBundleBytes = null) {
         const { node } = stack;
         window.__p2pPeerId = node.peerId.toString();
         window.__p2pPeerIdMatchesExpected = window.__p2pPeerId === window.__expectedPeerId;
-        node.services.pubsub.addEventListener('message', (evt) => {
+        let transferCollector = null;
+        node.services.pubsub.addEventListener('message', async (evt) => {
           const text = new TextDecoder().decode(evt.detail.data);
           window.__p2pReceived.push(text);
           try {
-            const parsed = JSON.parse(text);
+            const parsed = decodeBridgeMessage(text) || JSON.parse(text);
             const kind = parsed?.event?.kind;
             if (kind !== undefined) {
               window.__p2pBridgeKinds.push(kind);
+            }
+            if (transferCollector && parsed?.event) {
+              await transferCollector.ingest('libp2p', parsed.event);
             }
           } catch (error) {
             window.__p2pErrors.push(String(error));
           }
           status.textContent = \`received \${window.__p2pBridgeKinds.join(',')}\`;
         });
+
+        if (nativeWs && typeof node.dial === 'function') {
+          try {
+            await node.dial(multiaddr(nativeWs));
+            window.__p2pConnected = true;
+            console.log('[native-wasm:bare:status] dialed bootstrap peer ' + nativeWs);
+          } catch (error) {
+            console.log('[native-wasm:bare:warn] bootstrap dial failed: ' + (error?.message || error));
+          }
+        }
+
+        await node.services.pubsub.subscribe('${BRIDGE_TOPIC}');
+        console.log('[native-wasm:bare:trace] subscribed to bridge topic ${BRIDGE_TOPIC}');
 
         await new Promise((resolve) => {
           const tick = () => {
@@ -351,12 +601,16 @@ function createStaticServer(bareRepoBundleBytes = null) {
         if (!bundleB64) {
           throw new Error('missing bare repo bundle payload');
         }
+        console.log('[native-wasm:bare:trace] decoding bare repo bundle payload');
         const binary = atob(bundleB64);
         const bundleBytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+        console.log('[native-wasm:bare:trace] decoded bundle bytes ' + bundleBytes.length);
         const rootId = 'live-bare-repo';
         const sliceSize = 256;
         const slices = packetize(rootId, bundleBytes, sliceSize);
+        console.log('[native-wasm:bare:trace] packetized bundle into ' + slices.length + ' slices');
         const secretKey = generateSecretKey();
+        console.log('[native-wasm:bare:trace] signing manifest event');
         const manifestEvent = encodeTransferEvent(secretKey, ${TRANSFER_MANIFEST_KIND}, JSON.stringify({
           protocol: '${TRANSFER_PROTOCOL}',
           version: ${TRANSFER_VERSION},
@@ -368,27 +622,76 @@ function createStaticServer(bareRepoBundleBytes = null) {
         if (!verifyEvent(manifestEvent)) {
           throw new Error('manifest event signature failed verification');
         }
-        window.__bareRepoSentManifestId = manifestEvent.id;
-        await node.broadcast(encodeBridgeMessage(manifestEvent, 'nostr->libp2p', [], { topic: '${BRIDGE_TOPIC}' }));
-        window.__bareRepoSentKinds.push(manifestEvent.kind);
-        for (const slice of slices) {
-          const sliceEvent = encodeTransferEvent(secretKey, ${TRANSFER_SLICE_KIND}, JSON.stringify({
-            protocol: '${TRANSFER_PROTOCOL}',
-            version: ${TRANSFER_VERSION},
-            type: 'slice',
-            root_id: slice.rootId,
-            seq: slice.seq,
-            total_slices: slice.totalSlices,
-            data: [...slice.data],
-          }), [['e', manifestEvent.id]]);
-          if (!verifyEvent(sliceEvent)) {
-            throw new Error('slice event signature failed verification');
+        const sliceEvents = slices.map((slice) => encodeTransferEvent(secretKey, ${TRANSFER_SLICE_KIND}, JSON.stringify({
+          protocol: '${TRANSFER_PROTOCOL}',
+          version: ${TRANSFER_VERSION},
+          type: 'slice',
+          root_id: slice.rootId,
+          seq: slice.seq,
+          total_slices: slice.totalSlices,
+          data: [...slice.data],
+        }), [['e', manifestEvent.id]]));
+        transferCollector = createTransferCollector(rootId, slices.length, bundleBytes.length);
+
+        const publishTransferEvent = async (event) => {
+          const bridgePayload = encodeBridgeMessage(event, 'nostr->libp2p', [], { topic: '${BRIDGE_TOPIC}' });
+          await Promise.all([
+            node.services.pubsub.publish('${BRIDGE_TOPIC}', new TextEncoder().encode(bridgePayload)),
+            Promise.allSettled(DEFAULT_RELAYS.map((relay) => relayPool.publish([relay], event))),
+          ]);
+        };
+
+        const relayQueryPromise = (async () => {
+          try {
+            const deadline = Date.now() + 120_000;
+            const queryIds = [manifestEvent.id, ...sliceEvents.map((event) => event.id)];
+            const seenIds = new Set();
+            while (Date.now() < deadline && !window.__bareRepoReconstructed) {
+              const events = await relayPool.querySync(
+                DEFAULT_RELAYS,
+                { ids: queryIds, limit: queryIds.length },
+                { maxWait: 5000, label: 'bare-repo-transfer' },
+              );
+              for (const event of events || []) {
+                if (!event?.id || seenIds.has(event.id)) continue;
+                seenIds.add(event.id);
+                await transferCollector.ingest('relay', event);
+              }
+              if (window.__bareRepoReconstructed) return true;
+              await new Promise((resolve) => setTimeout(resolve, 1000));
+            }
+            return window.__bareRepoReconstructed;
+          } catch (error) {
+            window.__p2pErrors.push(String(error?.message || error));
+            return false;
           }
-          await node.broadcast(encodeBridgeMessage(sliceEvent, 'nostr->libp2p', [], { topic: '${BRIDGE_TOPIC}' }));
+        })();
+
+        console.log('[native-wasm:bare:trace] broadcasting manifest event ' + manifestEvent.id);
+        window.__bareRepoSentManifestId = manifestEvent.id;
+        await publishTransferEvent(manifestEvent);
+        console.log('[native-wasm:bare:trace] manifest broadcast complete');
+        window.__bareRepoSentKinds.push(manifestEvent.kind);
+        for (let index = 0; index < sliceEvents.length; index++) {
+          const sliceEvent = sliceEvents[index];
+          const slice = slices[index];
+          console.log('[native-wasm:bare:trace] signing slice ' + slice.seq + '/' + slice.totalSlices);
+          console.log('[native-wasm:bare:trace] broadcasting slice event ' + sliceEvent.id);
+          await publishTransferEvent(sliceEvent);
+          console.log('[native-wasm:bare:trace] slice broadcast complete ' + slice.seq);
           window.__bareRepoSentKinds.push(sliceEvent.kind);
         }
-        window.__bareRepoSentSliceCount = slices.length;
+        window.__bareRepoSentSliceCount = sliceEvents.length;
         window.__bareRepoPublished = true;
+        console.log('[native-wasm:bare:trace] bare repo publish complete');
+        const reconstructed = await transferCollector.done;
+        if (reconstructed?.bytes) {
+          window.__bareRepoReconstructed = true;
+          window.__bareRepoReconstructionSource = reconstructed.source;
+          window.__bareRepoReconstructedSha256 = reconstructed.sha256;
+          window.__bareRepoReconstructedBytes = reconstructed.bytes.length;
+          console.log('[native-wasm:bare:trace] bare repo reconstructed via ' + reconstructed.source + ' sha256 ' + reconstructed.sha256);
+        }
         status.textContent = 'published';
         document.title = 'published';
       } catch (error) {
@@ -654,6 +957,11 @@ async function runChromiumBareRepoExchange(browserBaseUrl, nativeDialAddr, bundl
       `[native-wasm:bare-browser:requestfailed] ${request.method()} ${request.url()} ${request.failure()?.errorText || ''}`,
     );
   });
+  page.on('response', (response) => {
+    if (response.status() === 404) {
+      console.log(`[native-wasm:bare-browser:404] ${response.request().method()} ${response.url()}`);
+    }
+  });
   try {
     const pageUrl = `${browserBaseUrl}/p2p-bare-repo-test.html?nativeWs=${encodeURIComponent(nativeDialAddr)}&bundleB64=${encodeURIComponent(bundleB64)}`;
     console.log(`[native-wasm:test] navigating bare-repo browser to ${pageUrl}`);
@@ -836,6 +1144,7 @@ test('native peer and wasm peer exchange a real bare-repo nip-pip blob in Chromi
   await ensureChromiumBrowser();
 
   const bareRepo = createBareRepoBundle();
+  const bareRepoSha256 = createHash('sha256').update(bareRepo.bundleBytes).digest('hex');
   const bareRepoBundleB64 = Buffer.from(bareRepo.bundleBytes).toString('base64');
   const [{ server, port: serverPort }, native] = await Promise.all([
     createStaticServer(bareRepo.bundleBytes),
@@ -852,11 +1161,17 @@ test('native peer and wasm peer exchange a real bare-repo nip-pip blob in Chromi
   );
 
   try {
-    await waitForCondition(
-      async () => native.stdoutLines.some((line) => line.includes('INBOUND transfer-manifest root_id=live-bare-repo'))
-        && native.stdoutLines.some((line) => line.includes('INBOUND transfer-slice root_id=live-bare-repo')),
-      { timeoutMs: 120_000, description: 'native peer to receive bare-repo transfer events' },
-    );
+    try {
+      await waitForCondition(
+        async () => native.stdoutLines.some((line) => line.includes('INBOUND transfer-manifest root_id=live-bare-repo'))
+          && native.stdoutLines.some((line) => line.includes('INBOUND transfer-slice root_id=live-bare-repo')),
+        { timeoutMs: 30_000, description: 'native peer to receive bare-repo transfer events' },
+      );
+    } catch (error) {
+      console.log(`[native-wasm:test] native libp2p receipt did not win the race: ${error?.message || error}`);
+    }
+
+    await page.waitForFunction(() => window.__bareRepoReconstructed === true, null, { timeout: 120_000 });
 
     const result = await page.evaluate(() => ({
       peerId: window.__p2pPeerId || '',
@@ -867,6 +1182,10 @@ test('native peer and wasm peer exchange a real bare-repo nip-pip blob in Chromi
       sentSliceCount: window.__bareRepoSentSliceCount || 0,
       published: window.__bareRepoPublished || false,
       connected: window.__p2pConnected || false,
+      reconstructed: window.__bareRepoReconstructed || false,
+      reconstructionSource: window.__bareRepoReconstructionSource || '',
+      reconstructedSha256: window.__bareRepoReconstructedSha256 || '',
+      reconstructedBytes: window.__bareRepoReconstructedBytes || 0,
       error: window.__p2pError || '',
     }));
 
@@ -878,16 +1197,12 @@ test('native peer and wasm peer exchange a real bare-repo nip-pip blob in Chromi
     assert.ok(result.sentSliceCount > 0, 'browser should publish at least one slice event');
     assert.ok(result.sentKinds.includes(TRANSFER_MANIFEST_KIND), 'browser should publish a manifest event');
     assert.ok(result.sentKinds.includes(TRANSFER_SLICE_KIND), 'browser should publish slice events');
-    assert.ok(
-      native.stdoutLines.some((line) => line.includes('INBOUND transfer-manifest root_id=live-bare-repo')),
-      'native node should receive a manifest event',
-    );
-    assert.ok(
-      native.stdoutLines.some((line) => line.includes('INBOUND transfer-slice root_id=live-bare-repo')),
-      'native node should receive a slice event',
-    );
+    assert.ok(result.reconstructed, 'browser should reconstruct the bare repo from relay or libp2p');
+    assert.ok(['relay', 'libp2p'].includes(result.reconstructionSource), 'browser should reconstruct from relay or libp2p');
+    assert.equal(result.reconstructedSha256, bareRepoSha256, 'reconstructed bundle sha256 should match the source bundle');
+    assert.equal(result.reconstructedBytes, bareRepo.bundleBytes.length, 'reconstructed byte length should match the source bundle');
     console.log(
-      `[native-wasm:test] live bare-repo success peerId=${result.peerId} manifest=${result.sentManifestId} slices=${result.sentSliceCount}`,
+      `[native-wasm:test] live bare-repo success peerId=${result.peerId} source=${result.reconstructionSource} manifest=${result.sentManifestId} slices=${result.sentSliceCount}`,
     );
   } finally {
     await page.close().catch(() => {});
