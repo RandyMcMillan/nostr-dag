@@ -75,10 +75,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let dcutr = dcutr::Behaviour::new(local_peer_id);
     let autonat = autonat::Behaviour::new(
         local_peer_id,
-        autonat::Config {
-            push_listen_addr_updates: true,
-            ..Default::default()
-        },
+        autonat::Config::default(),
     );
 
     let mut swarm = libp2p::SwarmBuilder::with_existing_identity(local_key)
@@ -175,7 +172,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     }
                     Some(NodeCommand::Status) => {
                         println!(
-                            "{} discovered_peers={} relay_peers={} wasm_like_peers={} nat={:?}",
+                            "{} discovered_peers={} relay_peers={} wasm_like_peers={} nat=observing",
                             runtime.status_line(&listen_addrs, swarm.connected_peers().count()),
                             discovered_peers.len(),
                             relay_peers.len(),
@@ -183,8 +180,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                 .values()
                                 .filter(|role| matches!(role, PeerTopicRole::WasmLike))
                                 .count(),
-                            // The AutoNAT behaviour reports reachability through identify events.
-                            "unknown",
                         );
                     }
                     Some(NodeCommand::Quit) => {
@@ -282,9 +277,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     SwarmEvent::Behaviour(BehaviourEvent::Relay(relay::client::Event::ReservationReqAccepted { relay_peer_id, .. })) => {
                         relay_peers.insert(relay_peer_id);
                         println!("RELAY reserved peer={relay_peer_id}");
-                    }
-                    SwarmEvent::Behaviour(BehaviourEvent::AutoNat(event)) => {
-                        println!("AUTONAT {event:?}");
                     }
                     SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(
                         gossipsub::Event::Message { propagation_source, message, .. },
