@@ -47,6 +47,7 @@ function runNativePeer() {
       if (sentCommands) return;
       sentCommands = true;
       child.stdin.write('/status\n/quit\n');
+      child.stdin.end();
     };
 
     child.stdout.on('data', (chunk) => {
