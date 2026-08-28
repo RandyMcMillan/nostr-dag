@@ -5,6 +5,7 @@
 
 use std::env;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use nostr::{EventId, Filter, Keys, Kind, PublicKey, SecretKey};
@@ -31,7 +32,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         env::var("FEDERATION_KEY").map_err(|_| "FEDERATION_KEY env var required (nsec or hex)")?;
     let keys = parse_keys(&secret_key)?;
 
-    let relay_url = env::var("RELAY_URL").unwrap_or_else(|_| "ws://localhost:8080".to_string());
+    let relay_urls = relay_urls_from_env();
 
     let federation_pubkeys: Vec<PublicKey> = env::var("FEDERATION_PUBKEYS")
         .map_err(|_| "FEDERATION_PUBKEYS env var required (comma-separated hex pubkeys)")?
@@ -41,7 +42,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!(
         pubkey = %keys.public_key(),
-        relay = %relay_url,
+        relays = ?relay_urls,
         federation_size = federation_pubkeys.len(),
         "Starting federation daemon"
     );
@@ -53,7 +54,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dag = Arc::new(Mutex::new(Dag::new(federation_pubkeys.clone())));
     let pool = RelayPool::default();
 
-    pool.add_relay(&relay_url, RelayOptions::default()).await?;
+    for relay_url in &relay_urls {
+        pool.add_relay(relay_url, RelayOptions::default()).await?;
+    }
     pool.connect().await;
 
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -68,15 +71,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dag_clone = dag.clone();
     let keys_clone = keys.clone();
     let pool_clone = pool.clone();
+    let relay_urls = Arc::new(relay_urls);
+    let relay_round = Arc::new(AtomicUsize::new(0));
 
     pool.handle_notifications(move |notification| {
         let dag = dag_clone.clone();
         let keys = keys_clone.clone();
         let pool = pool_clone.clone();
+        let relay_urls = relay_urls.clone();
+        let relay_round = relay_round.clone();
 
         async move {
             if let RelayPoolNotification::Event { event, .. } = notification {
-                handle_event(&dag, &keys, &pool, (*event).clone()).await;
+                handle_event(&dag, &keys, &pool, &relay_urls, &relay_round, (*event).clone()).await;
             }
             Ok(false)
         }
@@ -86,7 +93,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn handle_event(dag: &Arc<Mutex<Dag>>, keys: &Keys, pool: &RelayPool, event: nostr::Event) {
+async fn handle_event(
+    dag: &Arc<Mutex<Dag>>,
+    keys: &Keys,
+    pool: &RelayPool,
+    relay_urls: &Arc<Vec<String>>,
+    relay_round: &Arc<AtomicUsize>,
+    event: nostr::Event,
+) {
     let event_id = event.id;
     let event_kind = event.kind;
     let event_author = event.pubkey;
@@ -106,7 +120,7 @@ async fn handle_event(dag: &Arc<Mutex<Dag>>, keys: &Keys, pool: &RelayPool, even
             );
 
             if is_chat_message {
-                maybe_ack(&mut dag_guard, keys, pool);
+                maybe_ack(&mut dag_guard, keys, relay_urls, relay_round);
             }
         }
         InsertResult::Buffered { missing, .. } => {
@@ -126,7 +140,12 @@ async fn handle_event(dag: &Arc<Mutex<Dag>>, keys: &Keys, pool: &RelayPool, even
     }
 }
 
-fn maybe_ack(dag: &mut Dag, keys: &Keys, pool: &RelayPool) {
+fn maybe_ack(
+    dag: &mut Dag,
+    keys: &Keys,
+    relay_urls: &Arc<Vec<String>>,
+    relay_round: &Arc<AtomicUsize>,
+) {
     let dominated = dag.participants().contains(&keys.public_key());
     if !dominated {
         trace!(pubkey = %keys.public_key(), "skipping ack: not a federation participant");
@@ -160,15 +179,50 @@ fn maybe_ack(dag: &mut Dag, keys: &Keys, pool: &RelayPool) {
     };
 
     let delay_ms = rand::thread_rng().gen_range(0..10_000);
-    let pool = pool.clone();
+    let relay_urls = relay_urls.clone();
+    let relay_round = relay_round.clone();
 
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(delay_ms)).await;
         info!(ack_id = %ack.id, delay_ms, "Publishing acknowledgment");
-        if let Err(e) = pool.send_event(&ack).await {
+        if let Err(e) = publish_ack_round_robin(&ack, relay_urls, relay_round).await {
             error!(?e, "Failed to publish ack");
         }
     });
+}
+
+async fn publish_ack_round_robin(
+    ack: &nostr::Event,
+    relay_urls: Arc<Vec<String>>,
+    relay_round: Arc<AtomicUsize>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if relay_urls.is_empty() {
+        return Ok(());
+    }
+
+    let start = relay_round.fetch_add(1, Ordering::Relaxed) % relay_urls.len();
+    let ordered_relays = relay_urls
+        .iter()
+        .cycle()
+        .skip(start)
+        .take(relay_urls.len())
+        .cloned()
+        .collect::<Vec<_>>();
+
+    for (index, relay_url) in ordered_relays.iter().enumerate() {
+        let pool = RelayPool::default();
+        pool.add_relay(relay_url, RelayOptions::default()).await?;
+        pool.connect().await;
+        info!(relay = %relay_url, ack_id = %ack.id, index, "Publishing acknowledgment via relay");
+        if let Err(e) = pool.send_event(ack).await {
+            warn!(relay = %relay_url, ?e, "Failed to publish ack via relay");
+        }
+        if index + 1 < ordered_relays.len() {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+    }
+
+    Ok(())
 }
 
 async fn fetch_missing(pool: &RelayPool, missing: &[EventId]) {
@@ -191,4 +245,29 @@ fn parse_keys(s: &str) -> Result<Keys, Box<dyn std::error::Error>> {
         let sk = SecretKey::from_hex(s)?;
         Ok(Keys::new(sk))
     }
+}
+
+fn relay_urls_from_env() -> Vec<String> {
+    let candidates = env::var("RELAY_URLS")
+        .ok()
+        .map(|value| value.split(',').map(str::trim).map(str::to_string).collect::<Vec<_>>())
+        .unwrap_or_else(|| {
+            env::var("RELAY_URL")
+                .ok()
+                .map(|value| vec![value])
+                .unwrap_or_else(|| vec!["ws://localhost:8080".to_string()])
+        });
+
+    let mut deduped = Vec::new();
+    for candidate in candidates {
+        let trimmed = candidate.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let normalized = trimmed.trim_end_matches('/').to_string();
+        if !deduped.iter().any(|existing| existing == &normalized) {
+            deduped.push(normalized);
+        }
+    }
+    deduped
 }
