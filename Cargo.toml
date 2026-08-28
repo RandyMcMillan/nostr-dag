@@ -99,7 +99,7 @@ libp2p = { version = "0.54", optional = true, features = [
     "ping",
     "macros",
 ] }
-nostr = { version = "0.44", default-features = false, features = ["alloc"] }
+nostr = { version = "0.44", default-features = false, features = ["std"] }
 
 [dependencies]
 getrandom = { version = "0.2", features = ["js"], optional = true }

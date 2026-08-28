@@ -1314,7 +1314,9 @@ pub mod wasm_node {
     use wasm_bindgen_futures::spawn_local;
     use web_sys::js_sys::Function;
 
-    use super::{maybe_build_wasm_time_response, NOSTR_DAG_TOPIC};
+    use super::{
+        deterministic_wasm_identity_keypair, maybe_build_wasm_time_response, NOSTR_DAG_TOPIC,
+    };
 
     #[derive(NetworkBehaviour)]
     struct Behaviour {
