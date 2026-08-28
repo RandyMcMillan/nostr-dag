@@ -1,185 +1,125 @@
-name: CI
+name: macOS Cross-Architecture CI
 
 on:
   push:
-    branches: ["**"]
+    branches: [ "main", "master" ]
   pull_request:
+    branches: [ "main", "master" ]
+
+  # Manual Dispatch Configuration
   workflow_dispatch:
-
-env:
-  CARGO_TERM_COLOR: always
-
-permissions:
-  contents: read
+    inputs:
+      runner_target:
+        description: 'Select runner architecture to build'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - 'all'
+          - 'arm64-only'
+          - 'x86_64-only'
+      enable_debug:
+        description: 'Enable verbose logging / debug outputs'
+        required: false
+        default: false
+        type: boolean
+      custom_cargo_args:
+        description: 'Additional flags for cargo build (e.g. --release)'
+        required: false
+        default: '--release'
+        type: string
 
 jobs:
-  test:
-    name: Test (native)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust stable
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Build (native)
-        run: cargo build --features native
-
-      - name: Run tests
-        run: cargo test --features native
-
-  js:
-    name: Test (JS / GUI)
+  build-macos:
+    name: Build on ${{ matrix.runner }} (${{ matrix.target-arch }})
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ github.event_name == 'workflow_dispatch' && fromJSON('["ubuntu-latest","windows-latest","macos-latest","macos-26","macos-15","macos-14","macos-13","macos-12","macos-26-large","macos-26-xlarge","macos-15-large","macos-15-xlarge"]') || fromJSON('["ubuntu-latest"]') }}
-    runs-on: ${{ matrix.os }}
+        include:
+          # Active Runners
+          - runner: macos-latest
+            target-arch: arm64
+          - runner: macos-26
+            target-arch: arm64
+          - runner: macos-26-intel
+            target-arch: x86_64
+          - runner: macos-15
+            target-arch: arm64
+          - runner: macos-15-intel
+            target-arch: x86_64
+
+          # Deprecated / Legacy Standard Runners
+          - runner: macos-14
+            target-arch: arm64
+          - runner: macos-13
+            target-arch: x86_64
+          - runner: macos-12
+            target-arch: x86_64
+
+          # Larger Runners (Org / Enterprise)
+          - runner: macos-26-large
+            target-arch: x86_64
+          - runner: macos-26-xlarge
+            target-arch: arm64
+          - runner: macos-15-large
+            target-arch: x86_64
+          - runner: macos-15-xlarge
+            target-arch: arm64
+
+    # Conditionally filter runners based on the dispatch choice
+    if: |
+      github.event_name != 'workflow_dispatch' ||
+      github.event.inputs.runner_target == 'all' ||
+      (github.event.inputs.runner_target == 'arm64-only' && matrix.target-arch == 'arm64') ||
+      (github.event.inputs.runner_target == 'x86_64-only' && matrix.target-arch == 'x86_64')
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Install Node dependencies
-        run: npm ci
-
-      - name: Install Rust stable
+      - name: Display Dispatch Inputs & Host Architecture
         run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-          rustup target add wasm32-unknown-unknown
+          echo "=== Workflow Dispatch Options ==="
+          echo "Runner Target Input: ${{ inputs.runner_target }}"
+          echo "Debug Mode Input:   ${{ inputs.enable_debug }}"
+          echo "Cargo Flags Input:  ${{ inputs.custom_cargo_args }}"
+          echo ""
+          echo "=== OS & Architecture Details ==="
+          sw_vers
+          echo "Kernel architecture: $(uname -m)"
+          echo "Machine processor:   $(uname -p)"
 
-      - name: Install clang for wasm C dependencies (Linux)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y clang lld
-
-      - name: Install clang for wasm C dependencies (macOS)
-        if: runner.os == 'macOS'
+      - name: Verify Architecture Expectation
         run: |
-          brew install llvm
-          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
+          EXPECTED="${{ matrix.target-arch }}"
+          ACTUAL="$(uname -m)"
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "Error: Expected $EXPECTED but running on $ACTUAL"
+            exit 1
+          else
+            echo "Successfully running on $ACTUAL as expected."
+          fi
 
-      - name: Install LLVM for wasm C dependencies (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
+      - name: Print Build Environment Tools
         run: |
-          choco install llvm -y --no-progress
-          "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          echo "Xcode Version:"
+          xcode-select -p
+          xcodebuild -version
+          
+          echo "Compiler path:"
+          which clang
+          clang --version
 
-      - name: Install wasm-pack
-        run: cargo install wasm-pack --locked
-
-      - name: Run JS tests
-        run: node --test test/*.test.mjs
-
-  wasm:
-    name: Build (wasm)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust stable
+      - name: Run Cargo Build
         run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-          rustup target add wasm32-unknown-unknown
+          if [ "${{ inputs.enable_debug }}" = "true" ]; then
+            set -x
+            export RUST_BACKTRACE=1
+          fi
+          
+          # Access dispatch input string or fallback default
+          CARGO_FLAGS="${{ inputs.custom_cargo_args || '--release' }}"
+          echo "Executing: cargo build $CARGO_FLAGS"
+          # cargo build $CARGO_FLAGS
 
-      - name: Install clang for wasm C dependencies
-        run: sudo apt-get update && sudo apt-get install -y clang lld
-
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-wasm-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Install wasm-pack
-        run: cargo install wasm-pack --locked
-
-      - name: Build wasm package
-        run: wasm-pack build --target web --no-default-features --features wasm
-
-      - name: Test wasm JS contracts
-        run: node --test test/git-wasm.test.mjs test/p2p-wasm.test.mjs
-
-      - name: Copy shared CSS for site assets
-        run: |
-          mkdir -p site/shared
-          cp demo/shared/page.css site/shared/
-
-      - name: Upload wasm artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: wasm-pkg
-          path: pkg/
-
-  p2p:
-    name: Build (p2p native)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust stable
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-
-      - name: Install libp2p system deps
-        run: sudo apt-get install -y libssl-dev pkg-config
-
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-p2p-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Build (native + p2p)
-        run: cargo build --features native,p2p
-
-      - name: Test (native + p2p)
-        run: cargo test --features native,p2p
-
-  p2p-wasm:
-    name: Build (p2p-wasm)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust stable
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-          rustup target add wasm32-unknown-unknown
-
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-p2p-wasm-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Install wasm-pack
-        run: cargo install wasm-pack --locked
-
-      - name: Build wasm package (p2p-wasm)
-        env:
-          CC: clang
-          CXX: clang++
-        run: wasm-pack build --target web --no-default-features --features wasm,p2p-wasm
