@@ -209,7 +209,7 @@ fn percent_encode(value: &str) -> String {
     out
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod tests {
     use super::*;
     use serde_json::Value;
