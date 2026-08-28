@@ -17,6 +17,33 @@ use nostr::{Event, EventId, Keys, PublicKey};
 use std::collections::BTreeSet;
 
 #[cfg(feature = "p2p")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PeerTopicRole {
+    NativeLike,
+    WasmLike,
+}
+
+#[cfg(feature = "p2p")]
+pub fn classify_peer_topic_role(address: &Multiaddr) -> PeerTopicRole {
+    classify_peer_topic_role_str(&address.to_string())
+}
+
+#[cfg(feature = "p2p")]
+pub fn classify_peer_topic_role_str(address: &str) -> PeerTopicRole {
+    let lowered = address.to_ascii_lowercase();
+    if lowered.contains("/ws")
+        || lowered.contains("/wss")
+        || lowered.contains("/webrtc")
+        || lowered.contains("/webtransport")
+        || lowered.contains("/p2p-circuit")
+    {
+        PeerTopicRole::WasmLike
+    } else {
+        PeerTopicRole::NativeLike
+    }
+}
+
+#[cfg(feature = "p2p")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NodeCommand {
     Broadcast(String),
@@ -337,6 +364,23 @@ mod tests {
             parse_node_command("hello world").unwrap(),
             Some(NodeCommand::Broadcast(message)) if message == "hello world"
         ));
+    }
+
+    #[cfg(feature = "p2p")]
+    #[test]
+    fn classify_peer_topic_role_marks_browser_like_transports() {
+        assert_eq!(
+            classify_peer_topic_role_str("/ip4/127.0.0.1/tcp/4001"),
+            PeerTopicRole::NativeLike
+        );
+        assert_eq!(
+            classify_peer_topic_role_str("/dns4/example.com/tcp/443/wss/p2p/abc"),
+            PeerTopicRole::WasmLike
+        );
+        assert_eq!(
+            classify_peer_topic_role_str("/webrtc/p2p/abc"),
+            PeerTopicRole::WasmLike
+        );
     }
 
     #[cfg(feature = "p2p")]

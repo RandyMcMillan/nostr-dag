@@ -9,7 +9,7 @@
 //!   - `/help` shows the command list
 //!   - `/quit` exits
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use libp2p::{
@@ -21,7 +21,8 @@ use libp2p::{
 };
 use nostr_dag::p2p::{NETWORK_TIME_PROTOCOL, NETWORK_TIME_VERSION, NOSTR_DAG_TOPIC};
 use nostr_dag::p2p_node::{
-    format_inbound_summary, parse_node_command, NodeCommand, PeerRuntime, HELP_TEXT,
+    classify_peer_topic_role, format_inbound_summary, parse_node_command, NodeCommand, PeerRuntime,
+    PeerTopicRole, HELP_TEXT,
 };
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::mpsc;
@@ -107,6 +108,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("HELP\n{HELP_TEXT}");
 
     let mut discovered_peers = HashSet::<PeerId>::new();
+    let mut peer_topic_roles = HashMap::<PeerId, PeerTopicRole>::new();
     let mut listen_addrs: Vec<String> = Vec::new();
 
     if let Ok(addr) = std::env::var("P2P_DIAL") {
@@ -141,9 +143,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     }
                     Some(NodeCommand::Status) => {
                         println!(
-                            "{} discovered_peers={}",
+                            "{} discovered_peers={} wasm_like_peers={}",
                             runtime.status_line(&listen_addrs, swarm.connected_peers().count()),
                             discovered_peers.len(),
+                            peer_topic_roles
+                                .values()
+                                .filter(|role| matches!(role, PeerTopicRole::WasmLike))
+                                .count(),
                         );
                     }
                     Some(NodeCommand::Quit) => {
@@ -164,8 +170,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     }
                     SwarmEvent::Behaviour(BehaviourEvent::Mdns(mdns::Event::Discovered(peers))) => {
                         for (peer_id, addr) in peers {
+                            let role = classify_peer_topic_role(&addr);
+                            peer_topic_roles.insert(peer_id, role);
                             if discovered_peers.insert(peer_id) {
-                                info!(%peer_id, %addr, "mDNS peer discovered");
+                                info!(%peer_id, %addr, ?role, "mDNS peer discovered");
+                                if matches!(role, PeerTopicRole::WasmLike) {
+                                    println!(
+                                        "DETECTED wasm-topic peer peer={} addr={}",
+                                        peer_id, addr
+                                    );
+                                } else {
+                                    println!(
+                                        "DETECTED native-topic peer peer={} addr={}",
+                                        peer_id, addr
+                                    );
+                                }
                             }
                             swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
                         }
@@ -175,6 +194,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             discovered_peers.remove(&peer_id);
                             swarm.behaviour_mut().gossipsub.remove_explicit_peer(&peer_id);
                         }
+                    }
+                    SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
+                        let remote_addr = endpoint.get_remote_address().to_string();
+                        let role = classify_peer_topic_role(endpoint.get_remote_address());
+                        peer_topic_roles.insert(peer_id, role);
+                        if matches!(role, PeerTopicRole::WasmLike) {
+                            println!(
+                                "DETECTED wasm-topic peer peer={} addr={}",
+                                peer_id, remote_addr
+                            );
+                        } else {
+                            println!("DETECTED native-topic peer peer={} addr={}", peer_id, remote_addr);
+                        }
+                    }
+                    SwarmEvent::ConnectionClosed { peer_id, .. } => {
+                        peer_topic_roles.remove(&peer_id);
                     }
                     SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(
                         gossipsub::Event::Message { propagation_source, message, .. },
@@ -189,10 +224,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
                             let reaction = runtime.process_inbound_message(&text);
                             let summary = reaction.summary;
+                            let topic_role = peer_topic_roles.get(&propagation_source).copied();
                             println!(
-                                "{} source={}",
+                                "{} source={}{}",
                                 format_inbound_summary(&summary),
-                                propagation_source.to_string()
+                                propagation_source.to_string(),
+                                topic_role
+                                    .map(|role| match role {
+                                        PeerTopicRole::WasmLike => " topic_peer=wasm-like",
+                                        PeerTopicRole::NativeLike => " topic_peer=native-like",
+                                    })
+                                    .unwrap_or("")
                             );
                             if let Some(event_id) = reaction.inserted_event_id {
                                 println!(
