@@ -55,7 +55,7 @@ function runNativePeer(bootstrap = WASM_LIKE_BOOTSTRAP) {
     child.stdout.on('data', (chunk) => {
       stdout += chunk.toString('utf8');
       logChunk('stdout', chunk);
-      if (stdout.includes('BOOTSTRAP peers=1 wasm_like=1')) {
+      if (/^BOOTSTRAP peers=\d+ wasm_like=\d+$/m.test(stdout)) {
         sendCommands();
       }
     });
