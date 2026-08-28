@@ -39,7 +39,6 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     const decoder = new TextDecoder();
     const SIGNER_KEY = 'nostr-dag-bridge-signer-v1';
     const DEFAULT_RELAYS = [
-      'wss://relay.damus.io',
       'wss://nos.lol',
       'wss://relay.nostr.com',
       'wss://relay.nostr.band',

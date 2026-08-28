@@ -33,7 +33,7 @@ test('buildRepositoryAnnouncementDraft emits a real NIP-34 repository announceme
     description: 'demo repository',
     web: ['https://github.com/RandyMcMillan/nostr-dag'],
     clone: ['nostr://npub1example/nostr-dag-demo'],
-    relays: ['wss://relay.damus.io', 'wss://nos.lol'],
+    relays: ['wss://nos.lol', 'wss://relay.primal.net'],
     earliestUniqueCommit: '1'.repeat(40),
     maintainers: ['a'.repeat(64), 'b'.repeat(64)],
     hashtags: ['nip34', 'quorum'],
@@ -42,7 +42,7 @@ test('buildRepositoryAnnouncementDraft emits a real NIP-34 repository announceme
   assert.equal(draft.kind, NIP34_REPOSITORY_ANNOUNCEMENT_KIND);
   assert.deepEqual(draft.tags[0], ['d', 'nostr-dag-demo']);
   assert.ok(draft.tags.some((tag) => tag[0] === 'clone' && tag[1] === 'nostr://npub1example/nostr-dag-demo'));
-  assert.ok(draft.tags.some((tag) => tag[0] === 'relays' && tag.includes('wss://relay.damus.io')));
+  assert.ok(draft.tags.some((tag) => tag[0] === 'relays' && tag.includes('wss://relay.primal.net')));
   assert.ok(draft.tags.some((tag) => tag[0] === 'maintainers' && tag.includes('b'.repeat(64))));
   assert.ok(draft.tags.some((tag) => tag[0] === 'r' && tag[1] === '1'.repeat(40) && tag[2] === 'euc'));
 });

@@ -2,7 +2,6 @@ import { bootstrapDemoPageChrome } from './page-shell.mjs';
 import { resolveHref } from './page-path.js';
 
 export const DAG_RELAYS = [
-  'wss://relay.damus.io',
   'wss://nos.lol',
   'wss://relay.nostr.com',
   'wss://relay.nostr.band',

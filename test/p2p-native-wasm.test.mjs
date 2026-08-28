@@ -167,7 +167,6 @@ async function crawlRelayCandidates() {
   const { SimplePool } = await import('nostr-tools/pool');
   const pool = new SimplePool();
   const seeds = [
-    'wss://relay.damus.io',
     'wss://nos.lol',
     'wss://relay.nostr.com',
     'wss://relay.nostr.band',
