@@ -138,6 +138,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut discovered_peers = HashSet::<PeerId>::new();
     let mut peer_topic_roles = HashMap::<PeerId, PeerTopicRole>::new();
     let mut relay_peers = HashSet::<PeerId>::new();
+    let mut external_addrs = Vec::<String>::new();
     let mut listen_addrs: Vec<String> = Vec::new();
 
     if let Ok(addr) = std::env::var("P2P_DIAL") {
@@ -172,7 +173,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     }
                     Some(NodeCommand::Status) => {
                         println!(
-                            "{} discovered_peers={} relay_peers={} wasm_like_peers={} nat=observing",
+                            "{} discovered_peers={} relay_peers={} wasm_like_peers={} external_addrs={} nat=observing",
                             runtime.status_line(&listen_addrs, swarm.connected_peers().count()),
                             discovered_peers.len(),
                             relay_peers.len(),
@@ -180,6 +181,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                 .values()
                                 .filter(|role| matches!(role, PeerTopicRole::WasmLike))
                                 .count(),
+                            external_addrs.len(),
                         );
                     }
                     Some(NodeCommand::Quit) => {
@@ -197,6 +199,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                             listen_addrs.push(address.clone());
                         }
                         println!("LISTENING {address}");
+                    }
+                    SwarmEvent::ExternalAddrConfirmed { address } => {
+                        let address = address.to_string();
+                        if !external_addrs.iter().any(|existing| existing == &address) {
+                            external_addrs.push(address.clone());
+                        }
+                        println!("PUBLIC_ADDR {address}");
+                    }
+                    SwarmEvent::NewExternalAddrOfPeer { peer_id, address } => {
+                        println!("PEER_EXTERNAL_ADDR peer={peer_id} addr={address}");
                     }
                     SwarmEvent::Behaviour(BehaviourEvent::Mdns(mdns::Event::Discovered(peers))) => {
                         for (peer_id, addr) in peers {
