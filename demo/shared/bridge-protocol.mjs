@@ -32,6 +32,21 @@ export function buildBridgeEnvelope(event, direction, relayHints = [], meta = {}
   };
 }
 
+export function encodeBridgeMessage(event, direction, relayHints = [], meta = {}) {
+  return JSON.stringify(buildBridgeEnvelope(event, direction, relayHints, meta));
+}
+
+export function decodeBridgeMessage(message) {
+  if (typeof message === 'string') {
+    try {
+      return unwrapBridgeEnvelope(JSON.parse(message));
+    } catch {
+      return null;
+    }
+  }
+  return unwrapBridgeEnvelope(message);
+}
+
 export function unwrapBridgeEnvelope(message) {
   if (!message || typeof message !== 'object') return null;
   if (isNostrEvent(message)) {
