@@ -163,7 +163,7 @@ function probeRelayHandshake(relayUrl) {
     });
     child.on('error', () => resolve(false));
     child.on('close', (code) => {
-      const ok = code === 0 && /101 Switching Protocols/i.test(stdout);
+      const ok = /101 Switching Protocols/i.test(stdout);
       if (!ok && stderr) {
         console.log(`[native-wasm:test] relay probe failed ${relayUrl}: ${stderr.trim()}`);
       }
@@ -216,7 +216,7 @@ function createBareRepoBundle() {
   }
 }
 
-function createStaticServer(bareRepoBundleBytes = null) {
+function createStaticServer(bareRepoBundleBytes = null, bareRepoRelayUrls = []) {
   return new Promise((resolve, reject) => {
     const server = createServer(async (req, res) => {
       try {
@@ -376,11 +376,7 @@ function createStaticServer(bareRepoBundleBytes = null) {
       window.__bareRepoReconstructedSha256 = '';
       window.__bareRepoReconstructedBytes = 0;
 
-      const DEFAULT_RELAYS = [
-        'wss://relay.damus.io',
-        'wss://nos.lol',
-        'wss://relay.nostr.band',
-      ];
+      const DEFAULT_RELAYS = ${JSON.stringify(bareRepoRelayUrls.length ? bareRepoRelayUrls : ['wss://nos.lol'])};
       const relayPool = new SimplePool();
 
       const packetize = (rootId, payload, maxSliceBytes) => {
@@ -1146,8 +1142,10 @@ test('native peer and wasm peer exchange a real bare-repo nip-pip blob in Chromi
   const bareRepo = createBareRepoBundle();
   const bareRepoSha256 = createHash('sha256').update(bareRepo.bundleBytes).digest('hex');
   const bareRepoBundleB64 = Buffer.from(bareRepo.bundleBytes).toString('base64');
+  const bareRepoRelayUrls = await discoverHealthyRelays();
+  const relayUrls = bareRepoRelayUrls.length ? bareRepoRelayUrls : ['wss://nos.lol'];
   const [{ server, port: serverPort }, native] = await Promise.all([
-    createStaticServer(bareRepo.bundleBytes),
+    createStaticServer(bareRepo.bundleBytes, relayUrls),
     startNativePeer(),
   ]);
 
