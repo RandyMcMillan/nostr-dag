@@ -584,6 +584,10 @@ test('PIP git-bare verbose bare-repo roundtrip', () => {
     const { manifest, sliceEvents, slices } = encodePayloadAsTransferEvents(rootId, bundleBytes, sliceSize);
     console.log(`[PIP] broadcast root_id=${rootId} slices=${slices.length} slice_size=${sliceSize}`);
     console.log(`[PIP] encoded bare repo into manifest=${manifest.id ?? 'manifest-id'} slices=${sliceEvents.length}`);
+    console.log(`[PIP] manifest event:\n${JSON.stringify(manifest, null, 2)}`);
+    sliceEvents.forEach((event, index) => {
+      console.log(`[PIP] slice event seq=${index}:\n${JSON.stringify(event, null, 2)}`);
+    });
 
     const parsedManifest = parseEnvelope(manifest);
     assert.equal(parsedManifest.type, 'manifest');
