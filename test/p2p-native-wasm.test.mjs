@@ -104,7 +104,7 @@ function createStaticServer() {
     <pre id="status">starting</pre>
     <script type="module">
       import initWasm, * as wasmPkg from '/site/pkg/nostr_dag.js';
-      import { createSharedLibp2pStack } from '/demo/shared/libp2p-stack.mjs';
+      import { createSharedLibp2pStack, deterministicPeerIdFromSeed } from '/demo/shared/libp2p-stack.mjs';
 
       const status = document.getElementById('status');
       const nativeWs = new URL(location.href).searchParams.get('nativeWs') || '';
@@ -120,6 +120,7 @@ function createStaticServer() {
       try {
         await initWasm('/site/pkg/nostr_dag_bg.wasm');
         window.__nostrDagWasm = wasmPkg;
+        window.__expectedPeerId = await deterministicPeerIdFromSeed('nostr-dag-wasm');
 
         const stack = await createSharedLibp2pStack({
           bootstrapPeers: nativeWs ? [nativeWs] : [],
@@ -143,6 +144,7 @@ function createStaticServer() {
 
         const { node } = stack;
         window.__p2pPeerId = node.peerId.toString();
+        window.__p2pPeerIdMatchesExpected = window.__p2pPeerId === window.__expectedPeerId;
         node.services.pubsub.addEventListener('message', (evt) => {
           const text = new TextDecoder().decode(evt.detail.data);
           window.__p2pReceived.push(text);
@@ -460,6 +462,11 @@ test('native peer and wasm peer exchange a real nip-pip blob', { timeout: 300_00
     await waitForCondition(
       async () => webdriverExecute(webdriverPort, sessionId, 'return window.__p2pConnected === true;'),
       { timeoutMs: 120_000, description: 'browser peer to connect to the native peer' },
+    );
+
+    await waitForCondition(
+      async () => webdriverExecute(webdriverPort, sessionId, 'return window.__p2pPeerIdMatchesExpected === true;'),
+      { timeoutMs: 120_000, description: 'browser peer id to match the deterministic seed' },
     );
 
     native.child.stdin.write('/pip hello native wasm nip-pip\n');
