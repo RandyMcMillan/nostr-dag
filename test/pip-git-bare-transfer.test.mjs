@@ -236,6 +236,17 @@ function reconstruct(slices) {
   return out;
 }
 
+function encodePayloadAsTransferEvents(rootId, payload, sliceSize) {
+  const slices = packetize(rootId, payload, sliceSize);
+  const manifest = buildManifestEnvelope({
+    rootId,
+    totalBytes: payload.length,
+    totalSlices: slices.length,
+  });
+  const sliceEvents = slices.map((slice) => buildSliceEnvelope(slice, manifest.id ?? 'manifest-id'));
+  return { manifest, sliceEvents, slices };
+}
+
 /**
  * Build a PIP transfer-manifest envelope (kind 39078).
  *
@@ -570,21 +581,15 @@ test('PIP git-bare verbose bare-repo roundtrip', () => {
 
     const rootId = 'git-bare-pip-verbose';
     const sliceSize = 64;
-    const slices = packetize(rootId, bundleBytes, sliceSize);
+    const { manifest, sliceEvents, slices } = encodePayloadAsTransferEvents(rootId, bundleBytes, sliceSize);
     console.log(`[PIP] broadcast root_id=${rootId} slices=${slices.length} slice_size=${sliceSize}`);
+    console.log(`[PIP] encoded bare repo into manifest=${manifest.id ?? 'manifest-id'} slices=${sliceEvents.length}`);
 
-    const manifestEnv = buildManifestEnvelope({
-      rootId,
-      totalBytes: bundleBytes.length,
-      totalSlices: slices.length,
-    });
-    const sliceEnvs = slices.map((slice) => buildSliceEnvelope(slice, 'verbose-manifest-id'));
-
-    const parsedManifest = parseEnvelope(manifestEnv);
+    const parsedManifest = parseEnvelope(manifest);
     assert.equal(parsedManifest.type, 'manifest');
     console.log(`[PIP] received manifest root_id=${parsedManifest.manifest.rootId}`);
 
-    const receivedSlices = sliceEnvs.map((env) => parseEnvelope(env).slice);
+    const receivedSlices = sliceEvents.map((env) => parseEnvelope(env).slice);
     console.log(`[PIP] received slices=${receivedSlices.length}`);
 
     const shuffled = [...receivedSlices].reverse();
