@@ -30,7 +30,7 @@ test-p2p-native-wasm:
 
 test-pip-bare-repo:
     TARGET_DIR="${CARGO_TARGET_DIR:-$(cargo metadata --format-version 1 --no-deps | grep -o '"target_directory":"[^"]*"' | cut -d'"' -f4)}"; CARGO_TARGET_DIR="$TARGET_DIR" cargo test --features p2p git_bare_pip_transfer_verbose_trace -- --nocapture
-    node --test test/pip-git-bare-transfer.test.mjs
+    node --test --test-name-pattern "bare-repo" test/p2p-native-wasm.test.mjs
 
 build-relay:
     TARGET_DIR="${CARGO_TARGET_DIR:-$(cargo metadata --format-version 1 --no-deps | grep -o '"target_directory":"[^"]*"' | cut -d'"' -f4)}"; CARGO_TARGET_DIR="$TARGET_DIR" cargo build --release --bin relay --bin federation --features relay

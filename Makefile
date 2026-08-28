@@ -54,7 +54,7 @@ test-p2p-native-wasm:
 
 test-pip-bare-repo:
 	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) $(CARGO) test --features p2p git_bare_pip_transfer_verbose_trace -- --nocapture
-	node --test test/pip-git-bare-transfer.test.mjs
+	node --test --test-name-pattern "bare-repo" test/p2p-native-wasm.test.mjs
 
 build-relay:
 	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) $(CARGO) build --release --bin relay --bin federation --features relay
