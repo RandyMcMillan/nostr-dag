@@ -204,12 +204,34 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                                 );
 
                                 for (index, message) in messages.into_iter().enumerate() {
-                                    if let Err(err) = swarm.behaviour_mut().gossipsub.publish(
-                                        IdentTopic::new(NOSTR_DAG_TOPIC),
-                                        message.as_bytes(),
-                                    ) {
-                                        warn!(?err, "PIP publish failed");
-                                    } else if index == 0 {
+                                    let mut attempt = 0usize;
+                                    loop {
+                                        attempt += 1;
+                                        match swarm.behaviour_mut().gossipsub.publish(
+                                            IdentTopic::new(NOSTR_DAG_TOPIC),
+                                            message.as_bytes(),
+                                        ) {
+                                            Ok(_) => break,
+                                            Err(err)
+                                                if matches!(
+                                                    err,
+                                                    gossipsub::PublishError::InsufficientPeers
+                                                ) && attempt < 5 =>
+                                            {
+                                                warn!(
+                                                    attempt,
+                                                    ?err,
+                                                    "PIP publish waiting for peers"
+                                                );
+                                                tokio::time::sleep(Duration::from_secs(1)).await;
+                                            }
+                                            Err(err) => {
+                                                warn!(attempt, ?err, "PIP publish failed");
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    if index == 0 {
                                         println!("PIP manifest staged");
                                     } else if let Some(slice_event_id) = slice_event_ids.get(index - 1) {
                                         println!(
