@@ -61,6 +61,25 @@
     const repoPing = new Map();
     const faviconCache = new Map();
 
+    const CORS_PROXIES = [
+      'https://cors.isomorphic-git.org',
+      'https://corsproxy.io/?',
+    ];
+
+    async function tryWithCorsProxies(operation, baseOptions, contextLabel) {
+      let lastError;
+      for (const proxy of CORS_PROXIES) {
+        try {
+          footer.log('git', `${contextLabel} trying proxy ${proxy}`, 'trace');
+          return await operation({ ...baseOptions, corsProxy: proxy });
+        } catch (e) {
+          lastError = e;
+          footer.log('git', `${contextLabel} proxy ${proxy} failed: ${e.message}`, 'trace');
+        }
+      }
+      throw lastError;
+    }
+
     function warmFavicon(url) {
       if (faviconCache.has(url)) {
         return;
@@ -482,6 +501,7 @@
     async function ensureRepo(repo, route = null) {
       const url = repo.url;
       const dir = repo.dir;
+      const ensureStart = performance.now();
       try {
         await ensureDir(fs, '/repos');
         const exists = await pathExists(fs, dir);
@@ -493,7 +513,6 @@
             fs,
             http,
             dir,
-            corsProxy: 'https://cors.isomorphic-git.org',
             url,
             singleBranch: true,
             depth: route ? GIT_HISTORY_DEPTH : 1,
@@ -505,13 +524,14 @@
             },
           };
           await cloneWithSingleBranchFallback(
-            (options) => git.clone(options),
+            (options) => tryWithCorsProxies((opts) => git.clone(opts), options, `${repo.name} clone`),
             cloneOptions,
             (error) => {
               footer.log('git', `${repo.name} clone failed with singleBranch=true: ${error.message}`, 'warn');
               footer.log('git', `${repo.name} retrying clone with singleBranch=false`, 'warn');
             },
           );
+          footer.log('git', `${repo.name} clone done in ${Math.round(performance.now() - ensureStart)} ms`, 'debug');
         } else {
           setRepoStatus(repo.name, 'reusing cached clone...');
           footer.log('git', `${repo.name} reusing cached clone`, 'info');
@@ -523,6 +543,7 @@
       }
 
       setRepoStatus(repo.name, 'fetching tags...');
+      const fetchStart = performance.now();
       footer.log('git', `${repo.name} fetching tags${route ? ` (${progressContextLabel(route)})` : ''}`, 'debug');
       await fetchRepoRefs(repo, route, (progress) => {
         const message = getGitProgressReporter(repo, 'fetch', route)(progress);
@@ -530,39 +551,33 @@
           footer.log('git', message, 'trace');
         }
       }).catch(() => {});
+      footer.log('git', `${repo.name} fetch done in ${Math.round(performance.now() - fetchStart)} ms`, 'debug');
       setRepoStatus(repo.name, 'ready');
-      footer.log('git', `${repo.name} ready`, 'info', 'available');
+      footer.log('git', `${repo.name} ensureRepo complete in ${Math.round(performance.now() - ensureStart)} ms`, 'debug');
     }
 
     async function fetchRepoRefs(repo, route = null, onProgress = null) {
       const selection = fetchSelectionOptions(route);
-      await git.fetch({
-        fs,
-        http,
-        dir: repo.dir,
-        corsProxy: 'https://cors.isomorphic-git.org',
-        url: repo.url,
-        all: true,
-        tags: true,
-        force: true,
-        prune: true,
-        depth: route ? GIT_HISTORY_DEPTH : undefined,
-        onProgress,
-        ...selection,
-      });
+      await tryWithCorsProxies(
+        (opts) => git.fetch({ fs, http, dir: repo.dir, url: repo.url, all: true, tags: true, force: true, prune: true, depth: route ? GIT_HISTORY_DEPTH : undefined, onProgress, ...selection, ...opts }),
+        {},
+        `${repo.name} fetch`,
+      );
     }
 
     async function readRepo(repo, route = null) {
+      const readStart = performance.now();
       footer.log('git', `readRepo start ${repo.name}`, 'debug');
       const localBranches = await git.listBranches({ fs, dir: repo.dir }).catch(() => []);
       const remoteBranches = await git.listBranches({ fs, dir: repo.dir, remote: 'origin' }).catch(() => []);
       const branches = [...new Set([...localBranches, ...remoteBranches])];
-      const serverRefs = await git.listServerRefs({
-        fs,
-        http,
-        corsProxy: 'https://cors.isomorphic-git.org',
-        url: repo.url,
-      }).catch(() => []);
+      footer.log('git', `${repo.name} listBranches done in ${Math.round(performance.now() - readStart)} ms`, 'trace');
+      const serverRefs = await tryWithCorsProxies(
+        (opts) => git.listServerRefs({ fs, http, url: repo.url, ...opts }),
+        {},
+        `${repo.name} listServerRefs`,
+      ).catch(() => []);
+      footer.log('git', `${repo.name} listServerRefs done in ${Math.round(performance.now() - readStart)} ms`, 'trace');
       const tags = [...new Set([
         ...await git.listTags({ fs, dir: repo.dir }).catch(() => []),
         ...remoteTagNames(serverRefs),
@@ -575,6 +590,7 @@
       let commits = [];
       let resolvedRef = ref;
       let reloadedAfterMiss = false;
+      const logStart = performance.now();
       for (const candidate of candidates) {
         if (!candidate) continue;
         try {
@@ -585,18 +601,18 @@
           commits = [];
         }
       }
+      footer.log('git', `${repo.name} git.log done in ${Math.round(performance.now() - logStart)} ms`, 'trace');
       if (!commits.length && route?.tag && !reloadedAfterMiss) {
         reloadedAfterMiss = true;
         footer.log('git', `readRepo tag miss ${repo.name} tag=${route.tag} refetching`, 'debug');
         await fetchRepoRefs(repo, route).catch(() => {});
         const retryTags = [...new Set([
           ...await git.listTags({ fs, dir: repo.dir }).catch(() => []),
-          ...remoteTagNames(await git.listServerRefs({
-            fs,
-            http,
-            corsProxy: 'https://cors.isomorphic-git.org',
-            url: repo.url,
-          }).catch(() => [])),
+          ...remoteTagNames(await tryWithCorsProxies(
+            (opts) => git.listServerRefs({ fs, http, url: repo.url, ...opts }),
+            {},
+            `${repo.name} listServerRefs retry`,
+          ).catch(() => [])),
         ])];
         retryTags.sort((a, b) => a.localeCompare(b));
         for (const candidate of refCandidatesForRoute(route, branches, retryTags)) {
@@ -638,7 +654,7 @@
         return [];
       });
       const commitLimit = estimateRecentCommitLimit(files.length);
-      footer.log('git', `readRepo done ${repo.name} commits=${commits.length} files=${files.length} snapshotRef=${snapshotRef}`, 'debug');
+      footer.log('git', `readRepo done ${repo.name} commits=${commits.length} files=${files.length} snapshotRef=${snapshotRef} total=${Math.round(performance.now() - readStart)} ms`, 'debug');
       const decoratedCommits = await collectCommitDecorations(repo, localBranches, remoteBranches, route, commits.slice(0, commitLimit).map(createCommitSummary));
       return {
         latest,
