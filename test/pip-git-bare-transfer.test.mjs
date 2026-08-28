@@ -26,7 +26,19 @@
  */
 
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 
 // ---------------------------------------------------------------------------
@@ -57,6 +69,45 @@ const DEPTH_LEVELS = 10;
  */
 function sha256Hex(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
+}
+
+function gitRun(args, cwd, extra = {}) {
+  const result = spawnSync('git', args, {
+    cwd,
+    encoding: 'utf8',
+    env: { ...process.env, ...extra.env },
+  });
+  assert.equal(
+    result.status,
+    0,
+    `git ${args.join(' ')} failed in ${cwd}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+  );
+  return result.stdout.trim();
+}
+
+function logTree(root, label) {
+  console.log(`[PIP] ${label} tree at ${root}`);
+
+  function walk(dir, indent) {
+    const entries = readdirSync(dir, { withFileTypes: true })
+      .map((entry) => entry.name)
+      .sort((a, b) => a.localeCompare(b));
+
+    for (const name of entries) {
+      const full = join(dir, name);
+      const rel = full.slice(root.length + 1);
+      const prefix = ' '.repeat(indent);
+      const stat = statSync(full);
+      if (stat.isDirectory()) {
+        console.log(`[PIP] ${prefix}${rel}/`);
+        walk(full, indent + 2);
+      } else {
+        console.log(`[PIP] ${prefix}${rel} (${stat.size})`);
+      }
+    }
+  }
+
+  walk(root, 2);
 }
 
 // ---------------------------------------------------------------------------
@@ -484,4 +535,80 @@ test('PIP git-bare SHA-256 transfer via bridge envelope', () => {
     `bridge transfer SHA-256 mismatch\n  expected  ${referenceSha}\n  got       ${reconstructedSha}`);
 
   console.log(`  [PIP] bridge transfer SHA-256 VERIFIED: ${reconstructedSha}`);
+});
+
+test('PIP git-bare verbose bare-repo roundtrip', () => {
+  const work = mkdtempSync(join(tmpdir(), 'nostr-dag-pip-'));
+  const srcDir = join(work, 'src-repo');
+  mkdirSync(srcDir);
+
+  try {
+    const depth = DEPTH_LEVELS;
+    gitRun(['init', '-b', 'main'], srcDir);
+    gitRun(['config', 'user.email', 'pip-test@nostr-dag'], srcDir);
+    gitRun(['config', 'user.name', 'PIP Test'], srcDir);
+
+    for (let level = 0; level < depth; level++) {
+      const file = join(srcDir, `level-${String(level).padStart(3, '0')}.txt`);
+      writeFileSync(
+        file,
+        `PIP git-bare transfer depth level ${level}\nroot_id: git-bare-pip-test\ndepth: ${depth}\nlevel: ${level}\n`,
+      );
+      gitRun(['add', '-A'], srcDir);
+      gitRun(['commit', '-m', `depth level ${level}: add level-${String(level).padStart(3, '0')}.txt`], srcDir);
+    }
+
+    const originalHead = gitRun(['rev-parse', 'HEAD'], srcDir);
+    logTree(srcDir, 'created source repo');
+
+    const bundlePath = join(work, 'verbose.bundle');
+    gitRun(['bundle', 'create', bundlePath, 'main'], srcDir);
+    const bundleBytes = new Uint8Array(readFileSync(bundlePath));
+    const referenceSha = sha256Hex(bundleBytes);
+    console.log(`[PIP] created bundle bytes=${bundleBytes.length} sha256=${referenceSha}`);
+    console.log(`[PIP] created HEAD ${originalHead}`);
+
+    const rootId = 'git-bare-pip-verbose';
+    const sliceSize = 64;
+    const slices = packetize(rootId, bundleBytes, sliceSize);
+    console.log(`[PIP] broadcast root_id=${rootId} slices=${slices.length} slice_size=${sliceSize}`);
+
+    const manifestEnv = buildManifestEnvelope({
+      rootId,
+      totalBytes: bundleBytes.length,
+      totalSlices: slices.length,
+    });
+    const sliceEnvs = slices.map((slice) => buildSliceEnvelope(slice, 'verbose-manifest-id'));
+
+    const parsedManifest = parseEnvelope(manifestEnv);
+    assert.equal(parsedManifest.type, 'manifest');
+    console.log(`[PIP] received manifest root_id=${parsedManifest.manifest.rootId}`);
+
+    const receivedSlices = sliceEnvs.map((env) => parseEnvelope(env).slice);
+    console.log(`[PIP] received slices=${receivedSlices.length}`);
+
+    const shuffled = [...receivedSlices].reverse();
+    const reconstructed = reconstruct(shuffled);
+    const reconstructedSha = sha256Hex(reconstructed);
+    console.log(`[PIP] reconstructed bytes=${reconstructed.length} sha256=${reconstructedSha}`);
+
+    assert.equal(reconstructedSha, referenceSha);
+
+    const reconstructedBundlePath = join(work, 'reconstructed.bundle');
+    writeFileSync(reconstructedBundlePath, reconstructed);
+
+    const bareDir = join(work, 'bare-repo');
+    gitRun(['clone', '--bare', reconstructedBundlePath, bareDir], work);
+    logTree(bareDir, 'restored bare repo');
+
+    const restoredHead = gitRun(
+      ['-c', 'safe.bareRepository=all', 'rev-parse', 'HEAD'],
+      bareDir,
+      { env: { GIT_DIR: bareDir } },
+    );
+    assert.equal(restoredHead, originalHead);
+    console.log(`[PIP] restored bare repo HEAD ${restoredHead}`);
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
 });
