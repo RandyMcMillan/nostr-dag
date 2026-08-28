@@ -15,11 +15,14 @@ use std::time::Duration;
 use libp2p::{
     futures::StreamExt,
     gossipsub::{self, IdentTopic, MessageAuthenticity},
-    autonat, dcutr, identify, identity, mdns, noise, relay,
+    autonat, dcutr, identify, mdns, noise, relay,
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, yamux, Multiaddr, PeerId,
 };
-use nostr_dag::p2p::{NETWORK_TIME_PROTOCOL, NETWORK_TIME_VERSION, NOSTR_DAG_TOPIC};
+use nostr_dag::p2p::{
+    deterministic_native_identity_keypair, deterministic_native_nostr_keys, NETWORK_TIME_PROTOCOL,
+    NETWORK_TIME_VERSION, NOSTR_DAG_TOPIC,
+};
 use nostr_dag::p2p_node::{
     build_nip_pip_publication, classify_peer_topic_role, classify_peer_topic_role_from_addrs,
     format_inbound_summary, parse_bootstrap_peers, parse_node_command, NodeCommand, PeerRuntime,
@@ -49,8 +52,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         )
         .init();
 
-    let local_key = identity::Keypair::generate_ed25519();
-    let runtime_keys = nostr::Keys::generate();
+    let local_key = deterministic_native_identity_keypair();
+    let runtime_keys = deterministic_native_nostr_keys();
     let mut runtime = PeerRuntime::new_with_self_participation(runtime_keys.clone());
     let local_peer_id = local_key.public().to_peer_id();
     let topic = IdentTopic::new(NOSTR_DAG_TOPIC);

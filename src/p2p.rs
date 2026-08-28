@@ -32,10 +32,53 @@ pub const TRANSFER_MANIFEST_KIND: nostr::Kind = nostr::Kind::Custom(39078);
 /// PIP Nostr event kind used for transfer slices.
 pub const TRANSFER_SLICE_KIND: nostr::Kind = nostr::Kind::Custom(39079);
 
+const DETERMINISTIC_NATIVE_LIBP2P_SEED_HEX: &str =
+    "0401a34dbb8fd5fee2ffd914b184de1b89e78df8c76b68b01cf941570be8b872";
+#[cfg(all(feature = "p2p-wasm", target_arch = "wasm32"))]
+const DETERMINISTIC_WASM_LIBP2P_SEED_HEX: &str =
+    "3870cd6b88012214ab72801833c63ff224a18ac7e859c489df7be554bf88c78a";
+const DETERMINISTIC_NATIVE_NOSTR_SECRET_HEX: &str =
+    "0401a34dbb8fd5fee2ffd914b184de1b89e78df8c76b68b01cf941570be8b872";
+
 /// PIP protocol name carried in transfer manifest and slice event payloads.
 const TRANSFER_PROTOCOL: &str = "nostr-dag-transfer";
 /// PIP transfer payload version.
 const TRANSFER_VERSION: u64 = 1;
+
+fn hex_to_bytes<const N: usize>(hex: &str) -> [u8; N] {
+    assert_eq!(hex.len(), N * 2, "hex string must be exactly {} bytes", N);
+    let mut out = [0u8; N];
+    for (index, chunk) in hex.as_bytes().chunks_exact(2).enumerate() {
+        let hi = (chunk[0] as char).to_digit(16).expect("invalid hex digit") as u8;
+        let lo = (chunk[1] as char).to_digit(16).expect("invalid hex digit") as u8;
+        out[index] = (hi << 4) | lo;
+    }
+    out
+}
+
+#[cfg(feature = "p2p")]
+pub fn deterministic_native_identity_keypair() -> libp2p::identity::Keypair {
+    libp2p::identity::Keypair::ed25519_from_bytes(hex_to_bytes::<32>(
+        DETERMINISTIC_NATIVE_LIBP2P_SEED_HEX,
+    ))
+        .expect("deterministic native libp2p identity seed is valid")
+}
+
+#[cfg(all(feature = "p2p-wasm", target_arch = "wasm32"))]
+pub fn deterministic_wasm_identity_keypair() -> libp2p::identity::Keypair {
+    libp2p::identity::Keypair::ed25519_from_bytes(hex_to_bytes::<32>(
+        DETERMINISTIC_WASM_LIBP2P_SEED_HEX,
+    ))
+        .expect("deterministic wasm libp2p identity seed is valid")
+}
+
+#[cfg(feature = "p2p")]
+pub fn deterministic_native_nostr_keys() -> nostr::Keys {
+    nostr::Keys::new(
+        nostr::SecretKey::from_hex(DETERMINISTIC_NATIVE_NOSTR_SECRET_HEX)
+            .expect("deterministic native nostr secret key seed is valid"),
+    )
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TransferManifest {
@@ -891,14 +934,16 @@ pub mod native {
     use libp2p::{
         futures::StreamExt,
         gossipsub::{self, IdentTopic, MessageAuthenticity},
-        identity, mdns, noise,
+        mdns, noise,
         swarm::{NetworkBehaviour, SwarmEvent},
         tcp, yamux, Multiaddr,
     };
     use tokio::sync::mpsc;
     use tracing::{debug, info, warn};
 
-    use super::{maybe_build_native_time_response, NOSTR_DAG_TOPIC};
+    use super::{
+        deterministic_native_identity_keypair, maybe_build_native_time_response, NOSTR_DAG_TOPIC,
+    };
 
     #[derive(NetworkBehaviour)]
     struct Behaviour {
@@ -919,7 +964,7 @@ pub mod native {
         pub async fn start(
         ) -> Result<(Self, mpsc::Receiver<String>), Box<dyn std::error::Error + Send + Sync>>
         {
-            let local_key = identity::Keypair::generate_ed25519();
+            let local_key = deterministic_native_identity_keypair();
 
             let topic = IdentTopic::new(NOSTR_DAG_TOPIC);
 
@@ -1064,6 +1109,13 @@ pub mod native {
             assert!(received_a.iter().any(|m| m.contains("from B")));
             assert!(received_b.iter().any(|m| m.contains("from A")));
         }
+
+        #[test]
+        fn deterministic_identity_helpers_are_stable() {
+            let native_a = deterministic_native_identity_keypair();
+            let native_b = deterministic_native_identity_keypair();
+            assert_eq!(native_a.public().to_peer_id(), native_b.public().to_peer_id());
+        }
     }
 }
 
@@ -1115,11 +1167,11 @@ pub mod wasm_node {
 
     #[wasm_bindgen]
     impl P2pNode {
-        /// Create a new node with a freshly generated Ed25519 identity.
+        /// Create a new node with a deterministic Ed25519 identity.
         #[wasm_bindgen(constructor)]
         pub fn new() -> P2pNode {
             P2pNode {
-                local_key: identity::Keypair::generate_ed25519(),
+                local_key: deterministic_wasm_identity_keypair(),
                 on_message: None,
             }
         }
