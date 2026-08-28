@@ -11,7 +11,7 @@ ifndef CARGO_TARGET_DIR
 CARGO_TARGET_DIR := $(shell cargo metadata --format-version 1 --no-deps | grep -o '"target_directory":"[^"]*"' | cut -d'"' -f4)
 endif
 
-.PHONY: help build test test-all test-native test-js test-p2p test-p2p-native-wasm build-relay build-server ensure-wasm-target wasm site demo server clean deploy
+.PHONY: help build test test-all test-native test-js test-p2p test-p2p-native-wasm test-pip-bare-repo build-relay build-server ensure-wasm-target wasm site demo server clean deploy
 
 help:
 	@printf '%s\n' \
@@ -23,6 +23,7 @@ help:
 		'  test-js     Run JS tests' \
 		'  test-p2p    Run P2P integration tests' \
 		'  test-p2p-native-wasm Run native↔wasm PIP test' \
+		'  test-pip-bare-repo Run bare-repo PIP transfer tests' \
 		'  build-relay Build relay + federation release binaries' \
 		'  build-server Build the nostr-dag server binary' \
 		'  wasm        Build the WASM package into site/pkg' \
@@ -50,6 +51,10 @@ test-p2p:
 
 test-p2p-native-wasm:
 	node --test test/p2p-native-wasm.test.mjs
+
+test-pip-bare-repo:
+	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) $(CARGO) test --features p2p git_bare_pip_transfer_verbose_trace -- --nocapture
+	node --test test/pip-git-bare-transfer.test.mjs
 
 build-relay:
 	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) $(CARGO) build --release --bin relay --bin federation --features relay
