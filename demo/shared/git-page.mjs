@@ -1,5 +1,6 @@
 import { bootstrapDemoPageChrome } from './page-shell.mjs';
 import { resolveHref } from './page-path.js';
+import { hostProbe, remoteProbeUrl } from './host-probe.mjs';
 
 export const GIT_REPOS = [
   {
@@ -80,24 +81,8 @@ export function bootstrapGitChrome({
   });
 }
 
-export function remoteProbeUrl(repo) {
-  return `${new URL(repo.url).origin}/favicon.ico`;
-}
+export { remoteProbeUrl };
 
 export async function probeRemoteHost(repo) {
-  const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 8000);
-  try {
-    await fetch(remoteProbeUrl(repo), {
-      method: 'GET',
-      mode: 'no-cors',
-      cache: 'no-store',
-      signal: controller.signal,
-    });
-    return true;
-  } catch {
-    return false;
-  } finally {
-    window.clearTimeout(timeout);
-  }
+  return hostProbe.available(repo, { strategy: 'favicon' });
 }
