@@ -210,6 +210,7 @@ function createStaticServer() {
 
 function startNativePeer() {
   return new Promise((resolve, reject) => {
+    console.log('[native-wasm:test] starting native peer');
     const child = spawn('cargo', ['run', '--features', 'p2p', '--bin', 'p2p-node'], {
       cwd: REPO_ROOT,
       env: {
@@ -236,6 +237,7 @@ function startNativePeer() {
       const text = chunk.toString('utf8');
       stdout += text;
       for (const line of text.split(/\r?\n/).filter(Boolean)) {
+        console.log(`[native-wasm:native] ${line}`);
         const peerMatch = line.match(/^READY peer_id=([A-Za-z0-9]+)\b/);
         if (peerMatch) {
           peerId = peerMatch[1];
@@ -331,9 +333,11 @@ function buildWsDialAddress(wsListenAddr, peerId) {
 }
 
 async function ensureChromiumBrowser() {
+  console.log('[native-wasm:test] checking Chromium availability');
   try {
     const browser = await chromium.launch({ headless: true });
     await browser.close();
+    console.log('[native-wasm:test] Chromium available');
     return;
   } catch (error) {
     const message = String(error?.message || error);
@@ -342,6 +346,7 @@ async function ensureChromiumBrowser() {
     }
   }
 
+  console.log('[native-wasm:test] installing Chromium via Playwright');
   await new Promise((resolve, reject) => {
     const child = spawn('npx', ['playwright', 'install', 'chromium'], {
       cwd: REPO_ROOT,
@@ -356,17 +361,25 @@ async function ensureChromiumBrowser() {
 
   const browser = await chromium.launch({ headless: true });
   await browser.close();
+  console.log('[native-wasm:test] Chromium installed and ready');
 }
 
 async function runChromiumNativeWasmExchange(browserBaseUrl, nativeDialAddr) {
+  console.log(`[native-wasm:test] launching Chromium page at ${browserBaseUrl}`);
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
+  page.on('console', (message) => {
+    console.log(`[native-wasm:browser:${message.type()}] ${message.text()}`);
+  });
   try {
     const pageUrl = `${browserBaseUrl}/p2p-wasm-native-test.html?nativeWs=${encodeURIComponent(nativeDialAddr)}`;
+    console.log(`[native-wasm:test] navigating browser to ${pageUrl}`);
     await page.goto(pageUrl, { waitUntil: 'domcontentloaded' });
 
     await page.waitForFunction(() => window.__p2pReady === true, null, { timeout: 120_000 });
+    console.log('[native-wasm:test] browser wasm peer reported ready');
     await page.waitForFunction(() => window.__p2pConnected === true, null, { timeout: 120_000 });
+    console.log('[native-wasm:test] browser connected to native peer');
 
     return { browser, page };
   } catch (error) {
@@ -479,9 +492,11 @@ test('native peer and wasm peer exchange a real nip-pip blob in Chromium', { tim
 
   const browserBaseUrl = `http://127.0.0.1:${serverPort}`;
   const nativeDialAddr = buildWsDialAddress(native.wsListenAddr, native.peerId);
+  console.log(`[native-wasm:test] native websocket dial addr ${nativeDialAddr}`);
   const { browser, page } = await runChromiumNativeWasmExchange(browserBaseUrl, nativeDialAddr);
 
   try {
+    console.log('[native-wasm:test] sending /pip command to native peer');
     native.child.stdin.write('/pip hello native wasm nip-pip\n');
 
     await page.waitForFunction(
@@ -489,6 +504,7 @@ test('native peer and wasm peer exchange a real nip-pip blob in Chromium', { tim
       null,
       { timeout: 120_000 },
     );
+    console.log('[native-wasm:test] browser received both manifest and slice events');
 
     const result = await page.evaluate(() => ({
       peerId: window.__p2pPeerId || '',
@@ -504,6 +520,9 @@ test('native peer and wasm peer exchange a real nip-pip blob in Chromium', { tim
     assert.ok(result.bridgeKinds.includes(39078), 'browser should receive a manifest event');
     assert.ok(result.bridgeKinds.includes(39079), 'browser should receive a slice event');
     assert.ok(result.receivedCount >= 2, 'browser should receive at least manifest and slice messages');
+    console.log(
+      `[native-wasm:test] success peerId=${result.peerId} bridgeKinds=${result.bridgeKinds.join(',')} received=${result.receivedCount}`,
+    );
   } finally {
     await page.close().catch(() => {});
     await browser.close().catch(() => {});
