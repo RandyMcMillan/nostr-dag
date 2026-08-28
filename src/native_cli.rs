@@ -225,8 +225,10 @@ fn maybe_ack(
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(delay_ms)).await;
         info!(ack_id = %ack.id, delay_ms, "Publishing acknowledgment");
-        if let Err(e) = publish_ack_round_robin(&ack, relay_urls, relay_round).await {
-            error!(?e, "Failed to publish ack");
+        match publish_ack_round_robin(&ack, relay_urls, relay_round).await {
+            Ok(0) => warn!(ack_id = %ack.id, "No relays accepted the ack"),
+            Ok(sent) => info!(ack_id = %ack.id, sent, "Published ack"),
+            Err(e) => error!(?e, "Failed to publish ack"),
         }
     });
 }
@@ -235,34 +237,48 @@ async fn publish_ack_round_robin(
     ack: &nostr::Event,
     relay_urls: Arc<Vec<String>>,
     relay_round: Arc<AtomicUsize>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
     if relay_urls.is_empty() {
-        return Ok(());
+        return Ok(0);
     }
 
     let start = relay_round.fetch_add(1, Ordering::Relaxed) % relay_urls.len();
-    let ordered_relays = relay_urls
-        .iter()
-        .cycle()
-        .skip(start)
-        .take(relay_urls.len())
-        .cloned()
-        .collect::<Vec<_>>();
+    let ordered_relays = round_robin_order(&relay_urls, start);
+    let mut succeeded = 0usize;
 
     for (index, relay_url) in ordered_relays.iter().enumerate() {
         let pool = RelayPool::default();
-        pool.add_relay(relay_url, RelayOptions::default()).await?;
+        if let Err(e) = pool.add_relay(relay_url, RelayOptions::default()).await {
+            warn!(relay = %relay_url, ack_id = %ack.id, ?e, "Skipping relay: failed to add");
+            continue;
+        }
         pool.connect().await;
         info!(relay = %relay_url, ack_id = %ack.id, index, "Publishing acknowledgment via relay");
         if let Err(e) = pool.send_event(ack).await {
             warn!(relay = %relay_url, ?e, "Failed to publish ack via relay");
+        } else {
+            succeeded += 1;
         }
         if index + 1 < ordered_relays.len() {
             tokio::time::sleep(Duration::from_millis(250)).await;
         }
     }
 
-    Ok(())
+    Ok(succeeded)
+}
+
+fn round_robin_order(relay_urls: &[String], start: usize) -> Vec<String> {
+    if relay_urls.is_empty() {
+        return Vec::new();
+    }
+    let start = start % relay_urls.len();
+    relay_urls
+        .iter()
+        .cycle()
+        .skip(start)
+        .take(relay_urls.len())
+        .cloned()
+        .collect()
 }
 
 async fn fetch_missing(pool: &RelayPool, missing: &[EventId]) {
@@ -335,5 +351,31 @@ mod tests {
             Some(value) => env::set_var("RELAY_URL", value),
             None => env::remove_var("RELAY_URL"),
         }
+    }
+
+    #[test]
+    fn round_robin_order_rotates_without_dropping_relays() {
+        let relays = vec![
+            "wss://one.example".to_string(),
+            "wss://two.example".to_string(),
+            "wss://three.example".to_string(),
+        ];
+
+        assert_eq!(
+            round_robin_order(&relays, 0),
+            vec![
+                "wss://one.example".to_string(),
+                "wss://two.example".to_string(),
+                "wss://three.example".to_string(),
+            ]
+        );
+        assert_eq!(
+            round_robin_order(&relays, 1),
+            vec![
+                "wss://two.example".to_string(),
+                "wss://three.example".to_string(),
+                "wss://one.example".to_string(),
+            ]
+        );
     }
 }
