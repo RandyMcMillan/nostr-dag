@@ -34,51 +34,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ github.event_name == 'workflow_dispatch' && (
-          github.event.inputs.runner_target == 'arm64-only' && fromJSON('[
-            {"runner":"macos-latest","target-arch":"arm64"},
-            {"runner":"macos-26","target-arch":"arm64"},
-            {"runner":"macos-15","target-arch":"arm64"},
-            {"runner":"macos-14","target-arch":"arm64"},
-            {"runner":"macos-26-xlarge","target-arch":"arm64"},
-            {"runner":"macos-15-xlarge","target-arch":"arm64"}
-          ]') ||
-          github.event.inputs.runner_target == 'x86_64-only' && fromJSON('[
-            {"runner":"macos-26-intel","target-arch":"x86_64"},
-            {"runner":"macos-15-intel","target-arch":"x86_64"},
-            {"runner":"macos-13","target-arch":"x86_64"},
-            {"runner":"macos-12","target-arch":"x86_64"},
-            {"runner":"macos-26-large","target-arch":"x86_64"},
-            {"runner":"macos-15-large","target-arch":"x86_64"}
-          ]') ||
-          fromJSON('[
-            {"runner":"macos-latest","target-arch":"arm64"},
-            {"runner":"macos-26","target-arch":"arm64"},
-            {"runner":"macos-26-intel","target-arch":"x86_64"},
-            {"runner":"macos-15","target-arch":"arm64"},
-            {"runner":"macos-15-intel","target-arch":"x86_64"},
-            {"runner":"macos-14","target-arch":"arm64"},
-            {"runner":"macos-13","target-arch":"x86_64"},
-            {"runner":"macos-12","target-arch":"x86_64"},
-            {"runner":"macos-26-large","target-arch":"x86_64"},
-            {"runner":"macos-26-xlarge","target-arch":"arm64"},
-            {"runner":"macos-15-large","target-arch":"x86_64"},
-            {"runner":"macos-15-xlarge","target-arch":"arm64"}
-          ]')
-        ) || fromJSON('[
-          {"runner":"macos-latest","target-arch":"arm64"},
-          {"runner":"macos-26","target-arch":"arm64"},
-          {"runner":"macos-26-intel","target-arch":"x86_64"},
-          {"runner":"macos-15","target-arch":"arm64"},
-          {"runner":"macos-15-intel","target-arch":"x86_64"},
-          {"runner":"macos-14","target-arch":"arm64"},
-          {"runner":"macos-13","target-arch":"x86_64"},
-          {"runner":"macos-12","target-arch":"x86_64"},
-          {"runner":"macos-26-large","target-arch":"x86_64"},
-          {"runner":"macos-26-xlarge","target-arch":"arm64"},
-          {"runner":"macos-15-large","target-arch":"x86_64"},
-          {"runner":"macos-15-xlarge","target-arch":"arm64"}
-        ]') }}
+        include: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.runner_target == 'arm64-only' && fromJSON('[{"runner":"macos-latest","target-arch":"arm64"},{"runner":"macos-26","target-arch":"arm64"},{"runner":"macos-15","target-arch":"arm64"},{"runner":"macos-14","target-arch":"arm64"},{"runner":"macos-26-xlarge","target-arch":"arm64"},{"runner":"macos-15-xlarge","target-arch":"arm64"}]') || github.event.inputs.runner_target == 'x86_64-only' && fromJSON('[{"runner":"macos-26-intel","target-arch":"x86_64"},{"runner":"macos-15-intel","target-arch":"x86_64"},{"runner":"macos-13","target-arch":"x86_64"},{"runner":"macos-12","target-arch":"x86_64"},{"runner":"macos-26-large","target-arch":"x86_64"},{"runner":"macos-15-large","target-arch":"x86_64"}]') || fromJSON('[{"runner":"macos-latest","target-arch":"arm64"},{"runner":"macos-26","target-arch":"arm64"},{"runner":"macos-26-intel","target-arch":"x86_64"},{"runner":"macos-15","target-arch":"arm64"},{"runner":"macos-15-intel","target-arch":"x86_64"},{"runner":"macos-14","target-arch":"arm64"},{"runner":"macos-13","target-arch":"x86_64"},{"runner":"macos-12","target-arch":"x86_64"},{"runner":"macos-26-large","target-arch":"x86_64"},{"runner":"macos-26-xlarge","target-arch":"arm64"},{"runner":"macos-15-large","target-arch":"x86_64"},{"runner":"macos-15-xlarge","target-arch":"arm64"}]')) || fromJSON('[{"runner":"macos-latest","target-arch":"arm64"},{"runner":"macos-26","target-arch":"arm64"},{"runner":"macos-26-intel","target-arch":"x86_64"},{"runner":"macos-15","target-arch":"arm64"},{"runner":"macos-15-intel","target-arch":"x86_64"},{"runner":"macos-14","target-arch":"arm64"},{"runner":"macos-13","target-arch":"x86_64"},{"runner":"macos-12","target-arch":"x86_64"},{"runner":"macos-26-large","target-arch":"x86_64"},{"runner":"macos-26-xlarge","target-arch":"arm64"},{"runner":"macos-15-large","target-arch":"x86_64"},{"runner":"macos-15-xlarge","target-arch":"arm64"}]') }}
 
     steps:
       - name: Checkout repository
