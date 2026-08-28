@@ -8,6 +8,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 
 // ---------------------------------------------------------------------------
@@ -112,4 +113,19 @@ test('broadcast messages match the nostr-dag-bridge envelope shape', async () =>
   assert.equal(received[0].protocol, 'nostr-dag-bridge');
   assert.equal(received[0].direction, 'outbound');
   assert.equal(received[0].event.id.length, 64);
+});
+
+function sha256Hex(text) {
+  return createHash('sha256').update(text, 'utf8').digest('hex');
+}
+
+test('wasm deterministic seed label hashes are stable', () => {
+  assert.equal(
+    sha256Hex('nostr-dag-native'),
+    '0401a34dbb8fd5fee2ffd914b184de1b89e78df8c76b68b01cf941570be8b872',
+  );
+  assert.equal(
+    sha256Hex('nostr-dag-wasm'),
+    '3870cd6b88012214ab72801833c63ff224a18ac7e859c489df7be554bf88c78a',
+  );
 });

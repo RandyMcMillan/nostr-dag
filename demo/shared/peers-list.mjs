@@ -8,6 +8,7 @@ export function createPeersListController({
   scheduleBridgeCachePersist,
   formatPeerDetail,
   sanitizePeerDetail,
+  deterministicPeerIds = new Set(),
 }) {
   function peerKey(peer) {
     return `${peer.source || 'browser'}:${peer.path || '/'}:${peer.peer_id}:${peer.kind || 'unknown'}`;
@@ -58,7 +59,7 @@ export function createPeersListController({
       <details class="bridge-card bridge-peer" data-peer-key="${String(peerKey(peer)).replaceAll('"', '&quot;')}">
         <summary class="bridge-card-summary">
           <div class="bridge-peer-head">
-            <div class="bridge-peer-title mono">${String(peer.peer_id).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')}</div>
+            <div class="bridge-peer-title mono">${String(peer.peer_id).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')}${deterministicPeerIds.has(String(peer.peer_id)) ? ' <span class="bridge-peer-star" title="Deterministic peer" aria-label="Deterministic peer">★</span>' : ''}</div>
             <div class="bridge-peer-meta">
               <span class="bridge-pill">${String(peer.kind || 'unknown').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')}</span>
               <span class="bridge-pill">${String(peer.path || '/').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')}</span>

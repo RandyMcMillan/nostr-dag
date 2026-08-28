@@ -7,9 +7,10 @@ import { gossipsub } from "https://esm.sh/@libp2p/gossipsub";
 import { identify } from "https://esm.sh/@libp2p/identify";
 import { webSockets } from "https://esm.sh/@libp2p/websockets";
 import { webRTC, webRTCDirect } from "https://esm.sh/@libp2p/webrtc";
+import { generateKeyPairFromSeed } from "https://esm.sh/@libp2p/crypto/keys";
 import { noise } from "https://esm.sh/@chainsafe/libp2p-noise";
 import { yamux } from "https://esm.sh/@chainsafe/libp2p-yamux";
-import { ed25519 } from "https://esm.sh/@noble/curves/ed25519";
+import { peerIdFromPrivateKey } from "https://esm.sh/@libp2p/peer-id";
 
 export const DEFAULT_BOOTSTRAP_PEERS = [
   "/ip4/104.131.131.82/tcp/4001/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ",
@@ -122,20 +123,13 @@ const createDeterministicPrivateKey = async (seed) => {
   if (privateKeyRaw.length !== 32) {
     throw new TypeError(`deterministic libp2p seed must be 32 bytes, got ${privateKeyRaw.length}`);
   }
-  const publicKeyRaw = ed25519.getPublicKey(privateKeyRaw);
-  const privateKey = new Uint8Array(64);
-  privateKey.set(privateKeyRaw, 0);
-  privateKey.set(publicKeyRaw, 32);
-  return {
-    type: "Ed25519",
-    raw: privateKey,
-    publicKey: {
-      type: "Ed25519",
-      raw: publicKeyRaw,
-    },
-    sign: async (message) => ed25519.sign(message instanceof Uint8Array ? message : new Uint8Array(message), privateKeyRaw),
-  };
+  return generateKeyPairFromSeed("Ed25519", privateKeyRaw);
 };
+
+export async function deterministicPeerIdFromSeed(seed) {
+  const privateKey = await createDeterministicPrivateKey(seed);
+  return peerIdFromPrivateKey(privateKey).toString();
+}
 
 const ensureTransportFilters = (transport, label, onLog) => {
   if (typeof transport.listenFilter !== "function") {

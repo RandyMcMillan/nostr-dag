@@ -5,7 +5,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     import { bootstrapDemoPageChrome } from './page-shell.mjs';
     import { resolveHref } from './page-path.js';
     import { measureRelayPing } from './relay-ping.mjs';
-    import { createSharedLibp2pStack } from './libp2p-stack.mjs';
+    import { createSharedLibp2pStack, deterministicPeerIdFromSeed } from './libp2p-stack.mjs';
     import { getNetworkUnixTime } from './network-time.mjs';
     import { BRIDGE_PROTOCOL, BRIDGE_PROTOCOL_VERSION, buildBridgeEnvelope, collectBridgeRelayHints, unwrapBridgeEnvelope } from './bridge-protocol.mjs';
     import { createListContainerController } from './list-container.mjs';
@@ -75,6 +75,8 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     const seenRelay = new Set();
     const seenLibp2p = new Set();
     const seenProcessed = new Set();
+    const deterministicPeerKeyLabels = ['nostr-dag-native', 'nostr-dag-wasm'];
+    const deterministicPeerIds = new Set();
     const recentNostrToLibp2p = [];
     const recentLibp2pToNostr = [];
     const recentSeenRelay = [];
@@ -217,6 +219,15 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       return bookmarkSnapshotFromItemState(item);
     }
 
+    async function initDeterministicPeerIds() {
+      const ids = await Promise.all(deterministicPeerKeyLabels.map((label) => deterministicPeerIdFromSeed(label)));
+      deterministicPeerIds.clear();
+      for (const peerId of ids) {
+        deterministicPeerIds.add(peerId);
+      }
+      schedulePeerRender();
+    }
+
     function updateBookmarkButtons(id) {
       return updateBookmarkButtonsState(id, bookmarkedRecentIds);
     }
@@ -256,6 +267,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     renderRecentLists();
     syncRecentListPauseState();
     scheduleRecentListsRender();
+    void initDeterministicPeerIds();
 
     document.querySelectorAll('[data-list-search]').forEach((input) => {
       input.addEventListener('keydown', (event) => {
@@ -1358,6 +1370,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       scheduleBridgeCachePersist,
       formatPeerDetail,
       sanitizePeerDetail,
+      deterministicPeerIds,
     });
 
     const relaysListController = createRelaysListController({
@@ -1589,6 +1602,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
           try {
             const stack = await createSharedLibp2pStack({
               ...config,
+              deterministicKeySeed: deterministicPeerKeyLabels[1] || 'nostr-dag-wasm',
               onLog(level, text, state) {
                 window.__sharedFooter?.log('libp2p', text, level, state);
               },

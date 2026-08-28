@@ -1085,6 +1085,7 @@ pub mod native {
     #[cfg(test)]
     mod tests {
         use super::*;
+        use crate::p2p::deterministic_native_nostr_keys;
 
         /// Two nodes discover each other via mDNS and exchange a message.
         /// This test is marked `#[ignore]` so it does not run in plain
@@ -1123,6 +1124,16 @@ pub mod native {
             let native_a = deterministic_native_identity_keypair();
             let native_b = deterministic_native_identity_keypair();
             assert_eq!(native_a.public().to_peer_id(), native_b.public().to_peer_id());
+            assert_eq!(
+                native_a.public().to_peer_id().to_string(),
+                "12D3KooWSL8rLNFrwVGVBJbHWxXQfFTfVtYnozURrqBFYBMfrniH"
+            );
+
+            let nostr_keys = deterministic_native_nostr_keys();
+            assert_eq!(
+                nostr_keys.public_key().to_hex(),
+                "2d724a13a80b6002607737ad1a99f3c0b148843707d59ac3bff08c7fce72ecce"
+            );
         }
     }
 }
