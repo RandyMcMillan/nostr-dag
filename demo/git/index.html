@@ -543,6 +543,7 @@
     }
 
     async function readRepo(repo, route = null) {
+      footer.log('git', `readRepo start ${repo.name}`, 'debug');
       const localBranches = await git.listBranches({ fs, dir: repo.dir }).catch(() => []);
       const remoteBranches = await git.listBranches({ fs, dir: repo.dir, remote: 'origin' }).catch(() => []);
       const branches = [...new Set([...localBranches, ...remoteBranches])];
@@ -559,6 +560,7 @@
       tags.sort((a, b) => a.localeCompare(b));
       const ref = resolveRefSelection(branches, tags, route || {});
       const selectedRef = selectedRefForRoute(route) || ref;
+      footer.log('git', `readRepo refs ${repo.name} branches=${branches.length} tags=${tags.length} ref=${ref} selectedRef=${selectedRef}`, 'debug');
       const candidates = refCandidatesForRoute(route, branches, tags);
       let commits = [];
       let resolvedRef = ref;
@@ -575,6 +577,7 @@
       }
       if (!commits.length && route?.tag && !reloadedAfterMiss) {
         reloadedAfterMiss = true;
+        footer.log('git', `readRepo tag miss ${repo.name} tag=${route.tag} refetching`, 'debug');
         await fetchRepoRefs(repo, route).catch(() => {});
         const retryTags = [...new Set([
           ...await git.listTags({ fs, dir: repo.dir }).catch(() => []),
@@ -601,6 +604,7 @@
       if (route?.commit) {
         selectedCommit = commits.find((commit) => commit.oid === route.commit || commit.oid.startsWith(route.commit)) || null;
         if (!selectedCommit) {
+          footer.log('git', `readRepo commit not in log ${repo.name} ${route.commit} fetching direct`, 'debug');
           const directCommit = await git.log({ fs, dir: repo.dir, ref: route.commit, depth: 1 }).catch(() => []);
           selectedCommit = directCommit[0] ? createCommitSummary(directCommit[0]) : null;
         }
@@ -624,6 +628,7 @@
         return [];
       });
       const commitLimit = estimateRecentCommitLimit(files.length);
+      footer.log('git', `readRepo done ${repo.name} commits=${commits.length} files=${files.length} snapshotRef=${snapshotRef}`, 'debug');
       const decoratedCommits = await collectCommitDecorations(repo, localBranches, remoteBranches, route, commits.slice(0, commitLimit).map(createCommitSummary));
       return {
         latest,
@@ -979,6 +984,7 @@
 
     function renderApp(results = null) {
       const route = getRouteContext(repos);
+      footer.log('git', `renderApp repo=${route.repoName || 'none'} view=${route.view || 'list'}`, 'debug');
       if (route.repo) {
         const cache = loadRepoCache();
         const data = results && !Array.isArray(results) ? results : (cache[route.repo.name] || emptyRepoData());
@@ -1060,19 +1066,23 @@
       const repo = repos.find((entry) => entry.name === repoName);
       if (!repo) return;
       const route = getRouteContext(repos).repo?.name === repo.name ? getRouteContext(repos) : null;
+      footer.log('git', `refreshOneRepo start ${repo.name} route=${route ? 'yes' : 'no'}`, 'debug');
       try {
         setRepoStatus(repo.name, 'refreshing...');
         if (route) setRepoHealth(repo.name, 'checking');
         const probe = route ? probeRemoteHost(repo).catch(() => false) : null;
         await ensureRepo(repo, route);
+        footer.log('git', `refreshOneRepo ensure done ${repo.name}`, 'debug');
         const data = await readRepo(repo, route);
         cacheRepoData(repo.name, data);
+        footer.log('git', `refreshOneRepo read done ${repo.name}`, 'debug');
         if (route) setRepoHealth(repo.name, (await probe) ? 'available' : 'unavailable');
         renderApp(repos.map((entry) => {
           const cache = loadRepoCache();
           return entry.name === repo.name ? data : (cache[entry.name] || emptyRepoData());
         }));
         setRepoStatus(repo.name, 'ready');
+        footer.log('git', `refreshOneRepo complete ${repo.name}`, 'debug');
       } catch (e) {
         if (route) setRepoHealth(repo.name, 'unavailable');
         setRepoStatus(repo.name, `refresh failed: ${e.message}`);
@@ -1141,18 +1151,22 @@
         renderApp();
         return;
       }
+      footer.log('git', `refreshDetail start ${route.repo.name} view=${route.view || 'code'} branch=${route.branch || ''} tag=${route.tag || ''} commit=${route.commit || ''}`, 'debug');
       try {
         setStatus(`loading ${route.repo.name}...`, 'checking');
         setRepoHealth(route.repo.name, 'checking');
         renderApp();
         const probe = probeRemoteHost(route.repo).catch(() => false);
         await ensureRepo(route.repo, route);
+        footer.log('git', `refreshDetail ensure done ${route.repo.name}`, 'debug');
         const data = await readRepo(route.repo, route);
         cacheRepoData(route.repo.name, data);
+        footer.log('git', `refreshDetail read done ${route.repo.name}`, 'debug');
         const available = await probe;
         setRepoHealth(route.repo.name, available ? 'available' : 'unavailable');
         renderApp(data);
         setStatus('ready', 'available');
+        footer.log('git', `refreshDetail complete ${route.repo.name} available=${available}`, 'debug');
       } catch (e) {
         setRepoHealth(route.repo.name, 'unavailable');
         setStatus(`unavailable: ${e.message}`, 'unavailable');
@@ -1162,6 +1176,7 @@
 
     async function refresh() {
       const route = getRouteContext(repos);
+      footer.log('git', `refresh dispatch repo=${route.repoName || 'none'} view=${route.view || 'list'}`, 'debug');
       if (route.repo) {
         await refreshDetail(route);
       } else if (route.repoName) {
