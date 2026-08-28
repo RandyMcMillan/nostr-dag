@@ -705,15 +705,37 @@ function createStaticServer(bareRepoBundleBytes = null, bareRepoRelayUrls = []) 
         }), [['e', manifestEvent.id]]));
         transferCollector = createTransferCollector(rootId, slices.length, bundleBytes.length);
 
+        const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+        let relayPublishRound = 0;
+        const publishRelayRoundRobin = async (event, eventLabel) => {
+          if (!DEFAULT_RELAYS.length) return;
+          const startIndex = relayPublishRound % DEFAULT_RELAYS.length;
+          relayPublishRound += 1;
+          const orderedRelays = [
+            ...DEFAULT_RELAYS.slice(startIndex),
+            ...DEFAULT_RELAYS.slice(0, startIndex),
+          ];
+          console.log('[native-wasm:bare:trace] relay round robin ' + eventLabel + ' order ' + orderedRelays.join(', '));
+          for (let index = 0; index < orderedRelays.length; index++) {
+            const relay = orderedRelays[index];
+            try {
+              await relayPool.publish([relay], event);
+              console.log('[native-wasm:bare:trace] relay publish ' + eventLabel + ' relay=' + relay);
+            } catch (error) {
+              const message = String(error?.message || error);
+              window.__p2pErrors.push(message);
+              console.log('[native-wasm:bare:warn] relay publish failed ' + eventLabel + ' relay=' + relay + ' error=' + message);
+            }
+            if (index < orderedRelays.length - 1) {
+              await sleep(250);
+            }
+          }
+        };
+
         const publishTransferEvent = async (event) => {
           const bridgePayload = encodeBridgeMessage(event, 'nostr->libp2p', [], { topic: '${BRIDGE_TOPIC}' });
-          const operations = [
-            node.services.pubsub.publish('${BRIDGE_TOPIC}', new TextEncoder().encode(bridgePayload)),
-          ];
-          if (!relayQueryStop) {
-            operations.push(Promise.allSettled(DEFAULT_RELAYS.map((relay) => relayPool.publish([relay], event))));
-          }
-          await Promise.all(operations);
+          await node.services.pubsub.publish('${BRIDGE_TOPIC}', new TextEncoder().encode(bridgePayload));
+          await publishRelayRoundRobin(event, String(event.kind));
         };
 
         let relayQueryStop = false;
@@ -801,12 +823,10 @@ function createStaticServer(bareRepoBundleBytes = null, bareRepoRelayUrls = []) 
           const sliceEvent = sliceEvents[index];
           const slice = slices[index];
           console.log('[native-wasm:bare:trace] signing slice ' + slice.seq + '/' + slice.totalSlices);
-          if (relayQueryStop || window.__bareRepoReconstructed) break;
           console.log('[native-wasm:bare:trace] broadcasting slice event ' + sliceEvent.id);
           await publishTransferEvent(sliceEvent);
           console.log('[native-wasm:bare:trace] slice broadcast complete ' + slice.seq);
           window.__bareRepoSentKinds.push(sliceEvent.kind);
-          if (relayQueryStop || window.__bareRepoReconstructed) break;
         }
         window.__bareRepoSentSliceCount = sliceEvents.length;
         window.__bareRepoPublished = true;
