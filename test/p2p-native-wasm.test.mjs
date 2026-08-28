@@ -734,7 +734,16 @@ function createStaticServer(bareRepoBundleBytes = null, bareRepoRelayUrls = []) 
         const totalEvents = (sliceEvents.length + 1) * totalRelays;
         let publishAttempts = 0;
         let lastProgressPct = -1;
+        const skippedRelays = new Set();
         window.__bareRepoPublishTotal = totalEvents;
+
+        const isResourceRejectingRelayError = (message) => {
+          const lowered = String(message || '').toLowerCase();
+          return lowered.includes('insufficient resources')
+            || lowered.includes('too many requests')
+            || lowered.includes('429')
+            || lowered.includes('resource');
+        };
 
         const updateProgress = (label) => {
           publishAttempts += 1;
@@ -751,12 +760,13 @@ function createStaticServer(bareRepoBundleBytes = null, bareRepoRelayUrls = []) 
         const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
         let relayPublishRound = 0;
         const publishRelayRoundRobin = async (event, eventLabel) => {
-          if (!DEFAULT_RELAYS.length) return;
-          const startIndex = relayPublishRound % DEFAULT_RELAYS.length;
+          const availableRelays = DEFAULT_RELAYS.filter((relay) => !skippedRelays.has(relay));
+          if (!availableRelays.length) return;
+          const startIndex = relayPublishRound % availableRelays.length;
           relayPublishRound += 1;
           const orderedRelays = [
-            ...DEFAULT_RELAYS.slice(startIndex),
-            ...DEFAULT_RELAYS.slice(0, startIndex),
+            ...availableRelays.slice(startIndex),
+            ...availableRelays.slice(0, startIndex),
           ];
           console.log('[native-wasm:bare:trace] relay round robin ' + eventLabel + ' order ' + orderedRelays.join(', '));
           for (let index = 0; index < orderedRelays.length; index++) {
@@ -768,6 +778,10 @@ function createStaticServer(bareRepoBundleBytes = null, bareRepoRelayUrls = []) 
               const message = String(error?.message || error);
               window.__p2pErrors.push(message);
               console.log('[native-wasm:bare:warn] relay publish failed ' + eventLabel + ' relay=' + relay + ' error=' + message);
+              if (isResourceRejectingRelayError(message)) {
+                skippedRelays.add(relay);
+                console.log('[native-wasm:bare:trace] skipping relay after resource rejection ' + relay);
+              }
             } finally {
               updateProgress(eventLabel + ' ' + relay);
             }
@@ -806,6 +820,7 @@ function createStaticServer(bareRepoBundleBytes = null, bareRepoRelayUrls = []) 
             const queryIds = [manifestEvent.id, ...sliceEvents.map((event) => event.id)];
             const seenIds = new Set();
             let lastLoggedRemaining = null;
+            const queryRelays = () => DEFAULT_RELAYS.filter((relay) => !skippedRelays.has(relay));
             while (Date.now() < deadline && !relayQueryStop && !window.__bareRepoReconstructed) {
               const remainingMs = Math.max(0, deadline - Date.now());
               const remainingSeconds = Math.ceil(remainingMs / 1000);
@@ -813,10 +828,15 @@ function createStaticServer(bareRepoBundleBytes = null, bareRepoRelayUrls = []) 
                 lastLoggedRemaining = remainingSeconds;
                 console.log('[native-wasm:bare:trace] relay query countdown ' + remainingSeconds + 's remaining');
               }
+              const activeRelays = queryRelays();
+              if (!activeRelays.length) {
+                console.log('[native-wasm:bare:trace] no active relays left for relay query');
+                return window.__bareRepoReconstructed;
+              }
               const events = [];
               await new Promise((resolve) => {
                 relayQueryCloser = relayPool.subscribeEose(
-                  DEFAULT_RELAYS,
+                  activeRelays,
                   { ids: queryIds, limit: queryIds.length },
                   {
                     maxWait: 2000,
