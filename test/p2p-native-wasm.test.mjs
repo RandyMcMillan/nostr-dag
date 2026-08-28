@@ -649,6 +649,11 @@ async function runChromiumBareRepoExchange(browserBaseUrl, nativeDialAddr, bundl
   page.on('console', (message) => {
     console.log(`[native-wasm:bare-browser:${message.type()}] ${message.text()}`);
   });
+  page.on('requestfailed', (request) => {
+    console.log(
+      `[native-wasm:bare-browser:requestfailed] ${request.method()} ${request.url()} ${request.failure()?.errorText || ''}`,
+    );
+  });
   try {
     const pageUrl = `${browserBaseUrl}/p2p-bare-repo-test.html?nativeWs=${encodeURIComponent(nativeDialAddr)}&bundleB64=${encodeURIComponent(bundleB64)}`;
     console.log(`[native-wasm:test] navigating bare-repo browser to ${pageUrl}`);
