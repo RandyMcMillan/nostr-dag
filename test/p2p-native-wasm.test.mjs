@@ -384,8 +384,8 @@ async function runChromiumNativeWasmExchange(browserBaseUrl, nativeDialAddr) {
     await page.waitForFunction(() => window.__p2pReady === true, null, { timeout: 120_000 });
     console.log('[native-wasm:test] browser wasm peer reported ready');
 
-    await page.waitForFunction(() => window.__p2pPeerSeen === true, null, { timeout: 120_000 });
-    console.log('[native-wasm:test] browser peer saw the native peer');
+    await page.waitForFunction(() => window.__p2pConnected === true, null, { timeout: 120_000 });
+    console.log('[native-wasm:test] browser peer connected to the native peer');
 
     return { browser, page };
   } catch (error) {
@@ -458,8 +458,8 @@ test('native peer and wasm peer exchange a real nip-pip blob', { timeout: 300_00
     );
 
     await waitForCondition(
-      async () => webdriverExecute(webdriverPort, sessionId, 'return window.__p2pPeerSeen === true;'),
-      { timeoutMs: 120_000, description: 'browser peer to see the native peer' },
+      async () => webdriverExecute(webdriverPort, sessionId, 'return window.__p2pConnected === true;'),
+      { timeoutMs: 120_000, description: 'browser peer to connect to the native peer' },
     );
 
     native.child.stdin.write('/pip hello native wasm nip-pip\n');
