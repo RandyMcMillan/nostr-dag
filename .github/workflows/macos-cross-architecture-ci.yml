@@ -7,15 +7,66 @@ on:
     branches: [ "main", "master" ]
   workflow_dispatch:
     inputs:
-      runner_target:
-        description: 'Select runner architecture to build'
-        required: true
-        default: 'all'
-        type: choice
-        options:
-          - 'all'
-          - 'arm64-only'
-          - 'x86_64-only'
+      macos_latest:
+        description: 'Include macos-latest'
+        required: false
+        default: true
+        type: boolean
+      macos_26:
+        description: 'Include macos-26'
+        required: false
+        default: true
+        type: boolean
+      macos_26_intel:
+        description: 'Include macos-26-intel'
+        required: false
+        default: true
+        type: boolean
+      macos_15:
+        description: 'Include macos-15'
+        required: false
+        default: true
+        type: boolean
+      macos_15_intel:
+        description: 'Include macos-15-intel'
+        required: false
+        default: true
+        type: boolean
+      macos_14:
+        description: 'Include macos-14'
+        required: false
+        default: true
+        type: boolean
+      macos_13:
+        description: 'Include macos-13'
+        required: false
+        default: true
+        type: boolean
+      macos_12:
+        description: 'Include macos-12'
+        required: false
+        default: true
+        type: boolean
+      macos_26_large:
+        description: 'Include macos-26-large'
+        required: false
+        default: true
+        type: boolean
+      macos_26_xlarge:
+        description: 'Include macos-26-xlarge'
+        required: false
+        default: true
+        type: boolean
+      macos_15_large:
+        description: 'Include macos-15-large'
+        required: false
+        default: true
+        type: boolean
+      macos_15_xlarge:
+        description: 'Include macos-15-xlarge'
+        required: false
+        default: true
+        type: boolean
       enable_debug:
         description: 'Enable verbose logging / debug outputs'
         required: false
@@ -28,13 +79,66 @@ on:
         type: string
 
 jobs:
+  select-macos-matrix:
+    name: Select macOS matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - id: matrix
+        shell: bash
+        env:
+          MACOS_LATEST: ${{ github.event_name == 'workflow_dispatch' && inputs.macos_latest || github.event_name != 'workflow_dispatch' }}
+          MACOS_26: ${{ github.event_name == 'workflow_dispatch' && inputs.macos_26 || github.event_name != 'workflow_dispatch' }}
+          MACOS_26_INTEL: ${{ github.event_name == 'workflow_dispatch' && inputs.macos_26_intel || github.event_name != 'workflow_dispatch' }}
+          MACOS_15: ${{ github.event_name == 'workflow_dispatch' && inputs.macos_15 || github.event_name != 'workflow_dispatch' }}
+          MACOS_15_INTEL: ${{ github.event_name == 'workflow_dispatch' && inputs.macos_15_intel || github.event_name != 'workflow_dispatch' }}
+          MACOS_14: ${{ github.event_name == 'workflow_dispatch' && inputs.macos_14 || github.event_name != 'workflow_dispatch' }}
+          MACOS_13: ${{ github.event_name == 'workflow_dispatch' && inputs.macos_13 || github.event_name != 'workflow_dispatch' }}
+          MACOS_12: ${{ github.event_name == 'workflow_dispatch' && inputs.macos_12 || github.event_name != 'workflow_dispatch' }}
+          MACOS_26_LARGE: ${{ github.event_name == 'workflow_dispatch' && inputs.macos_26_large || github.event_name != 'workflow_dispatch' }}
+          MACOS_26_XLARGE: ${{ github.event_name == 'workflow_dispatch' && inputs.macos_26_xlarge || github.event_name != 'workflow_dispatch' }}
+          MACOS_15_LARGE: ${{ github.event_name == 'workflow_dispatch' && inputs.macos_15_large || github.event_name != 'workflow_dispatch' }}
+          MACOS_15_XLARGE: ${{ github.event_name == 'workflow_dispatch' && inputs.macos_15_xlarge || github.event_name != 'workflow_dispatch' }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const enabled = (name, runner, targetArch) => {
+            const value = process.env[name];
+            return value === 'true' || value === '1' || value === true ? { runner, 'target-arch': targetArch } : null;
+          };
+
+          const entries = [
+            enabled('MACOS_LATEST', 'macos-latest', 'arm64'),
+            enabled('MACOS_26', 'macos-26', 'arm64'),
+            enabled('MACOS_26_INTEL', 'macos-26-intel', 'x86_64'),
+            enabled('MACOS_15', 'macos-15', 'arm64'),
+            enabled('MACOS_15_INTEL', 'macos-15-intel', 'x86_64'),
+            enabled('MACOS_14', 'macos-14', 'arm64'),
+            enabled('MACOS_13', 'macos-13', 'x86_64'),
+            enabled('MACOS_12', 'macos-12', 'x86_64'),
+            enabled('MACOS_26_LARGE', 'macos-26-large', 'x86_64'),
+            enabled('MACOS_26_XLARGE', 'macos-26-xlarge', 'arm64'),
+            enabled('MACOS_15_LARGE', 'macos-15-large', 'x86_64'),
+            enabled('MACOS_15_XLARGE', 'macos-15-xlarge', 'arm64'),
+          ].filter(Boolean);
+
+          if (!entries.length) {
+            throw new Error('No macOS runners selected');
+          }
+          const matrix = { include: entries };
+          console.log(`matrix=${JSON.stringify(matrix)}`);
+          console.log(`matrix=${JSON.stringify(matrix)}`);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `matrix=${JSON.stringify(matrix)}\n`);
+          NODE
+
   build-macos:
+    needs: select-macos-matrix
     name: Build on ${{ matrix.runner }} (${{ matrix.target-arch }})
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
-      matrix:
-        include: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.runner_target == 'arm64-only' && fromJSON('[{"runner":"macos-latest","target-arch":"arm64"},{"runner":"macos-26","target-arch":"arm64"},{"runner":"macos-15","target-arch":"arm64"},{"runner":"macos-14","target-arch":"arm64"},{"runner":"macos-26-xlarge","target-arch":"arm64"},{"runner":"macos-15-xlarge","target-arch":"arm64"}]') || github.event.inputs.runner_target == 'x86_64-only' && fromJSON('[{"runner":"macos-26-intel","target-arch":"x86_64"},{"runner":"macos-15-intel","target-arch":"x86_64"},{"runner":"macos-13","target-arch":"x86_64"},{"runner":"macos-12","target-arch":"x86_64"},{"runner":"macos-26-large","target-arch":"x86_64"},{"runner":"macos-15-large","target-arch":"x86_64"}]') || fromJSON('[{"runner":"macos-latest","target-arch":"arm64"},{"runner":"macos-26","target-arch":"arm64"},{"runner":"macos-26-intel","target-arch":"x86_64"},{"runner":"macos-15","target-arch":"arm64"},{"runner":"macos-15-intel","target-arch":"x86_64"},{"runner":"macos-14","target-arch":"arm64"},{"runner":"macos-13","target-arch":"x86_64"},{"runner":"macos-12","target-arch":"x86_64"},{"runner":"macos-26-large","target-arch":"x86_64"},{"runner":"macos-26-xlarge","target-arch":"arm64"},{"runner":"macos-15-large","target-arch":"x86_64"},{"runner":"macos-15-xlarge","target-arch":"arm64"}]')) || fromJSON('[{"runner":"macos-latest","target-arch":"arm64"},{"runner":"macos-26","target-arch":"arm64"},{"runner":"macos-26-intel","target-arch":"x86_64"},{"runner":"macos-15","target-arch":"arm64"},{"runner":"macos-15-intel","target-arch":"x86_64"},{"runner":"macos-14","target-arch":"arm64"},{"runner":"macos-13","target-arch":"x86_64"},{"runner":"macos-12","target-arch":"x86_64"},{"runner":"macos-26-large","target-arch":"x86_64"},{"runner":"macos-26-xlarge","target-arch":"arm64"},{"runner":"macos-15-large","target-arch":"x86_64"},{"runner":"macos-15-xlarge","target-arch":"arm64"}]') }}
+      matrix: ${{ fromJSON(needs.select-macos-matrix.outputs.matrix) }}
 
     steps:
       - name: Checkout repository
