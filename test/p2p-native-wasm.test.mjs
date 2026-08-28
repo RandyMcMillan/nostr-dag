@@ -134,11 +134,21 @@ function createBareRepoBundle() {
   }
 }
 
-function createStaticServer() {
+function createStaticServer(bareRepoBundleBytes = null) {
   return new Promise((resolve, reject) => {
     const server = createServer(async (req, res) => {
       try {
         const url = new URL(req.url ?? '/', 'http://127.0.0.1');
+        if (url.pathname === '/p2p-bare-repo.bundle') {
+          if (!bareRepoBundleBytes) {
+            res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+            res.end('bare-repo bundle unavailable');
+            return;
+          }
+          res.writeHead(200, { 'content-type': 'application/octet-stream' });
+          res.end(Buffer.from(bareRepoBundleBytes));
+          return;
+        }
         if (url.pathname === '/p2p-wasm-native-test.html') {
           const nativeWs = url.searchParams.get('nativeWs') || '';
           const html = `<!doctype html>
