@@ -66,8 +66,12 @@ fn hex_to_bytes<const N: usize>(hex: &str) -> [u8; N] {
 
 #[cfg(feature = "p2p")]
 pub fn deterministic_native_identity_keypair() -> libp2p::identity::Keypair {
+    let seed_hex = std::env::var("NOSTR_DAG_NATIVE_LIBP2P_SEED_HEX")
+        .ok()
+        .filter(|value| value.len() == 64)
+        .unwrap_or_else(|| DETERMINISTIC_NATIVE_LIBP2P_SEED_HEX.to_string());
     libp2p::identity::Keypair::ed25519_from_bytes(hex_to_bytes::<32>(
-        DETERMINISTIC_NATIVE_LIBP2P_SEED_HEX,
+        &seed_hex,
     ))
         .expect("deterministic native libp2p identity seed is valid")
 }
