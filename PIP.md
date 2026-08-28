@@ -20,9 +20,9 @@ PIP does **not** redefine the Nostr event format itself; the embedded `event` ob
 ## 2. Terminology
 
 - **Bridge envelope** — a JSON object carried over libp2p that wraps a standard Nostr event plus routing metadata
-- **Manifest event** — a Nostr event describing the root identifier, total byte length, and total slice count for a
-  multi-slice payload
-- **Slice event** — a Nostr event containing one ordered slice of a larger payload
+- **Manifest event** — a Nostr event describing the root identifier, SHA-256 digest, size, packet count, tree depth,
+  MTU, encoding, and path for a multi-slice payload
+- **Slice event** — a Nostr event containing one packet slice from the recursive packet tree
 - **Root ID** — an application-defined identifier shared by all manifest and slice events belonging to the same payload
 - **Relay hints** — a deduplicated list of relay URLs that may be used when forwarding or publishing events
 
@@ -38,6 +38,9 @@ The following identifiers are normative:
 - Transfer request kind: `39077`
 - Transfer manifest kind: `39078`
 - Transfer slice kind: `39079`
+- PIP Blob Attestation kind: `39080`
+- PIP Quorum Seal kind: `39081`
+- PIP Quorum Membership kind: `39082`
 
 ## 4. Bridge envelope
 
@@ -81,9 +84,14 @@ Manifest events are Nostr events with `kind` `39078`.  Their `content` is a JSON
   "protocol": "nostr-dag-transfer",
   "version": 1,
   "type": "manifest",
-  "root_id": "root-1",
-  "total_bytes": 1024,
-  "total_slices": 8
+  "root": "root-1",
+  "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "size": 1024,
+  "packets": 15,
+  "depth": 3,
+  "mtu": 512,
+  "encoding": "json",
+  "path": ""
 }
 ```
 
@@ -92,9 +100,14 @@ Manifest events are Nostr events with `kind` `39078`.  Their `content` is a JSON
 - `protocol` — MUST be `nostr-dag-transfer`
 - `version` — MUST be integer `1`
 - `type` — MUST be `manifest`
-- `root_id` — MUST be a string
-- `total_bytes` — MUST be a non-negative integer
-- `total_slices` — MUST be a non-negative integer and describe the full slice count for the payload
+- `root` — MUST be a string
+- `sha256` — MUST be a lowercase hex SHA-256 of the full reconstructed payload
+- `size` — MUST be a non-negative integer (total bytes of the payload)
+- `packets` — MUST be a non-negative integer (total slices including parity)
+- `depth` — MUST be a non-negative integer (maximum tree depth)
+- `mtu` — MUST be a non-negative integer (threshold used for leaf sizing)
+- `encoding` — MUST be a string (e.g. `"json"`)
+- `path` — MUST be a string (relative path when walking a directory; empty for single blobs)
 
 ## 6. Transfer slice events
 
@@ -105,10 +118,10 @@ Slice events are Nostr events with `kind` `39079`.  Their `content` is a JSON ob
   "protocol": "nostr-dag-transfer",
   "version": 1,
   "type": "slice",
-  "root_id": "root-1",
-  "seq": 0,
-  "total_slices": 8,
-  "data": [1, 2, 3, 4]
+  "id": "root-1.0.0",
+  "header": {"seq_num": 0, "total_packets": 15},
+  "data": [1, 2, 3, 4],
+  "is_parity": false
 }
 ```
 
@@ -119,37 +132,65 @@ Each slice event MUST also include an `e` tag referencing the manifest event it 
 - `protocol` — MUST be `nostr-dag-transfer`
 - `version` — MUST be integer `1`
 - `type` — MUST be `slice`
-- `root_id` — MUST be a string matching the manifest `root_id`
-- `seq` — MUST be a zero-based integer sequence number
-- `total_slices` — MUST match the manifest `total_slices`
+- `id` — MUST be a recursive packet identifier (e.g. `ROOT.0.0` or `ROOT.0.P`)
+- `header` — MUST contain:
+  - `seq_num` — zero-based sequence number assigned during packetization
+  - `total_packets` — total number of packets in the batch (data + parity)
 - `data` — MUST be an array of integers in the byte range `0..=255`
+- `is_parity` — MUST be `true` for parity slices, `false` for data slices
 
 ## 7. Packetization rules
 
-- Producers MUST split payload bytes into ordered slices
-- `max_slice_bytes` less than `1` MUST be treated as `1`
-- Empty payloads MUST still produce exactly one slice with:
-  - `seq = 0`
-  - `total_slices = 1`
-  - `data = []`
+Producers split payload bytes using a recursive binary tree:
+
+1. If `data.len() <= mtu`, emit a single data slice (`is_parity: false`) with the current `id`
+2. Otherwise:
+   - Split the data in half
+   - Recursively packetize the left half with `id + ".0"`
+   - Recursively packetize the right half with `id + ".1"`
+   - Emit a parity slice (`id + ".P"`) whose payload is the XOR of the left and right halves
+3. `seq_num` is assigned monotonically during depth-first traversal
+4. `total_packets` is set to the final batch size after traversal completes
+5. Empty payloads still emit a single empty data slice so reconstruction remains well-defined
+
+### 7.1 Parity calculation
+
+Parity between two buffers is computed bytewise with XOR.  If the buffers differ in length, the shorter buffer is
+treated as padded with zeroes:
+
+```rust
+fn calculate_parity(left: &[u8], right: &[u8]) -> Vec<u8> {
+    let max_len = left.len().max(right.len());
+    let mut parity = vec![0; max_len];
+    for i in 0..max_len {
+        let l = if i < left.len() { left[i] } else { 0 };
+        let r = if i < right.len() { right[i] } else { 0 };
+        parity[i] = l ^ r;
+    }
+    parity
+}
+```
 
 ## 8. Reconstruction rules
 
-Consumers reconstruct payloads by ordering slices by `seq` and concatenating their `data` arrays.
+Consumers reconstruct payloads by collecting data slices (`is_parity: false`), ordering them by `seq_num`, and
+concatenating their `data` arrays.
 
 Consumers MUST reject reconstruction when:
 
-- the slice set is missing a sequence number
-- the number of received slices does not equal `total_slices`
-- slices for different `root_id` values are mixed together
-- slices disagree on `total_slices`
+- slices for different `root` values are mixed together
+- slices disagree on `total_packets`
 - any byte value falls outside `0..=255`
+
+Consumers MAY use parity slices to recover missing data slices when one sibling and the parent parity are both
+available.  Recovery is the same XOR operation: `missing = sibling XOR parity`.
 
 Consumers MAY treat an empty slice set as an empty payload.
 
 ## 9. Transfer request events
 
-Request events are Nostr events with `kind` `39077`.  Their `content` is a JSON object that asks a peer to publish a manifest for a specific payload.
+Request events are Nostr events with `kind` `39077`.  Their `content` is a JSON object that asks a peer to publish a
+manifest for a specific payload, or to re-send missing slices.
 
 ### 9.1 Canonical shape
 
@@ -160,6 +201,7 @@ Request events are Nostr events with `kind` `39077`.  Their `content` is a JSON 
   "type": "request",
   "request_id": "req-abc123",
   "root_id": "root-1",
+  "want": ["ROOT.0.0.P", "ROOT.1.1.0"],
   "range": { "offset": 0, "limit": 8 }
 }
 ```
@@ -174,20 +216,24 @@ Request events are Nostr events with `kind` `39077`.  Their `content` is a JSON 
 
 ### 9.3 Optional fields
 
+- `want` — array of missing packet ids the requester needs (gnostr repair-request style)
 - `range` — MAY contain:
   - `offset` — zero-based slice index to start from (default `0`)
-  - `limit` — maximum number of slices to return (default `total_slices`)
+  - `limit` — maximum number of slices to return (default `total_packets`)
 - `manifest_id` — MAY reference a specific known manifest event id
 
 ### 9.4 Behavior
 
-- Producers that hold the requested payload SHOULD respond by publishing the manifest (kind 39078) and the requested slices (kind 39079) on the same topic.
-- Producers SHOULD include the `request_id` in the manifest `metadata` field so the requester can correlate the response.
+- Producers that hold the requested payload SHOULD respond by publishing the manifest (kind 39078) and the requested
+  slices (kind 39079) on the same topic.
+- Producers SHOULD include the `request_id` in the manifest `metadata` field so the requester can correlate the
+  response.
 - If the producer does not hold the payload, it MUST silently ignore the request.
 
 ## 10. Transfer ACK / NAK events
 
-ACK and NAK events are Nostr events with `kind` `39076`.  They let a consumer tell a producer which slices were received or missed.
+ACK and NAK events are Nostr events with `kind` `39076`.  They let a consumer tell a producer which slices were
+received or missed.
 
 ### 10.1 Canonical shape
 
@@ -208,13 +254,13 @@ ACK and NAK events are Nostr events with `kind` `39076`.  They let a consumer te
 - `protocol` — MUST be `nostr-dag-transfer`
 - `version` — MUST be integer `1`
 - `type` — MUST be `ack` or `nak`
-- `root_id` — MUST match the manifest `root_id`
+- `root_id` — MUST match the manifest `root`
 - `manifest_id` — MUST be the hex event id of the manifest
 
 ### 10.3 Optional fields
 
-- `received` — array of `seq` numbers the consumer already has
-- `missing` — array of `seq` numbers the consumer still needs
+- `received` — array of `seq_num` values the consumer already has
+- `missing` — array of `seq_num` values the consumer still needs
 
 ### 10.4 Behavior
 
@@ -243,7 +289,7 @@ distinguishes:
 
 ## 13. Reference implementation
 
-The repository’s current reference implementation lives in:
+The repository's current reference implementation lives in:
 
 - `src/p2p.rs`
 - `demo/shared/bridge-page.mjs`
@@ -255,7 +301,7 @@ Any future protocol change should update both the implementation and this docume
 This section defines the three event kinds and lifecycle used when a DAG quorum collectively
 verifies and signs a PIP blob.
 
-### 12.1 Overview
+### 14.1 Overview
 
 The quorum attestation flow has three phases:
 
@@ -267,7 +313,7 @@ The quorum attestation flow has three phases:
    that references the seal and proves they verified the same blob.  Membership grows and the
    4/5 threshold is recalculated accordingly.
 
-### 12.2 New event kinds
+### 14.2 New event kinds
 
 | Kind  | Name                   | Constant           |
 |-------|------------------------|--------------------|
@@ -275,14 +321,14 @@ The quorum attestation flow has three phases:
 | 39081 | PIP Quorum Seal        | `PIP_SEAL_KIND`    |
 | 39082 | PIP Quorum Membership  | `PIP_JOIN_KIND`    |
 
-### 12.3 Attestation event (kind 39080)
+### 14.3 Attestation event (kind 39080)
 
 ```json
 {
   "protocol": "nostr-dag-transfer",
   "version": 1,
   "type": "attest",
-  "root_id": "<manifest root_id>",
+  "root_id": "<manifest root>",
   "sha256": "<lowercase hex sha256 of reconstructed blob>",
   "manifest_id": "<hex event id of the manifest event>"
 }
@@ -290,14 +336,14 @@ The quorum attestation flow has three phases:
 
 The event MUST carry `e` tags referencing the manifest event id and every slice event id.
 
-### 12.4 Seal event (kind 39081)
+### 14.4 Seal event (kind 39081)
 
 ```json
 {
   "protocol": "nostr-dag-transfer",
   "version": 1,
   "type": "seal",
-  "root_id": "<manifest root_id>",
+  "root_id": "<manifest root>",
   "sha256": "<lowercase hex sha256>",
   "attest_ids": ["<hex attestation event id>", ...]
 }
@@ -306,14 +352,14 @@ The event MUST carry `e` tags referencing the manifest event id and every slice 
 `attest_ids` MUST list exactly the attestation event ids that contributed to reaching
 the threshold.
 
-### 12.5 Membership (join) event (kind 39082)
+### 14.5 Membership (join) event (kind 39082)
 
 ```json
 {
   "protocol": "nostr-dag-transfer",
   "version": 1,
   "type": "join",
-  "root_id": "<manifest root_id>",
+  "root_id": "<manifest root>",
   "sha256": "<lowercase hex sha256>",
   "seal_id": "<hex event id of the quorum seal>"
 }
@@ -322,7 +368,7 @@ the threshold.
 The event MUST carry an `e` tag referencing the seal event id.  A join event MUST be
 rejected if no seal event exists yet or if `seal_id` does not match the sealed event.
 
-### 12.6 Threshold rule
+### 14.6 Threshold rule
 
 Given N total participants the threshold T is computed as:
 
@@ -334,7 +380,7 @@ A quorum is reached when the number of accepted attestations is strictly greater
 (i.e., at least `ceil(N × 4 / 5)` attestations).  T is recalculated whenever new members
 join via kind 39082.
 
-### 12.7 Reference implementation
+### 14.7 Reference implementation
 
 The Rust implementation lives in:
 

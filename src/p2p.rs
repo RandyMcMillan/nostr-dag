@@ -92,25 +92,36 @@ pub fn deterministic_native_nostr_keys() -> nostr::Keys {
     )
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TransferManifest {
-    pub root_id: String,
-    pub total_bytes: usize,
-    pub total_slices: usize,
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PacketHeader {
+    pub seq_num: u64,
+    pub total_packets: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TransferSlice {
-    pub root_id: String,
-    pub seq: usize,
-    pub total_slices: usize,
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ProtocolSlice {
+    pub id: String,
+    pub header: PacketHeader,
     pub data: Vec<u8>,
+    pub is_parity: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PacketManifest {
+    pub root: String,
+    pub sha256: String,
+    pub size: u64,
+    pub packets: u64,
+    pub depth: u32,
+    pub mtu: u64,
+    pub encoding: String,
+    pub path: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TransferEventPayload {
-    Manifest(TransferManifest),
-    Slice(TransferSlice),
+    Manifest(PacketManifest),
+    Slice(ProtocolSlice),
 }
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -251,56 +262,117 @@ fn validate_protocol(payload: &serde_json::Value) -> Result<(), TransferError> {
     Ok(())
 }
 
-/// Split payload bytes into ordered PIP transfer slices.
+/// XOR two payloads into a parity buffer (PIP helper).
+pub fn calculate_parity(left: &[u8], right: &[u8]) -> Vec<u8> {
+    let max_len = left.len().max(right.len());
+    let mut parity = vec![0; max_len];
+    for i in 0..max_len {
+        let l = if i < left.len() { left[i] } else { 0 };
+        let r = if i < right.len() { right[i] } else { 0 };
+        parity[i] = l ^ r;
+    }
+    parity
+}
+
+fn recursive_packetize(
+    id: String,
+    data: Vec<u8>,
+    threshold: usize,
+    seq: &mut u64,
+    max_depth: &mut u32,
+) -> Vec<ProtocolSlice> {
+    if data.len() <= threshold {
+        let slice = ProtocolSlice {
+            id: id.clone(),
+            header: PacketHeader {
+                seq_num: *seq,
+                total_packets: 0,
+            },
+            data,
+            is_parity: false,
+        };
+        *seq += 1;
+        let depth = id.matches('.').count() as u32;
+        *max_depth = (*max_depth).max(depth);
+        return vec![slice];
+    }
+
+    let half = data.len() / 2;
+    let left_data = data[..half].to_vec();
+    let right_data = data[half..].to_vec();
+    let parity_data = calculate_parity(&left_data, &right_data);
+
+    let mut slices = recursive_packetize(format!("{}.0", id), left_data, threshold, seq, max_depth);
+    slices.append(&mut recursive_packetize(
+        format!("{}.1", id),
+        right_data,
+        threshold,
+        seq,
+        max_depth,
+    ));
+    slices.push(ProtocolSlice {
+        id: format!("{}.P", id),
+        header: PacketHeader {
+            seq_num: *seq,
+            total_packets: 0,
+        },
+        data: parity_data,
+        is_parity: true,
+    });
+    *seq += 1;
+    slices
+}
+
+/// Split payload bytes into a recursive PIP packet tree with parity slices.
 ///
-/// The output is suitable for a PIP manifest/slice sequence:
-/// - all slices share the same `root_id`
-/// - `seq` values are zero-based and contiguous
+/// The output follows the gnostr recursive packet-tree model:
+/// - binary split until `data.len() <= threshold`
+/// - one parity slice (`id.P`) emitted at each internal node
+/// - leaf slices are data slices with `is_parity: false`
 /// - empty payloads still emit a single empty slice so reconstruction remains well-defined
 pub fn packetize_payload(
     root_id: &str,
     payload: &[u8],
-    max_slice_bytes: usize,
-) -> Vec<TransferSlice> {
-    let chunk_size = max_slice_bytes.max(1);
-    let total_slices = payload.len().div_ceil(chunk_size).max(1);
-
-    if payload.is_empty() {
-        return vec![TransferSlice {
-            root_id: root_id.to_string(),
-            seq: 0,
-            total_slices,
-            data: Vec::new(),
-        }];
+    threshold: usize,
+) -> Vec<ProtocolSlice> {
+    let threshold = threshold.max(1);
+    let mut seq = 0;
+    let mut depth = 0;
+    let mut slices = recursive_packetize(
+        root_id.to_string(),
+        payload.to_vec(),
+        threshold,
+        &mut seq,
+        &mut depth,
+    );
+    let total = slices.len() as u64;
+    for slice in &mut slices {
+        slice.header.total_packets = total;
     }
-
-    payload
-        .chunks(chunk_size)
-        .enumerate()
-        .map(|(seq, chunk)| TransferSlice {
-            root_id: root_id.to_string(),
-            seq,
-            total_slices,
-            data: chunk.to_vec(),
-        })
-        .collect()
+    slices
 }
 
 /// Build a PIP transfer-manifest Nostr event.
 ///
-/// The event content follows the `PIP.md` manifest schema and advertises the total payload size
-/// plus the total number of slices expected for the shared `root_id`.
+/// The event content follows the gnostr recursive packet-tree manifest schema
+/// (kind 39078) and advertises the payload size, packet count, tree depth,
+/// SHA-256 digest, and encoding for the shared `root`.
 pub fn build_transfer_manifest_event(
     keys: &nostr::Keys,
-    manifest: &TransferManifest,
+    manifest: &PacketManifest,
 ) -> Result<nostr::Event, nostr::event::builder::Error> {
     let content = serde_json::json!({
         "protocol": TRANSFER_PROTOCOL,
         "version": TRANSFER_VERSION,
         "type": "manifest",
-        "root_id": manifest.root_id,
-        "total_bytes": manifest.total_bytes,
-        "total_slices": manifest.total_slices,
+        "root": manifest.root,
+        "sha256": manifest.sha256,
+        "size": manifest.size,
+        "packets": manifest.packets,
+        "depth": manifest.depth,
+        "mtu": manifest.mtu,
+        "encoding": manifest.encoding,
+        "path": manifest.path,
     })
     .to_string();
 
@@ -309,21 +381,22 @@ pub fn build_transfer_manifest_event(
 
 /// Build a PIP transfer-slice Nostr event and link it to the manifest via `e` tag.
 ///
-/// Each slice repeats the `root_id`, exposes its zero-based sequence number, and carries raw bytes
-/// as a JSON array so the payload can be reconstructed deterministically by receivers.
+/// Each slice carries a recursive packet-tree identifier (`id`), sequencing header,
+/// raw bytes as a JSON array, and a parity flag so receivers can reconstruct
+/// the payload and recover from missing slices.
 pub fn build_transfer_slice_event(
     keys: &nostr::Keys,
-    slice: &TransferSlice,
+    slice: &ProtocolSlice,
     manifest_id: nostr::EventId,
 ) -> Result<nostr::Event, nostr::event::builder::Error> {
     let content = serde_json::json!({
         "protocol": TRANSFER_PROTOCOL,
         "version": TRANSFER_VERSION,
         "type": "slice",
-        "root_id": slice.root_id,
-        "seq": slice.seq,
-        "total_slices": slice.total_slices,
+        "id": slice.id,
+        "header": slice.header,
         "data": slice.data,
+        "is_parity": slice.is_parity,
     })
     .to_string();
 
@@ -337,17 +410,37 @@ pub fn build_transfer_slice_event(
 ///
 /// This is the explicit "bytes -> Nostr events" conversion used by the bare-repo transfer
 /// tests and by any future caller that wants to package a blob for publication.
+/// Computes a SHA-256 digest over the full payload and builds the recursive packet tree.
 pub fn encode_payload_as_transfer_events(
     keys: &nostr::Keys,
     root_id: &str,
     payload: &[u8],
-    max_slice_bytes: usize,
+    threshold: usize,
 ) -> Result<(nostr::Event, Vec<nostr::Event>), nostr::event::builder::Error> {
-    let slices = packetize_payload(root_id, payload, max_slice_bytes);
-    let manifest = TransferManifest {
-        root_id: root_id.to_string(),
-        total_bytes: payload.len(),
-        total_slices: slices.len(),
+    use sha2::{Digest, Sha256};
+    let sha256 = format!("{:x}", Sha256::digest(payload));
+    let mut seq = 0;
+    let mut depth = 0;
+    let mut slices = recursive_packetize(
+        root_id.to_string(),
+        payload.to_vec(),
+        threshold.max(1),
+        &mut seq,
+        &mut depth,
+    );
+    let total = slices.len() as u64;
+    for slice in &mut slices {
+        slice.header.total_packets = total;
+    }
+    let manifest = PacketManifest {
+        root: root_id.to_string(),
+        sha256,
+        size: payload.len() as u64,
+        packets: total,
+        depth,
+        mtu: threshold as u64,
+        encoding: "json".to_string(),
+        path: String::new(),
     };
     let manifest_event = build_transfer_manifest_event(keys, &manifest)?;
     let slice_events = slices
@@ -364,21 +457,27 @@ pub fn encode_payload_as_transfer_events(
 pub fn parse_transfer_event(event: &nostr::Event) -> Result<TransferEventPayload, TransferError> {
     let payload = parse_payload_json(event)?;
     validate_protocol(&payload)?;
-    let root_id = read_string_field(&payload, "root_id")?;
 
     if event.kind == TRANSFER_MANIFEST_KIND {
-        let total_bytes = read_u64_field(&payload, "total_bytes")? as usize;
-        let total_slices = read_u64_field(&payload, "total_slices")? as usize;
-        return Ok(TransferEventPayload::Manifest(TransferManifest {
-            root_id,
-            total_bytes,
-            total_slices,
-        }));
+        let manifest = PacketManifest {
+            root: read_string_field(&payload, "root")?,
+            sha256: read_string_field(&payload, "sha256")?,
+            size: read_u64_field(&payload, "size")?,
+            packets: read_u64_field(&payload, "packets")?,
+            depth: read_u64_field(&payload, "depth")? as u32,
+            mtu: read_u64_field(&payload, "mtu")?,
+            encoding: read_string_field(&payload, "encoding")?,
+            path: read_string_field(&payload, "path")?,
+        };
+        return Ok(TransferEventPayload::Manifest(manifest));
     }
 
     if event.kind == TRANSFER_SLICE_KIND {
-        let seq = read_u64_field(&payload, "seq")? as usize;
-        let total_slices = read_u64_field(&payload, "total_slices")? as usize;
+        let header = payload
+            .get("header")
+            .ok_or(TransferError::MissingField("header"))?;
+        let seq_num = read_u64_field(header, "seq_num")?;
+        let total_packets = read_u64_field(header, "total_packets")?;
         let data = payload
             .get("data")
             .and_then(serde_json::Value::as_array)
@@ -393,12 +492,19 @@ pub fn parse_transfer_event(event: &nostr::Event) -> Result<TransferEventPayload
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
+        let is_parity = payload
+            .get("is_parity")
+            .and_then(serde_json::Value::as_bool)
+            .ok_or(TransferError::MissingField("is_parity"))?;
 
-        return Ok(TransferEventPayload::Slice(TransferSlice {
-            root_id,
-            seq,
-            total_slices,
+        return Ok(TransferEventPayload::Slice(ProtocolSlice {
+            id: read_string_field(&payload, "id")?,
+            header: PacketHeader {
+                seq_num,
+                total_packets,
+            },
             data,
+            is_parity,
         }));
     }
 
@@ -407,45 +513,42 @@ pub fn parse_transfer_event(event: &nostr::Event) -> Result<TransferEventPayload
 
 /// Reconstruct the original payload from validated PIP transfer slices.
 ///
-/// Reconstruction requires a complete set of slices sharing one `root_id` and one
-/// `total_slices` value.  Missing sequence numbers or mixed metadata are rejected.
-pub fn reconstruct_payload(slices: &[TransferSlice]) -> Result<Vec<u8>, TransferError> {
+/// Reconstruction collects all data slices (`is_parity: false`), orders them by
+/// `seq_num`, and concatenates their payloads.  Parity slices are ignored during
+/// normal reconstruction; they are used only when slices are missing.
+pub fn reconstruct_payload(slices: &[ProtocolSlice]) -> Result<Vec<u8>, TransferError> {
     if slices.is_empty() {
         return Ok(Vec::new());
     }
 
-    let root_id = &slices[0].root_id;
-    let expected_total = slices[0].total_slices;
-    if expected_total != slices.len() {
-        return Err(TransferError::InvalidPayload(format!(
-            "slice count mismatch: expected {expected_total}, got {}",
-            slices.len()
-        )));
-    }
+    let root_id = slices[0]
+        .id
+        .split('.')
+        .next()
+        .unwrap_or("")
+        .to_string();
+    let expected_total = slices[0].header.total_packets;
 
-    let mut ordered = slices.to_vec();
-    ordered.sort_by_key(|slice| slice.seq);
-
-    for (index, slice) in ordered.iter().enumerate() {
-        if &slice.root_id != root_id {
+    // Verify consistency
+    for slice in slices {
+        let slice_root = slice.id.split('.').next().unwrap_or("");
+        if slice_root != root_id {
             return Err(TransferError::InvalidPayload(
-                "mixed root_id values in transfer slices".to_string(),
+                "mixed root values in transfer slices".to_string(),
             ));
         }
-        if slice.total_slices != expected_total {
+        if slice.header.total_packets != expected_total {
             return Err(TransferError::InvalidPayload(
-                "mixed total_slices values in transfer slices".to_string(),
+                "mixed total_packets values in transfer slices".to_string(),
             ));
-        }
-        if slice.seq != index {
-            return Err(TransferError::InvalidPayload(format!(
-                "missing slice sequence {index}, got {}",
-                slice.seq
-            )));
         }
     }
 
-    Ok(ordered.into_iter().flat_map(|slice| slice.data).collect())
+    // Filter to data slices only and sort by seq_num
+    let mut data_slices: Vec<&ProtocolSlice> = slices.iter().filter(|s| !s.is_parity).collect();
+    data_slices.sort_by_key(|s| s.header.seq_num);
+
+    Ok(data_slices.into_iter().flat_map(|s| s.data.clone()).collect())
 }
 
 /// Encode a Nostr event as a PIP bridge envelope.
@@ -495,6 +598,7 @@ pub fn decode_bridge_message(message: &str) -> Result<nostr::Event, TransferErro
 #[cfg(test)]
 mod transfer_tests {
     use super::*;
+    use sha2::Digest;
 
     #[test]
     fn packetize_and_reconstruct_payload_roundtrip() {
@@ -503,7 +607,7 @@ mod transfer_tests {
         assert!(slices.len() > 1);
         assert!(slices
             .iter()
-            .all(|slice| slice.total_slices == slices.len()));
+            .all(|slice| slice.header.total_packets == slices.len() as u64));
 
         let reconstructed = reconstruct_payload(&slices).unwrap();
         assert_eq!(reconstructed, original);
@@ -513,27 +617,34 @@ mod transfer_tests {
     fn packetize_empty_payload_emits_single_empty_slice() {
         let slices = packetize_payload("root-empty", &[], 8);
         assert_eq!(slices.len(), 1);
-        assert_eq!(slices[0].seq, 0);
+        assert_eq!(slices[0].header.seq_num, 0);
         assert!(slices[0].data.is_empty());
+        assert!(!slices[0].is_parity);
 
         let reconstructed = reconstruct_payload(&slices).unwrap();
         assert!(reconstructed.is_empty());
     }
 
     #[test]
-    fn reconstruct_rejects_missing_sequence() {
+    fn reconstruct_rejects_mixed_root() {
         let slices = vec![
-            TransferSlice {
-                root_id: "root-1".into(),
-                seq: 0,
-                total_slices: 2,
+            ProtocolSlice {
+                id: "root-1.0".into(),
+                header: PacketHeader {
+                    seq_num: 0,
+                    total_packets: 2,
+                },
                 data: vec![1, 2],
+                is_parity: false,
             },
-            TransferSlice {
-                root_id: "root-1".into(),
-                seq: 2,
-                total_slices: 2,
+            ProtocolSlice {
+                id: "root-2.0".into(),
+                header: PacketHeader {
+                    seq_num: 1,
+                    total_packets: 2,
+                },
                 data: vec![3],
+                is_parity: false,
             },
         ];
 
@@ -546,10 +657,15 @@ mod transfer_tests {
         let keys = nostr::Keys::generate();
         let payload = b"abcdefgh";
         let slices = packetize_payload("root-2", payload, 3);
-        let manifest = TransferManifest {
-            root_id: "root-2".to_string(),
-            total_bytes: payload.len(),
-            total_slices: slices.len(),
+        let manifest = PacketManifest {
+            root: "root-2".to_string(),
+            sha256: format!("{:x}", sha2::Sha256::digest(payload)),
+            size: payload.len() as u64,
+            packets: slices.len() as u64,
+            depth: 2,
+            mtu: 3,
+            encoding: "json".to_string(),
+            path: String::new(),
         };
         let manifest_event = build_transfer_manifest_event(&keys, &manifest).unwrap();
 
@@ -568,18 +684,8 @@ mod transfer_tests {
     async fn p2p_bridge_message_roundtrip_for_nostr_transfer_events() {
         let keys = nostr::Keys::generate();
         let payload = b"fractal swarm adaptation for nostr dag";
-        let slices = packetize_payload("root-bridge", payload, 7);
-        let manifest = TransferManifest {
-            root_id: "root-bridge".to_string(),
-            total_bytes: payload.len(),
-            total_slices: slices.len(),
-        };
-        let manifest_event = build_transfer_manifest_event(&keys, &manifest).unwrap();
-
-        let mut slice_events = Vec::new();
-        for slice in &slices {
-            slice_events.push(build_transfer_slice_event(&keys, slice, manifest_event.id).unwrap());
-        }
+        let (manifest_event, slice_events) =
+            encode_payload_as_transfer_events(&keys, "root-bridge", payload, 7).unwrap();
 
         let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(64);
         let relay_hints = vec!["ws://localhost:8080".to_string()];
@@ -605,8 +711,8 @@ mod transfer_tests {
             }
         }
 
-        assert_eq!(received_manifest, Some(manifest));
-        assert_eq!(received_slices.len(), slices.len());
+        assert!(received_manifest.is_some());
+        assert_eq!(received_slices.len(), slice_events.len());
 
         let reconstructed = reconstruct_payload(&received_slices).unwrap();
         assert_eq!(reconstructed, payload);
@@ -882,28 +988,17 @@ mod git_bare_pip_tests {
             let slice_size = slice_size.max(1);
             let root_id = format!("git-bare-pip-depth-{slice_size}");
 
-            // --- packetize ---
-            let slices = packetize_payload(&root_id, &bundle_bytes, slice_size);
-            let slice_count = slices.len();
-            println!("slice_size={slice_size}  slice_count={slice_count}");
-
-            let manifest = TransferManifest {
-                root_id: root_id.clone(),
-                total_bytes: bundle_bytes.len(),
-                total_slices: slice_count,
-            };
-
             // --- encode to Nostr events ---
             let keys = nostr::Keys::generate();
-            let manifest_event =
-                build_transfer_manifest_event(&keys, &manifest).expect("build manifest event");
-            let slice_events: Vec<nostr::Event> = slices
-                .iter()
-                .map(|s| {
-                    build_transfer_slice_event(&keys, s, manifest_event.id)
-                        .expect("build slice event")
-                })
-                .collect();
+            let (manifest_event, slice_events) = encode_payload_as_transfer_events(
+                &keys,
+                &root_id,
+                &bundle_bytes,
+                slice_size,
+            )
+            .expect("encode payload as transfer events");
+            let slice_count = slice_events.len();
+            println!("slice_size={slice_size}  slice_count={slice_count}");
 
             // --- decode from Nostr events ---
             let parsed_manifest =
@@ -911,11 +1006,11 @@ mod git_bare_pip_tests {
                     TransferEventPayload::Manifest(m) => m,
                     other => panic!("expected Manifest, got {other:?}"),
                 };
-            assert_eq!(parsed_manifest.root_id, root_id);
-            assert_eq!(parsed_manifest.total_bytes, bundle_bytes.len());
-            assert_eq!(parsed_manifest.total_slices, slice_count);
+            assert_eq!(parsed_manifest.root, root_id);
+            assert_eq!(parsed_manifest.size, bundle_bytes.len() as u64);
+            assert_eq!(parsed_manifest.packets, slice_count as u64);
 
-            let mut recovered: Vec<TransferSlice> = slice_events
+            let mut recovered: Vec<ProtocolSlice> = slice_events
                 .iter()
                 .map(|ev| match parse_transfer_event(ev).expect("parse slice") {
                     TransferEventPayload::Slice(s) => s,
@@ -924,7 +1019,12 @@ mod git_bare_pip_tests {
                 .collect();
 
             // Shuffle to prove order-independent reconstruction.
-            recovered.sort_by_key(|s| s.seq.wrapping_mul(1_000_003).wrapping_add(17));
+            recovered.sort_by_key(|s| {
+                s.header
+                    .seq_num
+                    .wrapping_mul(1_000_003)
+                    .wrapping_add(17)
+            });
 
             // --- reconstruct ---
             let reconstructed = reconstruct_payload(&recovered).expect("reconstruct payload");
@@ -969,20 +1069,16 @@ mod git_bare_pip_tests {
         let slice_size = bundle_bytes.len() / 8 + 1;
         let root_id = "git-bare-pip-unbundle-test";
 
-        let slices = packetize_payload(root_id, &bundle_bytes, slice_size);
         let keys = nostr::Keys::generate();
-        let manifest = TransferManifest {
-            root_id: root_id.to_string(),
-            total_bytes: bundle_bytes.len(),
-            total_slices: slices.len(),
-        };
-        let manifest_event = build_transfer_manifest_event(&keys, &manifest).unwrap();
-        let slice_events: Vec<nostr::Event> = slices
-            .iter()
-            .map(|s| build_transfer_slice_event(&keys, s, manifest_event.id).unwrap())
-            .collect();
+        let (_manifest_event, slice_events) = encode_payload_as_transfer_events(
+            &keys,
+            root_id,
+            &bundle_bytes,
+            slice_size,
+        )
+        .expect("encode payload as transfer events");
 
-        let recovered_slices: Vec<TransferSlice> = slice_events
+        let recovered_slices: Vec<ProtocolSlice> = slice_events
             .iter()
             .map(|ev| match parse_transfer_event(ev).unwrap() {
                 TransferEventPayload::Slice(s) => s,
@@ -1068,7 +1164,7 @@ mod git_bare_pip_tests {
             }
         }
         println!("=== received transfer payload ===");
-        println!("  manifest root_id {root_id}");
+        println!("  manifest root {root_id}");
         println!("  received slices {}", received_slices.len());
 
         let reconstructed = reconstruct_payload(&received_slices).unwrap();

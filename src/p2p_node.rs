@@ -460,8 +460,8 @@ use crate::{
     create_ack_event,
     event::DAG_EVENT_KIND,
     p2p::{
-        build_transfer_manifest_event, build_transfer_slice_event, encode_bridge_message,
-        packetize_payload, parse_transfer_event, TransferEventPayload, TransferManifest,
+        encode_bridge_message, encode_payload_as_transfer_events, parse_transfer_event,
+        TransferEventPayload,
     },
     Dag, InsertResult, PIP_ATTEST_KIND, PIP_JOIN_KIND, PIP_SEAL_KIND,
 };
@@ -589,27 +589,21 @@ pub fn build_nip_pip_publication(
     root_id: &str,
     payload: &[u8],
     relay_hints: &[String],
-    max_slice_bytes: usize,
+    threshold: usize,
 ) -> Result<NipPipPublication, NipPipPublishError> {
-    let slices = packetize_payload(root_id, payload, max_slice_bytes);
-    let manifest = TransferManifest {
-        root_id: root_id.to_string(),
-        total_bytes: payload.len(),
-        total_slices: slices.len(),
-    };
-    let manifest_event = build_transfer_manifest_event(keys, &manifest)?;
+    let (manifest_event, slice_events) =
+        encode_payload_as_transfer_events(keys, root_id, payload, threshold)?;
     let manifest_message =
         encode_bridge_message(&manifest_event, "nostr->libp2p", relay_hints)?;
 
-    let mut slice_event_ids = Vec::with_capacity(slices.len());
-    let mut messages = Vec::with_capacity(slices.len() + 1);
+    let mut slice_event_ids = Vec::with_capacity(slice_events.len());
+    let mut messages = Vec::with_capacity(slice_events.len() + 1);
     messages.push(manifest_message);
 
-    for slice in &slices {
-        let slice_event = build_transfer_slice_event(keys, slice, manifest_event.id)?;
+    for slice_event in &slice_events {
         slice_event_ids.push(slice_event.id.to_hex());
         messages.push(encode_bridge_message(
-            &slice_event,
+            slice_event,
             "nostr->libp2p",
             relay_hints,
         )?);
@@ -618,7 +612,7 @@ pub fn build_nip_pip_publication(
     Ok(NipPipPublication {
         root_id: root_id.to_string(),
         total_bytes: payload.len(),
-        total_slices: slices.len(),
+        total_slices: slice_events.len(),
         manifest_event_id: manifest_event.id.to_hex(),
         slice_event_ids,
         messages,
@@ -763,15 +757,17 @@ pub enum InboundSummary {
         hop_count: u64,
     },
     TransferManifest {
-        root_id: String,
-        total_bytes: usize,
-        total_slices: usize,
+        root: String,
+        size: u64,
+        packets: u64,
+        depth: u32,
         event_id: String,
     },
     TransferSlice {
-        root_id: String,
-        seq: usize,
-        total_slices: usize,
+        id: String,
+        seq_num: u64,
+        total_packets: u64,
+        is_parity: bool,
         event_id: String,
     },
     NostrEvent {
@@ -799,15 +795,17 @@ pub fn summarize_inbound_message(message: &str) -> InboundSummary {
         if let Ok(payload) = parse_transfer_event(&event) {
             return match payload {
                 TransferEventPayload::Manifest(manifest) => InboundSummary::TransferManifest {
-                    root_id: manifest.root_id,
-                    total_bytes: manifest.total_bytes,
-                    total_slices: manifest.total_slices,
+                    root: manifest.root,
+                    size: manifest.size,
+                    packets: manifest.packets,
+                    depth: manifest.depth,
                     event_id: event.id.to_hex(),
                 },
                 TransferEventPayload::Slice(slice) => InboundSummary::TransferSlice {
-                    root_id: slice.root_id,
-                    seq: slice.seq,
-                    total_slices: slice.total_slices,
+                    id: slice.id,
+                    seq_num: slice.header.seq_num,
+                    total_packets: slice.header.total_packets,
+                    is_parity: slice.is_parity,
                     event_id: event.id.to_hex(),
                 },
             };
@@ -837,20 +835,22 @@ pub fn format_inbound_summary(summary: &InboundSummary) -> String {
             "INBOUND bridge direction={direction} topic={topic} event={event_id} relay_hints={relay_hints} hop_count={hop_count}"
         ),
         InboundSummary::TransferManifest {
-            root_id,
-            total_bytes,
-            total_slices,
+            root,
+            size,
+            packets,
+            depth,
             event_id,
         } => format!(
-            "INBOUND transfer-manifest root_id={root_id} total_bytes={total_bytes} total_slices={total_slices} event={event_id}"
+            "INBOUND transfer-manifest root={root} size={size} packets={packets} depth={depth} event={event_id}"
         ),
         InboundSummary::TransferSlice {
-            root_id,
-            seq,
-            total_slices,
+            id,
+            seq_num,
+            total_packets,
+            is_parity,
             event_id,
         } => format!(
-            "INBOUND transfer-slice root_id={root_id} seq={seq} total_slices={total_slices} event={event_id}"
+            "INBOUND transfer-slice id={id} seq={seq_num} total_packets={total_packets} is_parity={is_parity} event={event_id}"
         ),
         InboundSummary::NostrEvent { kind, event_id } => {
             format!("INBOUND nostr-event kind={kind} event={event_id}")
@@ -948,12 +948,14 @@ mod tests {
         bridge_native::{build_bridge_envelope, serialize_bridge_envelope, BridgeEnvelopeMeta},
         p2p::{
             build_transfer_manifest_event, build_transfer_slice_event, packetize_payload,
-            parse_transfer_event, TransferEventPayload, TransferManifest,
+            parse_transfer_event, PacketManifest, TransferEventPayload,
         },
     };
 
     #[cfg(feature = "p2p")]
     use nostr::{EventBuilder, Keys};
+    #[cfg(feature = "p2p")]
+    use sha2::Digest;
 
     #[cfg(feature = "p2p")]
     #[test]
@@ -1050,10 +1052,15 @@ mod tests {
 
         let payload = b"nostr dag peer packet";
         let slices = packetize_payload("root-1", payload, 8);
-        let manifest = TransferManifest {
-            root_id: "root-1".to_string(),
-            total_bytes: payload.len(),
-            total_slices: slices.len(),
+        let manifest = PacketManifest {
+            root: "root-1".to_string(),
+            sha256: format!("{:x}", sha2::Sha256::digest(payload)),
+            size: payload.len() as u64,
+            packets: slices.len() as u64,
+            depth: 1,
+            mtu: 8,
+            encoding: "json".to_string(),
+            path: String::new(),
         };
         let manifest_event = build_transfer_manifest_event(&keys, &manifest).unwrap();
         let slice_event = build_transfer_slice_event(&keys, &slices[0], manifest_event.id).unwrap();
@@ -1061,14 +1068,16 @@ mod tests {
         let manifest_json = serde_json::to_string(&manifest_event).unwrap();
         match summarize_inbound_message(&manifest_json) {
             InboundSummary::TransferManifest {
-                root_id,
-                total_bytes,
-                total_slices,
+                root,
+                size,
+                packets,
+                depth,
                 event_id,
             } => {
-                assert_eq!(root_id, "root-1");
-                assert_eq!(total_bytes, payload.len());
-                assert_eq!(total_slices, slices.len());
+                assert_eq!(root, "root-1");
+                assert_eq!(size, payload.len() as u64);
+                assert_eq!(packets, slices.len() as u64);
+                assert_eq!(depth, 1);
                 assert_eq!(event_id, manifest_event.id.to_hex());
             }
             other => panic!("unexpected manifest summary: {other:?}"),
@@ -1077,14 +1086,16 @@ mod tests {
         let slice_json = serde_json::to_string(&slice_event).unwrap();
         match summarize_inbound_message(&slice_json) {
             InboundSummary::TransferSlice {
-                root_id,
-                seq,
-                total_slices,
+                id,
+                seq_num,
+                total_packets,
+                is_parity,
                 event_id,
             } => {
-                assert_eq!(root_id, "root-1");
-                assert_eq!(seq, 0);
-                assert_eq!(total_slices, slices.len());
+                assert_eq!(id, slices[0].id);
+                assert_eq!(seq_num, 0);
+                assert_eq!(total_packets, slices.len() as u64);
+                assert!(!is_parity);
                 assert_eq!(event_id, slice_event.id.to_hex());
             }
             other => panic!("unexpected slice summary: {other:?}"),
@@ -1120,10 +1131,15 @@ mod tests {
 
         let payload = b"native peer protocol sample";
         let slices = packetize_payload("root-protocol", payload, 8);
-        let manifest = TransferManifest {
-            root_id: "root-protocol".to_string(),
-            total_bytes: payload.len(),
-            total_slices: slices.len(),
+        let manifest = PacketManifest {
+            root: "root-protocol".to_string(),
+            sha256: format!("{:x}", sha2::Sha256::digest(payload)),
+            size: payload.len() as u64,
+            packets: slices.len() as u64,
+            depth: 1,
+            mtu: 8,
+            encoding: "json".to_string(),
+            path: String::new(),
         };
         let manifest_event = build_transfer_manifest_event(&runtime_keys, &manifest).unwrap();
         let manifest_json = serde_json::to_string(&manifest_event).unwrap();
@@ -1160,9 +1176,9 @@ mod tests {
                 .expect("manifest bridge envelope");
         match parse_transfer_event(&manifest_envelope.event).unwrap() {
             TransferEventPayload::Manifest(manifest) => {
-                assert_eq!(manifest.root_id, "nip-pip-root");
-                assert_eq!(manifest.total_bytes, b"hello nip-pip network".len());
-                assert_eq!(manifest.total_slices, publication.total_slices);
+                assert_eq!(manifest.root, "nip-pip-root");
+                assert_eq!(manifest.size, b"hello nip-pip network".len() as u64);
+                assert_eq!(manifest.packets, publication.total_slices as u64);
             }
             other => panic!("unexpected manifest payload: {other:?}"),
         }
@@ -1171,8 +1187,8 @@ mod tests {
             .expect("slice bridge envelope");
         match parse_transfer_event(&slice_envelope.event).unwrap() {
             TransferEventPayload::Slice(slice) => {
-                assert_eq!(slice.root_id, "nip-pip-root");
-                assert_eq!(slice.total_slices, publication.total_slices);
+                assert!(slice.id.starts_with("nip-pip-root"));
+                assert_eq!(slice.header.total_packets, publication.total_slices as u64);
             }
             other => panic!("unexpected slice payload: {other:?}"),
         }
