@@ -62,6 +62,9 @@ jobs:
           rustup default stable
           rustup target add wasm32-unknown-unknown
 
+      - name: Install clang for wasm C dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang lld
+
       - name: Cache cargo
         uses: actions/cache@v4
         with:
@@ -145,4 +148,7 @@ jobs:
         run: cargo install wasm-pack --locked
 
       - name: Build wasm package (p2p-wasm)
+        env:
+          CC: clang
+          CXX: clang++
         run: wasm-pack build --target web --no-default-features --features wasm,p2p-wasm
