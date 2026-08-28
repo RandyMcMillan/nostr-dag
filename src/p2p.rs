@@ -1050,6 +1050,16 @@ mod git_bare_pip_tests {
             manifest_event.id,
             slice_events.len()
         );
+        println!(
+            "[PIP] manifest event:\n{}",
+            serde_json::to_string_pretty(&manifest_event).unwrap()
+        );
+        for (index, event) in slice_events.iter().enumerate() {
+            println!(
+                "[PIP] slice event seq={index}:\n{}",
+                serde_json::to_string_pretty(event).unwrap()
+            );
+        }
 
         let mut received_slices = Vec::new();
         for event in &slice_events {
