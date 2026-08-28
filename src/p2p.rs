@@ -32,11 +32,19 @@ pub const TRANSFER_MANIFEST_KIND: nostr::Kind = nostr::Kind::Custom(39078);
 /// PIP Nostr event kind used for transfer slices.
 pub const TRANSFER_SLICE_KIND: nostr::Kind = nostr::Kind::Custom(39079);
 
+// Stable SHA-256 preimage material for the native test identity.
+// The `nostr-dag-native` label hashes to the 32-byte Ed25519 seed used here.
+// Verify locally with: `printf 'nostr-dag-native' | shasum -a 256`
 const DETERMINISTIC_NATIVE_LIBP2P_SEED_HEX: &str =
     "0401a34dbb8fd5fee2ffd914b184de1b89e78df8c76b68b01cf941570be8b872";
 #[cfg(all(feature = "p2p-wasm", target_arch = "wasm32"))]
+// Stable SHA-256 preimage material for the WASM test identity.
+// The `nostr-dag-wasm` label hashes to the 32-byte Ed25519 seed used here.
+// Verify locally with: `printf 'nostr-dag-wasm' | shasum -a 256`
 const DETERMINISTIC_WASM_LIBP2P_SEED_HEX: &str =
     "3870cd6b88012214ab72801833c63ff224a18ac7e859c489df7be554bf88c78a";
+// The native Nostr signing key reuses the same deterministic 32-byte seed so
+// the browser/native test can reproduce the exact same signer across runs.
 const DETERMINISTIC_NATIVE_NOSTR_SECRET_HEX: &str =
     "0401a34dbb8fd5fee2ffd914b184de1b89e78df8c76b68b01cf941570be8b872";
 

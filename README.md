@@ -111,6 +111,13 @@ cargo run --features p2p --bin p2p-node
 # Run the native↔wasm PIP integration test
 node --test test/p2p-native-wasm.test.mjs
 
+# The deterministic test identities come from fixed SHA-256 labels:
+#   - `nostr-dag-native` → native libp2p / Nostr seed
+#   - `nostr-dag-wasm`   → WASM libp2p seed
+# These are preimages for reproducible test keys, not secrets.
+# To verify a label locally:
+#   `printf 'nostr-dag-wasm' | shasum -a 256`
+
 # Safari variant of the same test (macOS only):
 #   1. Safari → Settings → Advanced → show the Develop menu.
 #   2. Develop → Allow Remote Automation.
