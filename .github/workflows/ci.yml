@@ -44,6 +44,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Node dependencies
+        run: npm ci
+
       - name: Run JS tests
         run: node --test test/*.test.mjs
 
@@ -75,7 +78,7 @@ jobs:
         run: wasm-pack build --target web --no-default-features --features wasm
 
       - name: Test wasm JS contracts
-        run: node --test test/*-wasm.test.mjs
+        run: node --test test/git-wasm.test.mjs test/p2p-wasm.test.mjs
 
       - name: Copy shared CSS for site assets
         run: |
