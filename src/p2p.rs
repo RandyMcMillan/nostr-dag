@@ -329,6 +329,30 @@ pub fn build_transfer_slice_event(
         .sign_with_keys(keys)
 }
 
+/// Encode an arbitrary payload into the canonical PIP manifest/slice Nostr events.
+///
+/// This is the explicit "bytes -> Nostr events" conversion used by the bare-repo transfer
+/// tests and by any future caller that wants to package a blob for publication.
+pub fn encode_payload_as_transfer_events(
+    keys: &nostr::Keys,
+    root_id: &str,
+    payload: &[u8],
+    max_slice_bytes: usize,
+) -> Result<(nostr::Event, Vec<nostr::Event>), nostr::event::builder::Error> {
+    let slices = packetize_payload(root_id, payload, max_slice_bytes);
+    let manifest = TransferManifest {
+        root_id: root_id.to_string(),
+        total_bytes: payload.len(),
+        total_slices: slices.len(),
+    };
+    let manifest_event = build_transfer_manifest_event(keys, &manifest)?;
+    let slice_events = slices
+        .iter()
+        .map(|slice| build_transfer_slice_event(keys, slice, manifest_event.id))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((manifest_event, slice_events))
+}
+
 /// Parse a PIP manifest or slice transfer event payload.
 ///
 /// Validation enforces the normative transfer protocol string and version before decoding the
@@ -1007,26 +1031,25 @@ mod git_bare_pip_tests {
 
         let slice_size = 64usize;
         let root_id = "git-bare-pip-verbose";
-        let slices = packetize_payload(root_id, &bundle_bytes, slice_size);
         println!(
-            "[PIP] broadcast root_id={} slices={} slice_size={}",
+            "[PIP] broadcast root_id={} slice_size={}",
             root_id,
-            slices.len(),
             slice_size
         );
 
-        let manifest = TransferManifest {
-            root_id: root_id.to_string(),
-            total_bytes: bundle_bytes.len(),
-            total_slices: slices.len(),
-        };
         let keys = nostr::Keys::generate();
-        let manifest_event =
-            build_transfer_manifest_event(&keys, &manifest).expect("build manifest event");
-        let slice_events: Vec<nostr::Event> = slices
-            .iter()
-            .map(|slice| build_transfer_slice_event(&keys, slice, manifest_event.id).unwrap())
-            .collect();
+        let (manifest_event, slice_events) = encode_payload_as_transfer_events(
+            &keys,
+            root_id,
+            &bundle_bytes,
+            slice_size,
+        )
+        .expect("encode payload as transfer events");
+        println!(
+            "[PIP] encoded bare repo into manifest={} slices={}",
+            manifest_event.id,
+            slice_events.len()
+        );
 
         let mut received_slices = Vec::new();
         for event in &slice_events {
@@ -1035,7 +1058,7 @@ mod git_bare_pip_tests {
                 other => panic!("expected slice event, got {other:?}"),
             }
         }
-        println!("[PIP] received manifest root_id={}", manifest.root_id);
+        println!("[PIP] received manifest root_id={}", root_id);
         println!("[PIP] received slices={}", received_slices.len());
 
         let reconstructed = reconstruct_payload(&received_slices).unwrap();
