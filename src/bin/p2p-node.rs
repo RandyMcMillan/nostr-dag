@@ -54,6 +54,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let local_peer_id = local_key.public().to_peer_id();
     let topic = IdentTopic::new(NOSTR_DAG_TOPIC);
     let bootstrap_peers = parse_bootstrap_peers(std::env::var("P2P_BOOTSTRAP").ok().as_deref());
+    let bootstrap_wasm_like = bootstrap_peers
+        .iter()
+        .filter(|addr| matches!(classify_peer_topic_role(addr), PeerTopicRole::WasmLike))
+        .count();
 
     let gossipsub_config = gossipsub::ConfigBuilder::default()
         .heartbeat_interval(Duration::from_secs(10))
@@ -132,7 +136,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         "READY peer_id={local_peer_id} nostr_pubkey={} topic={NOSTR_DAG_TOPIC}",
         runtime.public_key()
     );
-    println!("BOOTSTRAP peers={}", bootstrap_peers.len());
+    println!(
+        "BOOTSTRAP peers={} wasm_like={}",
+        bootstrap_peers.len(),
+        bootstrap_wasm_like
+    );
     println!("HELP\n{HELP_TEXT}");
 
     let mut discovered_peers = HashSet::<PeerId>::new();
