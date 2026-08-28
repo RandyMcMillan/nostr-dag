@@ -132,6 +132,13 @@
       return repoHealth.get(repoName) || 'idle';
     }
 
+    function repoHealthClass(state) {
+      if (state === 'checking') return 'health-checking';
+      if (state === 'available') return 'health-available';
+      if (state === 'unavailable') return 'health-unavailable';
+      return 'health-idle';
+    }
+
     function createRepoCardModel(repo, data) {
       const iconUrl = `${new URL(repo.url).origin}/favicon.ico`;
       const selectedBranch = data.branches.includes(data.selectedRef) ? data.selectedRef : (data.branches[0] || '');
