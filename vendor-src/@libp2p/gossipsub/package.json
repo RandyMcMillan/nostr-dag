@@ -1,0 +1,149 @@
+{
+  "name": "@libp2p/gossipsub",
+  "version": "17.0.1",
+  "description": "A typescript implementation of gossipsub",
+  "files": [
+    "src",
+    "dist",
+    "!dist/test",
+    "!**/*.tsbuildinfo"
+  ],
+  "type": "module",
+  "types": "dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js",
+      "module-sync": "./dist/src/index.js"
+    },
+    "./message": {
+      "types": "./dist/src/message/index.d.ts",
+      "import": "./dist/src/message/index.js",
+      "module-sync": "./dist/src/message/index.js"
+    },
+    "./metrics": {
+      "types": "./dist/src/metrics.d.ts",
+      "import": "./dist/src/metrics.js",
+      "module-sync": "./dist/src/metrics.js"
+    },
+    "./score": {
+      "types": "./dist/src/score/index.d.ts",
+      "import": "./dist/src/score/index.js",
+      "module-sync": "./dist/src/score/index.js"
+    },
+    "./types": {
+      "types": "./dist/src/types.d.ts",
+      "import": "./dist/src/types.js",
+      "module-sync": "./dist/src/types.js"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "*": [
+        "*",
+        "dist/src/*",
+        "dist/src/*/index"
+      ]
+    }
+  },
+  "scripts": {
+    "lint": "aegir lint",
+    "dep-check": "aegir dep-check",
+    "release": "aegir release --no-types",
+    "build": "aegir build",
+    "generate": "protons ./src/message/rpc.proto",
+    "benchmark": "npm run benchmark:files -- 'dist/test/benchmark/**/*.test.js' -- --exit",
+    "benchmark:files": "NODE_OPTIONS='--max-old-space-size=4096' aegir test -t node --timeout 0 -f",
+    "test": "aegir test -f dist/test/*.spec.js",
+    "test:node": "aegir test -t node -f dist/test/*.spec.js -f dist/test/unit/*.spec.js -f dist/test/e2e/*.spec.js",
+    "test:chrome": "aegir test -f dist/test/*.spec.js -t browser",
+    "test:chrome-webworker": "aegir test -f dist/test/*.spec.js -t webworker",
+    "test:firefox": "aegir test -f dist/test/*.spec.js -t browser -- --browser firefox",
+    "test:firefox-webworker": "aegir test -f dist/test/*.spec.js -t webworker -- --browser firefox",
+    "test:electron-main": "aegir test -f dist/test/*.spec.js -t electron-main",
+    "test:webkit": "aegir test -f dist/test/*.spec.js -t browser -- --browser webkit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/libp2p/js-libp2p.git"
+  },
+  "keywords": [
+    "libp2p",
+    "pubsub",
+    "gossip"
+  ],
+  "author": "Cayman Nava",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/libp2p/js-libp2p/issues"
+  },
+  "homepage": "https://github.com/libp2p/js-libp2p/tree/main/packages/gossipsub#readme",
+  "dependencies": {
+    "@libp2p/crypto": "^5.1.23",
+    "@libp2p/interface": "^3.3.0",
+    "@libp2p/interface-internal": "^3.1.12",
+    "@libp2p/peer-id": "^6.0.15",
+    "@libp2p/utils": "^7.4.0",
+    "@multiformats/multiaddr": "^13.0.3",
+    "denque": "^2.1.0",
+    "it-length-prefixed": "^11.0.1",
+    "it-pipe": "^3.0.1",
+    "it-pushable": "^3.2.3",
+    "multiformats": "^14.0.0",
+    "protons-runtime": "^7.0.0",
+    "uint8arraylist": "^3.0.2",
+    "uint8arrays": "^6.1.1"
+  },
+  "devDependencies": {
+    "@chainsafe/as-sha256": "^1.2.0",
+    "@libp2p/floodsub": "^11.0.29",
+    "@libp2p/logger": "^6.2.13",
+    "@libp2p/peer-store": "^12.0.27",
+    "@types/benchmark": "^2.1.5",
+    "@types/sinon": "^22.0.0",
+    "abortable-iterator": "^5.1.0",
+    "aegir": "^48.1.1",
+    "benchmark": "^2.1.4",
+    "datastore-core": "^12.0.1",
+    "delay": "^7.0.0",
+    "it-all": "^3.0.9",
+    "mkdirp": "^3.0.1",
+    "p-defer": "^4.0.1",
+    "p-event": "^7.0.0",
+    "p-retry": "^8.0.0",
+    "p-wait-for": "^6.0.0",
+    "protons": "^9.0.1",
+    "sinon": "^22.0.0",
+    "sinon-ts": "^2.0.0",
+    "time-cache": "^0.3.0"
+  },
+  "engines": {
+    "npm": ">=8.7.0"
+  },
+  "eslintConfig": {
+    "extends": "ipfs",
+    "ignorePatterns": [
+      "src/message/rpc*",
+      "!.aegir.js"
+    ]
+  },
+  "contributors": [
+    "Cayman <caymannava@gmail.com>",
+    "Vasco Santos <vasco.santos@moxy.studio>",
+    "Mikerah <mikerahqc@protonmail.com>",
+    "Tuyen Nguyen <vutuyen2636@gmail.com>",
+    "Alex Potsides <alex@achingbrain.net>",
+    "Marin Petrunić <marin.petrunic@gmail.com>",
+    "Lion - dapplion <35266934+dapplion@users.noreply.github.com>",
+    "Gregory Markou <16929357+GregTheGreek@users.noreply.github.com>",
+    "Alan Shaw <alan.shaw@protocol.ai>",
+    "Tuyen <tuyen@wetrust.io>",
+    "Jacob Heun <jacobheun@gmail.com>",
+    "Patrick Michot <k0m0d0tr0n@gmail.com>",
+    "chainsafe <aidan@chainsafe.io>",
+    "Hugo Dias <hugomrdias@gmail.com>",
+    "Franck Royer <franck@royer.one>",
+    "ChainSafe <superadmin@chainsafe.io>"
+  ],
+  "sideEffects": false
+}

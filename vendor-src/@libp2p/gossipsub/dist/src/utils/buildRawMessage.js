@@ -1,0 +1,179 @@
+import { publicKeyFromProtobuf } from '@libp2p/crypto/keys';
+import { peerIdFromMultihash } from '@libp2p/peer-id';
+import * as Digest from 'multiformats/hashes/digest';
+import { concat as uint8ArrayConcat } from 'uint8arrays/concat';
+import { fromString as uint8ArrayFromString } from 'uint8arrays/from-string';
+import { toString as uint8ArrayToString } from 'uint8arrays/to-string';
+import { StrictSign, StrictNoSign } from "../index.js";
+import { RPC } from "../message/rpc.js";
+import { PublishConfigType, ValidateError } from "../types.js";
+export const SignPrefix = uint8ArrayFromString('libp2p-pubsub:');
+// Monotonic seqno counter seeded from the wall clock in nanoseconds, matching
+// go-libp2p-pubsub and rust-libp2p. The pubsub spec requires a "linearly
+// increasing 64-bit big-endian uint" seqno, and kubo's BasicSeqnoValidator
+// (default since kubo 0.40) drops messages whose seqno isn't strictly greater
+// than the previously-seen max from that peer.
+let seqnoCounter = BigInt(Date.now()) * 1000000n;
+function nextSeqno() {
+    const v = ++seqnoCounter;
+    const out = new Uint8Array(8);
+    new DataView(out.buffer).setBigUint64(0, v, false);
+    return out;
+}
+export async function buildRawMessage(publishConfig, topic, originalData, transformedData) {
+    switch (publishConfig.type) {
+        case PublishConfigType.Signing: {
+            const rpcMsg = {
+                from: publishConfig.author.toMultihash().bytes,
+                data: transformedData,
+                seqno: nextSeqno(),
+                topic,
+                signature: undefined, // Exclude signature field for signing
+                key: undefined // Exclude key field for signing
+            };
+            // Get the message in bytes, and prepend with the pubsub prefix
+            // the signature is over the bytes "libp2p-pubsub:<protobuf-message>"
+            const bytes = uint8ArrayConcat([SignPrefix, RPC.Message.encode(rpcMsg)]);
+            rpcMsg.signature = await publishConfig.privateKey.sign(bytes);
+            rpcMsg.key = publishConfig.key;
+            const msg = {
+                type: 'signed',
+                from: publishConfig.author,
+                data: originalData,
+                sequenceNumber: BigInt(`0x${uint8ArrayToString(rpcMsg.seqno ?? new Uint8Array(0), 'base16')}`),
+                topic,
+                signature: rpcMsg.signature,
+                key: publicKeyFromProtobuf(rpcMsg.key)
+            };
+            return {
+                raw: rpcMsg,
+                msg
+            };
+        }
+        case PublishConfigType.Anonymous: {
+            return {
+                raw: {
+                    from: undefined,
+                    data: transformedData,
+                    seqno: undefined,
+                    topic,
+                    signature: undefined,
+                    key: undefined
+                },
+                msg: {
+                    type: 'unsigned',
+                    data: originalData,
+                    topic
+                }
+            };
+        }
+        default:
+            throw new Error('Unreachable');
+    }
+}
+export async function validateToRawMessage(signaturePolicy, msg) {
+    // If strict-sign, verify all
+    // If anonymous (no-sign), ensure no preven
+    switch (signaturePolicy) {
+        case StrictNoSign:
+            if (msg.signature != null) {
+                return { valid: false, error: ValidateError.SignaturePresent };
+            }
+            if (msg.seqno != null) {
+                return { valid: false, error: ValidateError.SeqnoPresent };
+            }
+            if (msg.key != null) {
+                return { valid: false, error: ValidateError.FromPresent };
+            }
+            return { valid: true, message: { type: 'unsigned', topic: msg.topic, data: msg.data ?? new Uint8Array(0) } };
+        case StrictSign: {
+            // Verify seqno
+            if (msg.seqno == null) {
+                return { valid: false, error: ValidateError.InvalidSeqno };
+            }
+            if (msg.seqno.length !== 8) {
+                return { valid: false, error: ValidateError.InvalidSeqno };
+            }
+            if (msg.signature == null) {
+                return { valid: false, error: ValidateError.InvalidSignature };
+            }
+            if (msg.from == null) {
+                return { valid: false, error: ValidateError.InvalidPeerId };
+            }
+            let fromPeerId;
+            try {
+                // TODO: Fix PeerId types
+                fromPeerId = peerIdFromMultihash(Digest.decode(msg.from));
+            }
+            catch (e) {
+                return { valid: false, error: ValidateError.InvalidPeerId };
+            }
+            // - check from defined
+            // - transform source to PeerId
+            // - parse signature
+            // - get .key, else from source
+            // - check key == source if present
+            // - verify sig
+            let publicKey;
+            if (msg.key != null) {
+                // malformed key bytes must reject rather than throw, so an attacker
+                // sending them is still scored as delivering an invalid message
+                try {
+                    publicKey = publicKeyFromProtobuf(msg.key);
+                }
+                catch {
+                    return { valid: false, error: ValidateError.InvalidPeerId };
+                }
+                // the message key must derive to the `from` peer id
+                if (!fromPeerId.equals(publicKey.toMultihash().bytes)) {
+                    return { valid: false, error: ValidateError.InvalidPeerId };
+                }
+            }
+            else {
+                if (fromPeerId.publicKey == null) {
+                    return { valid: false, error: ValidateError.InvalidPeerId };
+                }
+                publicKey = fromPeerId.publicKey;
+            }
+            const rpcMsgPreSign = {
+                from: msg.from,
+                data: msg.data,
+                seqno: msg.seqno,
+                topic: msg.topic,
+                signature: undefined, // Exclude signature field for signing
+                key: undefined // Exclude key field for signing
+            };
+            // Get the message in bytes, and prepend with the pubsub prefix
+            // the signature is over the bytes "libp2p-pubsub:<protobuf-message>"
+            const bytes = uint8ArrayConcat([SignPrefix, RPC.Message.encode(rpcMsgPreSign)]);
+            // a malformed signature (e.g. the wrong length) makes verify throw for
+            // some key types; treat that as an invalid signature so the peer is still
+            // scored rather than the message escaping to the unscored error path
+            let validSignature;
+            try {
+                validSignature = await publicKey.verify(bytes, msg.signature);
+            }
+            catch {
+                validSignature = false;
+            }
+            if (!validSignature) {
+                return { valid: false, error: ValidateError.InvalidSignature };
+            }
+            return {
+                valid: true,
+                message: {
+                    type: 'signed',
+                    from: fromPeerId,
+                    data: msg.data ?? new Uint8Array(0),
+                    sequenceNumber: BigInt(`0x${uint8ArrayToString(msg.seqno, 'base16')}`),
+                    topic: msg.topic,
+                    signature: msg.signature,
+                    key: publicKey
+                }
+            };
+        }
+        default:
+            throw new Error('Unreachable');
+    }
+}
+//# sourceMappingURL=buildRawMessage.js.map
