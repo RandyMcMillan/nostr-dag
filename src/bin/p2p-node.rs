@@ -15,7 +15,7 @@ use std::time::Duration;
 use libp2p::{
     futures::StreamExt,
     gossipsub::{self, IdentTopic, MessageAuthenticity},
-    dcutr, identify, identity, mdns, noise, relay,
+    autonat, dcutr, identify, identity, mdns, noise, relay,
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, yamux, Multiaddr, PeerId,
 };
@@ -35,6 +35,7 @@ struct Behaviour {
     relay: relay::client::Behaviour,
     identify: identify::Behaviour,
     dcutr: dcutr::Behaviour,
+    autonat: autonat::Behaviour,
 }
 
 #[tokio::main]
@@ -72,6 +73,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         local_key.public(),
     ));
     let dcutr = dcutr::Behaviour::new(local_peer_id);
+    let autonat = autonat::Behaviour::new(
+        local_peer_id,
+        autonat::Config {
+            push_listen_addr_updates: true,
+            ..Default::default()
+        },
+    );
 
     let mut swarm = libp2p::SwarmBuilder::with_existing_identity(local_key)
         .with_tokio()
@@ -87,6 +95,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             relay,
             identify,
             dcutr,
+            autonat,
         })?
         .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(Duration::from_secs(60)))
         .build();
@@ -166,7 +175,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     }
                     Some(NodeCommand::Status) => {
                         println!(
-                            "{} discovered_peers={} relay_peers={} wasm_like_peers={}",
+                            "{} discovered_peers={} relay_peers={} wasm_like_peers={} nat={:?}",
                             runtime.status_line(&listen_addrs, swarm.connected_peers().count()),
                             discovered_peers.len(),
                             relay_peers.len(),
@@ -174,6 +183,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                                 .values()
                                 .filter(|role| matches!(role, PeerTopicRole::WasmLike))
                                 .count(),
+                            // The AutoNAT behaviour reports reachability through identify events.
+                            "unknown",
                         );
                     }
                     Some(NodeCommand::Quit) => {
@@ -271,6 +282,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     SwarmEvent::Behaviour(BehaviourEvent::Relay(relay::client::Event::ReservationReqAccepted { relay_peer_id, .. })) => {
                         relay_peers.insert(relay_peer_id);
                         println!("RELAY reserved peer={relay_peer_id}");
+                    }
+                    SwarmEvent::Behaviour(BehaviourEvent::AutoNat(event)) => {
+                        println!("AUTONAT {event:?}");
                     }
                     SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(
                         gossipsub::Event::Message { propagation_source, message, .. },
