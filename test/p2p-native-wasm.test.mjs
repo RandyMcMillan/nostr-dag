@@ -467,3 +467,47 @@ test.skip('native peer and wasm peer exchange a real nip-pip blob', { timeout: 3
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
 });
+
+test('native peer and wasm peer exchange a real nip-pip blob in Chromium', { timeout: 300_000 }, async () => {
+  await ensureP2pWasmBuild();
+  await ensureChromiumBrowser();
+
+  const [{ server, port: serverPort }, native] = await Promise.all([
+    createStaticServer(),
+    startNativePeer(),
+  ]);
+
+  const browserBaseUrl = `http://127.0.0.1:${serverPort}`;
+  const nativeDialAddr = buildWsDialAddress(native.wsListenAddr, native.peerId);
+  const { browser, page } = await runChromiumNativeWasmExchange(browserBaseUrl, nativeDialAddr);
+
+  try {
+    native.child.stdin.write('/pip hello native wasm nip-pip\n');
+
+    await page.waitForFunction(
+      () => window.__p2pBridgeKinds?.includes(39078) && window.__p2pBridgeKinds?.includes(39079),
+      null,
+      { timeout: 120_000 },
+    );
+
+    const result = await page.evaluate(() => ({
+      peerId: window.__p2pPeerId || '',
+      bridgeKinds: window.__p2pBridgeKinds || [],
+      receivedCount: (window.__p2pReceived || []).length,
+      error: window.__p2pError || '',
+      connected: window.__p2pConnected || false,
+    }));
+
+    assert.equal(result.error, '', `browser error: ${result.error}`);
+    assert.ok(result.connected, 'browser peer should connect to native peer');
+    assert.ok(result.peerId, 'browser peer id should be exposed');
+    assert.ok(result.bridgeKinds.includes(39078), 'browser should receive a manifest event');
+    assert.ok(result.bridgeKinds.includes(39079), 'browser should receive a slice event');
+    assert.ok(result.receivedCount >= 2, 'browser should receive at least manifest and slice messages');
+  } finally {
+    await page.close().catch(() => {});
+    await browser.close().catch(() => {});
+    native.child.kill('SIGTERM');
+    server.close();
+  }
+});
