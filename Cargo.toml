@@ -85,6 +85,7 @@ libp2p = { version = "0.54", optional = true, features = [
     "tokio",
     "macros",
 ] }
+nostr = { version = "0.44", default-features = false, features = ["std"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 futures = { version = "0.3", optional = true }
@@ -98,13 +99,13 @@ libp2p = { version = "0.54", optional = true, features = [
     "ping",
     "macros",
 ] }
+nostr = { version = "0.44", default-features = false, features = ["alloc"] }
 
 [dependencies]
 getrandom = { version = "0.2", features = ["js"], optional = true }
 getrandom_0_3 = { package = "getrandom", version = "0.3", features = ["wasm_js"], optional = true }
 git2 = { version = "0.20", optional = true }
 js-sys = { version = "0.3", optional = true }
-nostr = { version = "0.44", default-features = false, features = ["std"] }
 nostr-relay-pool = { version = "0.44.3", optional = true }
 rand = "0.8"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
