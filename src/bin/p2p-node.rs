@@ -21,8 +21,9 @@ use libp2p::{
 };
 use nostr_dag::p2p::{NETWORK_TIME_PROTOCOL, NETWORK_TIME_VERSION, NOSTR_DAG_TOPIC};
 use nostr_dag::p2p_node::{
-    classify_peer_topic_role, classify_peer_topic_role_from_addrs, format_inbound_summary,
-    parse_bootstrap_peers, parse_node_command, NodeCommand, PeerRuntime, PeerTopicRole, HELP_TEXT,
+    build_nip_pip_publication, classify_peer_topic_role, classify_peer_topic_role_from_addrs,
+    format_inbound_summary, parse_bootstrap_peers, parse_node_command, NodeCommand, PeerRuntime,
+    PeerTopicRole, HELP_TEXT,
 };
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::mpsc;
@@ -50,7 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let local_key = identity::Keypair::generate_ed25519();
     let runtime_keys = nostr::Keys::generate();
-    let mut runtime = PeerRuntime::new_with_self_participation(runtime_keys);
+    let mut runtime = PeerRuntime::new_with_self_participation(runtime_keys.clone());
     let local_peer_id = local_key.public().to_peer_id();
     let topic = IdentTopic::new(NOSTR_DAG_TOPIC);
     let bootstrap_peers = parse_bootstrap_peers(std::env::var("P2P_BOOTSTRAP").ok().as_deref());
@@ -174,6 +175,65 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                         info!(%addr, "dial requested");
                         if let Err(err) = swarm.dial(addr) {
                             warn!(?err, "dial failed");
+                        }
+                    }
+                    Some(NodeCommand::PublishPipBlob(message)) => {
+                        let root_id = format!(
+                            "nip-pip-{}-{}",
+                            runtime.public_key(),
+                            native_now_ms()
+                        );
+                        match build_nip_pip_publication(
+                            &runtime_keys,
+                            &root_id,
+                            message.as_bytes(),
+                            &[],
+                            256,
+                        ) {
+                            Ok(publication) => {
+                                let nostr_dag::p2p_node::NipPipPublication {
+                                    root_id,
+                                    total_bytes,
+                                    total_slices,
+                                    manifest_event_id,
+                                    slice_event_ids,
+                                    messages,
+                                } = publication;
+                                println!(
+                                    "PIP publishing root_id={} bytes={} slices={}",
+                                    root_id, total_bytes, total_slices
+                                );
+                                println!(
+                                    "PIP manifest event={} root_id={}",
+                                    manifest_event_id, root_id
+                                );
+
+                                for (index, message) in messages.into_iter().enumerate() {
+                                    if let Err(err) = swarm.behaviour_mut().gossipsub.publish(
+                                        IdentTopic::new(NOSTR_DAG_TOPIC),
+                                        message.as_bytes(),
+                                    ) {
+                                        warn!(?err, "PIP publish failed");
+                                    } else if index == 0 {
+                                        println!("PIP manifest staged");
+                                    } else if let Some(slice_event_id) = slice_event_ids.get(index - 1)
+                                    {
+                                        println!(
+                                            "PIP slice staged seq={} event={}",
+                                            index - 1,
+                                            slice_event_id
+                                        );
+                                    } else {
+                                        println!("PIP slice staged seq={}", index - 1);
+                                    }
+                                }
+
+                                println!(
+                                    "PIP publish attempted root_id={} bytes={} slices={}",
+                                    root_id, total_bytes, total_slices
+                                );
+                            }
+                            Err(err) => warn!(?err, "PIP publish build failed"),
                         }
                     }
                     Some(NodeCommand::Help) => {

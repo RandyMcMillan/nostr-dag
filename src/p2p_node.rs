@@ -6,7 +6,10 @@ use crate::{
     bridge_native::unwrap_bridge_envelope,
     create_ack_event,
     event::DAG_EVENT_KIND,
-    p2p::{parse_transfer_event, TransferEventPayload},
+    p2p::{
+        build_transfer_manifest_event, build_transfer_slice_event, encode_bridge_message,
+        packetize_payload, parse_transfer_event, TransferEventPayload, TransferManifest,
+    },
     Dag, InsertResult, PIP_ATTEST_KIND, PIP_JOIN_KIND, PIP_SEAL_KIND,
 };
 
@@ -85,6 +88,7 @@ pub enum NodeCommand {
     Broadcast(String),
     Dial(Multiaddr),
     Help,
+    PublishPipBlob(String),
     Status,
     Quit,
 }
@@ -104,6 +108,68 @@ pub struct PeerRuntime {
     keys: Keys,
     dag: Dag,
     participants: BTreeSet<PublicKey>,
+}
+
+#[cfg(feature = "p2p")]
+#[derive(Debug, thiserror::Error)]
+pub enum NipPipPublishError {
+    #[error("transfer error: {0}")]
+    Transfer(#[from] crate::p2p::TransferError),
+    #[error("event build error: {0}")]
+    EventBuild(#[from] nostr::event::builder::Error),
+}
+
+#[cfg(feature = "p2p")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NipPipPublication {
+    pub root_id: String,
+    pub total_bytes: usize,
+    pub total_slices: usize,
+    pub manifest_event_id: String,
+    pub slice_event_ids: Vec<String>,
+    pub messages: Vec<String>,
+}
+
+#[cfg(feature = "p2p")]
+pub fn build_nip_pip_publication(
+    keys: &Keys,
+    root_id: &str,
+    payload: &[u8],
+    relay_hints: &[String],
+    max_slice_bytes: usize,
+) -> Result<NipPipPublication, NipPipPublishError> {
+    let slices = packetize_payload(root_id, payload, max_slice_bytes);
+    let manifest = TransferManifest {
+        root_id: root_id.to_string(),
+        total_bytes: payload.len(),
+        total_slices: slices.len(),
+    };
+    let manifest_event = build_transfer_manifest_event(keys, &manifest)?;
+    let manifest_message =
+        encode_bridge_message(&manifest_event, "nostr->libp2p", relay_hints)?;
+
+    let mut slice_event_ids = Vec::with_capacity(slices.len());
+    let mut messages = Vec::with_capacity(slices.len() + 1);
+    messages.push(manifest_message);
+
+    for slice in &slices {
+        let slice_event = build_transfer_slice_event(keys, slice, manifest_event.id)?;
+        slice_event_ids.push(slice_event.id.to_hex());
+        messages.push(encode_bridge_message(
+            &slice_event,
+            "nostr->libp2p",
+            relay_hints,
+        )?);
+    }
+
+    Ok(NipPipPublication {
+        root_id: root_id.to_string(),
+        total_bytes: payload.len(),
+        total_slices: slices.len(),
+        manifest_event_id: manifest_event.id.to_hex(),
+        slice_event_ids,
+        messages,
+    })
 }
 
 #[cfg(feature = "p2p")]
@@ -217,6 +283,17 @@ pub fn parse_node_command(line: &str) -> Result<Option<NodeCommand>, String> {
             return Err("/broadcast requires a message".to_string());
         }
         return Ok(Some(NodeCommand::Broadcast(message.to_string())));
+    }
+
+    if let Some(rest) = trimmed
+        .strip_prefix("/pip ")
+        .or_else(|| trimmed.strip_prefix("/nip-pip "))
+    {
+        let message = rest.trim();
+        if message.is_empty() {
+            return Err("/pip requires a message".to_string());
+        }
+        return Ok(Some(NodeCommand::PublishPipBlob(message.to_string())));
     }
 
     Ok(Some(NodeCommand::Broadcast(trimmed.to_string())))
@@ -354,6 +431,7 @@ pub const HELP_TEXT: &str = concat!(
     "  /help                 show this help\n",
     "  /status               print local peer status\n",
     "  /dial <multiaddr>     dial a peer by multiaddr\n",
+    "  /pip <message>        publish a PIP/NIP-PIP blob\n",
     "  /broadcast <message>  publish a message\n",
     "  /quit                 exit the process\n",
     "Any other non-empty line is broadcast as-is.\n",
@@ -369,7 +447,7 @@ mod tests {
         bridge_native::{build_bridge_envelope, serialize_bridge_envelope, BridgeEnvelopeMeta},
         p2p::{
             build_transfer_manifest_event, build_transfer_slice_event, packetize_payload,
-            TransferManifest,
+            parse_transfer_event, TransferEventPayload, TransferManifest,
         },
     };
 
@@ -395,6 +473,10 @@ mod tests {
         assert!(matches!(
             parse_node_command("/broadcast hello world").unwrap(),
             Some(NodeCommand::Broadcast(message)) if message == "hello world"
+        ));
+        assert!(matches!(
+            parse_node_command("/pip hello world").unwrap(),
+            Some(NodeCommand::PublishPipBlob(message)) if message == "hello world"
         ));
         assert!(matches!(
             parse_node_command("hello world").unwrap(),
@@ -551,5 +633,46 @@ mod tests {
             InboundSummary::TransferManifest { .. }
         ));
         assert!(reaction.outbound_messages.is_empty());
+    }
+
+    #[cfg(feature = "p2p")]
+    #[test]
+    fn build_nip_pip_publication_wraps_manifest_and_slices_in_bridge_envelopes() {
+        let keys = Keys::generate();
+        let publication = build_nip_pip_publication(
+            &keys,
+            "nip-pip-root",
+            b"hello nip-pip network",
+            &[],
+            8,
+        )
+        .unwrap();
+
+        assert_eq!(publication.root_id, "nip-pip-root");
+        assert_eq!(publication.total_bytes, b"hello nip-pip network".len());
+        assert!(publication.total_slices >= 1);
+        assert_eq!(publication.messages.len(), publication.total_slices + 1);
+        assert_eq!(publication.slice_event_ids.len(), publication.total_slices);
+
+        let manifest_event = crate::bridge_native::unwrap_bridge_envelope(&publication.messages[0])
+            .expect("manifest bridge envelope");
+        match parse_transfer_event(&manifest_event).unwrap() {
+            TransferEventPayload::Manifest(manifest) => {
+                assert_eq!(manifest.root_id, "nip-pip-root");
+                assert_eq!(manifest.total_bytes, b"hello nip-pip network".len());
+                assert_eq!(manifest.total_slices, publication.total_slices);
+            }
+            other => panic!("unexpected manifest payload: {other:?}"),
+        }
+
+        let slice_event = crate::bridge_native::unwrap_bridge_envelope(&publication.messages[1])
+            .expect("slice bridge envelope");
+        match parse_transfer_event(&slice_event).unwrap() {
+            TransferEventPayload::Slice(slice) => {
+                assert_eq!(slice.root_id, "nip-pip-root");
+                assert_eq!(slice.total_slices, publication.total_slices);
+            }
+            other => panic!("unexpected slice payload: {other:?}"),
+        }
     }
 }

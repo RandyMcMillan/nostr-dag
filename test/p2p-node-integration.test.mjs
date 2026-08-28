@@ -8,7 +8,7 @@ const WASM_LIKE_BOOTSTRAP =
 const NATIVE_LIKE_BOOTSTRAP =
   '/ip4/127.0.0.1/tcp/4001/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN';
 
-function runNativePeer(bootstrap = WASM_LIKE_BOOTSTRAP) {
+function runNativePeer(bootstrap = WASM_LIKE_BOOTSTRAP, extraCommands = []) {
   return new Promise((resolve, reject) => {
     console.log('[native-node:test] launching cargo run --features p2p --bin p2p-node');
     const child = spawn('cargo', ['run', '--features', 'p2p', '--bin', 'p2p-node'], {
@@ -48,7 +48,8 @@ function runNativePeer(bootstrap = WASM_LIKE_BOOTSTRAP) {
     const sendCommands = () => {
       if (sentCommands) return;
       sentCommands = true;
-      child.stdin.write('/status\n/quit\n');
+      const commands = [...extraCommands, '/status', '/quit'];
+      child.stdin.write(`${commands.join('\n')}\n`);
       child.stdin.end();
     };
 
@@ -95,4 +96,13 @@ test('native p2p node counts wasm-like peers inside a mixed bootstrap mesh', asy
     [WASM_LIKE_BOOTSTRAP, NATIVE_LIKE_BOOTSTRAP].join(','),
     /BOOTSTRAP peers=2 wasm_like=1/,
   );
+});
+
+test('native p2p node publishes a nip-pip blob on demand', async () => {
+  const result = await runNativePeer(WASM_LIKE_BOOTSTRAP, ['/pip hello nip-pip network']);
+
+  assert.equal(result.code, 0, `stderr:\n${result.stderr}\nstdout:\n${result.stdout}`);
+  assert.match(result.stdout, /PIP publishing root_id=/);
+  assert.match(result.stdout, /PIP manifest event=/);
+  assert.match(result.stdout, /PIP publish attempted root_id=/);
 });
