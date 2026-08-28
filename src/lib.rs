@@ -5,6 +5,8 @@ mod bridge_roundtrip;
 mod dag;
 mod error;
 mod event;
+#[cfg(feature = "native")]
+pub mod native_cli;
 pub mod nip34;
 pub mod quorum;
 #[cfg(feature = "native")]
@@ -44,6 +46,12 @@ pub use nip34::{
     parse_p2p_clone_url, Nip34Error, NostrRemote,
 };
 pub use quorum::{AttestResult, BlobQuorum, JoinResult};
+#[cfg(feature = "native")]
+pub use native_cli::run_federation;
+#[cfg(feature = "relay")]
+pub use native_cli::run_local_relay;
+#[cfg(feature = "p2p")]
+pub use p2p_node::run_native_p2p_node;
 
 #[cfg(feature = "wasm")]
 mod wasm {
