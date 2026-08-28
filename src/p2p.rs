@@ -607,6 +607,8 @@ mod transfer_tests {
 
 #[cfg(all(test, feature = "native"))]
 mod git_bare_pip_tests {
+    use std::fs;
+    use std::path::Path;
     use std::process::Command;
 
     use sha2::{Digest, Sha256};
@@ -640,6 +642,59 @@ mod git_bare_pip_tests {
             String::from_utf8_lossy(&status.stdout),
             String::from_utf8_lossy(&status.stderr),
         );
+    }
+
+    fn print_tree(root: &Path, label: &str) {
+        fn walk(root: &Path, path: &Path, indent: usize) {
+            let mut entries = match fs::read_dir(path) {
+                Ok(entries) => entries
+                    .filter_map(Result::ok)
+                    .map(|entry| entry.path())
+                    .collect::<Vec<_>>(),
+                Err(err) => {
+                    println!(
+                        "[PIP] {:indent$}{} (unreadable: {})",
+                        "",
+                        path.strip_prefix(root).unwrap_or(path).display(),
+                        err,
+                        indent = indent
+                    );
+                    return;
+                }
+            };
+            entries.sort();
+            for entry in entries {
+                let rel = entry.strip_prefix(root).unwrap_or(&entry);
+                let metadata = match fs::metadata(&entry) {
+                    Ok(metadata) => metadata,
+                    Err(err) => {
+                        println!(
+                            "[PIP] {:indent$}{} (stat error: {})",
+                            "",
+                            rel.display(),
+                            err,
+                            indent = indent
+                        );
+                        continue;
+                    }
+                };
+                if metadata.is_dir() {
+                    println!("[PIP] {:indent$}{}/", "", rel.display(), indent = indent);
+                    walk(root, &entry, indent + 2);
+                } else {
+                    println!(
+                        "[PIP] {:indent$}{} ({})",
+                        "",
+                        rel.display(),
+                        metadata.len(),
+                        indent = indent
+                    );
+                }
+            }
+        }
+
+        println!("[PIP] {label} tree at {}", root.display());
+        walk(root, root, 2);
     }
 
     /// Build a git repository at `src_dir` with `depth` commits.
@@ -928,6 +983,78 @@ mod git_bare_pip_tests {
             "restored bare repo HEAD must match original\n  expected  {original_head}\n  got       {restored_head}"
         );
         println!("[PIP] bare repo HEAD VERIFIED: {restored_head}");
+    }
+
+    #[test]
+    fn git_bare_pip_transfer_verbose_trace() {
+        let work = tempfile::tempdir().unwrap();
+        let src_dir = work.path().join("src-repo-verbose");
+        fs::create_dir_all(&src_dir).unwrap();
+
+        let original_head = build_repo_with_depth(&src_dir, DEPTH_LEVELS);
+        println!("[PIP] created source repo at {}", src_dir.display());
+        print_tree(&src_dir, "source repo");
+
+        let bundle_path = work.path().join("verbose.bundle");
+        let bundle_bytes = create_bundle(&src_dir, &bundle_path);
+        let reference_sha256 = sha256_hex(&bundle_bytes);
+        println!(
+            "[PIP] created bundle size={} sha256={}",
+            bundle_bytes.len(),
+            reference_sha256
+        );
+        println!("[PIP] created HEAD {}", original_head);
+
+        let slice_size = 64usize;
+        let root_id = "git-bare-pip-verbose";
+        let slices = packetize_payload(root_id, &bundle_bytes, slice_size);
+        println!(
+            "[PIP] broadcast root_id={} slices={} slice_size={}",
+            root_id,
+            slices.len(),
+            slice_size
+        );
+
+        let manifest = TransferManifest {
+            root_id: root_id.to_string(),
+            total_bytes: bundle_bytes.len(),
+            total_slices: slices.len(),
+        };
+        let keys = nostr::Keys::generate();
+        let manifest_event =
+            build_transfer_manifest_event(&keys, &manifest).expect("build manifest event");
+        let slice_events: Vec<nostr::Event> = slices
+            .iter()
+            .map(|slice| build_transfer_slice_event(&keys, slice, manifest_event.id).unwrap())
+            .collect();
+
+        let mut received_slices = Vec::new();
+        for event in &slice_events {
+            match parse_transfer_event(event).unwrap() {
+                TransferEventPayload::Slice(slice) => received_slices.push(slice),
+                other => panic!("expected slice event, got {other:?}"),
+            }
+        }
+        println!("[PIP] received manifest root_id={}", manifest.root_id);
+        println!("[PIP] received slices={}", received_slices.len());
+
+        let reconstructed = reconstruct_payload(&received_slices).unwrap();
+        let reconstructed_sha256 = sha256_hex(&reconstructed);
+        println!(
+            "[PIP] reconstructed size={} sha256={}",
+            reconstructed.len(),
+            reconstructed_sha256
+        );
+        assert_eq!(reference_sha256, reconstructed_sha256);
+
+        let reconstructed_bundle_path = work.path().join("verbose.reconstructed.bundle");
+        fs::write(&reconstructed_bundle_path, &reconstructed).unwrap();
+
+        let dst_dir = work.path().join("verbose-bare-repo");
+        let restored_head = unbundle_and_get_head(&reconstructed_bundle_path, &dst_dir);
+        print_tree(&dst_dir, "bare repo");
+        assert_eq!(original_head, restored_head);
+        println!("[PIP] bare repo restored HEAD {restored_head}");
     }
 }
 
