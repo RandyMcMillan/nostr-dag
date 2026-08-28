@@ -337,6 +337,17 @@ function createStaticServer(bareRepoBundleBytes = null) {
           status.textContent = \`received \${window.__p2pBridgeKinds.join(',')}\`;
         });
 
+        await new Promise((resolve) => {
+          const tick = () => {
+            if (window.__p2pConnected) {
+              resolve();
+            } else {
+              setTimeout(tick, 100);
+            }
+          };
+          tick();
+        });
+
         const response = await fetch(bundleUrl);
         if (!response.ok) {
           throw new Error('failed to fetch bare repo bundle: ' + response.status);
@@ -453,6 +464,7 @@ function startNativePeer() {
 
     let stdout = '';
     let stderr = '';
+    const stdoutLines = [];
     let peerId = '';
     let wsListenAddr = '';
     let settled = false;
@@ -468,6 +480,7 @@ function startNativePeer() {
       const text = chunk.toString('utf8');
       stdout += text;
       for (const line of text.split(/\r?\n/).filter(Boolean)) {
+        stdoutLines.push(line);
         console.log(`[native-wasm:native] ${line}`);
         const peerMatch = line.match(/^READY peer_id=([A-Za-z0-9]+)\b/);
         if (peerMatch) {
@@ -478,7 +491,15 @@ function startNativePeer() {
           wsListenAddr = listenMatch[1];
         }
         if (peerId && wsListenAddr) {
-          finish(null, { child, stdout, stderr, peerId, wsListenAddr });
+          finish(null, {
+            child,
+            stdout,
+            stderr,
+            stdoutLines,
+            getStdout: () => stdout,
+            peerId,
+            wsListenAddr,
+          });
         }
       }
     };
