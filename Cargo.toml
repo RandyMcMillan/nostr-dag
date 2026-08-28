@@ -63,6 +63,7 @@ wasm = [
     "dep:web-sys",
     "dep:getrandom",
     "dep:getrandom_0_3",
+    "dep:serde",
     "dep:serde-wasm-bindgen",
     "dep:serde_json",
 ]
