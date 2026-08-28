@@ -103,33 +103,107 @@ function gitRun(args, cwd) {
   return result.stdout.trim();
 }
 
-async function crawlRelayCandidates() {
-  const sources = [
-    'https://nostr.watch/relays',
-  ];
-  const found = new Set();
-  for (const source of sources) {
-    try {
-      const response = await fetch(source, { redirect: 'follow' });
-      if (!response.ok) continue;
-      const text = await response.text();
-      const matches = text.match(/wss:\/\/[A-Za-z0-9.-]+(?:\/[^\s"'<>]*)?/g) || [];
-      for (const relay of matches) {
-        found.add(relay.replace(/\/$/, ''));
-      }
-    } catch {
-      // Crawl best-effort only.
-    }
+function normalizeRelayUrl(url) {
+  const value = String(url || '').trim();
+  if (!value) return '';
+  try {
+    const parsed = new URL(value);
+    if (!['http:', 'https:', 'ws:', 'wss:'].includes(parsed.protocol)) return '';
+    if (parsed.protocol === 'http:') parsed.protocol = 'ws:';
+    if (parsed.protocol === 'https:') parsed.protocol = 'wss:';
+    return parsed.toString().replace(/\/$/, '');
+  } catch {
+    return value.replace(/\/$/, '');
   }
+}
 
-  for (const relay of [
+function relayProbeHttpUrl(relayUrl) {
+  const value = normalizeRelayUrl(relayUrl);
+  if (!value) return '';
+  try {
+    const parsed = new URL(value);
+    if (parsed.hostname.endsWith('.onion')) return '';
+    if (parsed.protocol === 'ws:') parsed.protocol = 'http:';
+    if (parsed.protocol === 'wss:') parsed.protocol = 'https:';
+    if (!['http:', 'https:'].includes(parsed.protocol)) return '';
+    return parsed.toString().replace(/\/$/, '');
+  } catch {
+    return '';
+  }
+}
+
+async function crawlRelayCandidates() {
+  const found = new Set();
+  const { SimplePool } = await import('nostr-tools/pool');
+  const pool = new SimplePool();
+  const seeds = [
     'wss://relay.damus.io',
     'wss://nos.lol',
+    'wss://relay.nostr.com',
     'wss://relay.nostr.band',
     'wss://relay.primal.net',
     'wss://nostr.wine',
-  ]) {
-    found.add(relay);
+  ];
+  const relaysToQuery = [...new Set(seeds.map((relay) => normalizeRelayUrl(relay)).filter(Boolean))];
+
+  const collectRelayUrls = (value) => {
+    if (typeof value === 'string') {
+      const normalized = value.trim();
+      const relay = normalizeRelayUrl(normalized);
+      if (relay) found.add(relay);
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) collectRelayUrls(item);
+      return;
+    }
+    if (value && typeof value === 'object') {
+      for (const item of Object.values(value)) collectRelayUrls(item);
+    }
+  };
+
+  const recordRelayInfo = (event) => {
+    if (!event?.pubkey) return;
+    for (const tag of event.tags || []) {
+      if (!Array.isArray(tag) || tag[0] !== 'r' || !tag[1]) continue;
+      collectRelayUrls(tag[1]);
+    }
+    collectRelayUrls(event.content);
+    for (const value of Object.values(event)) {
+      if (value === event.tags || value === event.content) continue;
+      collectRelayUrls(value);
+    }
+  };
+
+  try {
+    const discoveryFilters = [{ kinds: [3, 10002], limit: 200 }];
+    let sawRelayListEvents = false;
+    for (const filter of discoveryFilters) {
+      try {
+        const events = await pool.querySync(relaysToQuery, filter, {
+          maxWait: 5000,
+          label: 'relay-crawler',
+        });
+        if (Array.isArray(events) && events.length) sawRelayListEvents = true;
+        for (const event of events || []) recordRelayInfo(event);
+      } catch {
+        // Crawl best-effort only.
+      }
+    }
+
+    if (!found.size || !sawRelayListEvents) {
+      try {
+        const events = await pool.querySync(relaysToQuery, [{ limit: 200 }], {
+          maxWait: 5000,
+          label: 'relay-crawler-fallback',
+        });
+        for (const event of events || []) recordRelayInfo(event);
+      } catch {
+        // Crawl best-effort only.
+      }
+    }
+  } finally {
+    pool.close(relaysToQuery);
   }
 
   return [...found];
@@ -137,7 +211,11 @@ async function crawlRelayCandidates() {
 
 function probeRelayHandshake(relayUrl) {
   return new Promise((resolve) => {
-    const parsed = new URL(relayUrl);
+    const probeUrl = relayProbeHttpUrl(relayUrl);
+    if (!probeUrl) {
+      resolve(false);
+      return;
+    }
     const child = spawn(
       'curl',
       [
@@ -149,7 +227,7 @@ function probeRelayHandshake(relayUrl) {
         '-H', 'Upgrade: websocket',
         '-H', 'Sec-WebSocket-Version: 13',
         '-H', 'Sec-WebSocket-Key: x3JJHMbDL1EzLkh9GBhXDw==',
-        `${parsed.origin}/`,
+        `${probeUrl}/`,
       ],
       { stdio: ['ignore', 'pipe', 'pipe'] },
     );
