@@ -19,7 +19,7 @@
  * 2. packetize() — splits the payload into ordered PIP slices.
  * 3. buildManifestEnvelope() / buildSliceEnvelope() — wraps each chunk in the
  *    nostr-dag-transfer JSON envelope format (kinds 39078 / 39079).
- * 4. parseEnvelope() — decodes and validates each envelope.
+ * 4. parseTransferEvent() — decodes and validates each envelope.
  * 5. reconstruct() — reassembles ordered slices into the original bytes.
  * 6. SHA-256 comparison between original and reconstructed bytes.
  * 7. Repeat at several slice granularities (depth levels).
@@ -105,7 +105,7 @@ function gitRun(args, cwd, extra = {}) {
 }
 
 function logTree(root, label) {
-  console.log(`[PIP] ${label} tree at ${root}`);
+  console.log(`${label} tree at ${root}`);
 
   function walk(dir, indent) {
     const entries = readdirSync(dir, { withFileTypes: true })
@@ -118,10 +118,10 @@ function logTree(root, label) {
       const prefix = ' '.repeat(indent);
       const stat = statSync(full);
       if (stat.isDirectory()) {
-        console.log(`[PIP] ${prefix}${rel}/`);
+        console.log(`${prefix}${rel}/`);
         walk(full, indent + 2);
       } else {
-        console.log(`[PIP] ${prefix}${rel} (${stat.size})`);
+        console.log(`${prefix}${rel} (${stat.size})`);
       }
     }
   }
@@ -308,6 +308,22 @@ function buildManifestEnvelope(manifest) {
   };
 }
 
+function buildSliceEnvelope(slice, manifestEventId) {
+  return {
+    kind: SLICE_KIND,
+    content: JSON.stringify({
+      protocol:     TRANSFER_PROTOCOL,
+      version:      TRANSFER_VERSION,
+      type:         'slice',
+      root_id:      slice.rootId,
+      seq:          slice.seq,
+      total_slices: slice.totalSlices,
+      data:         [...slice.data],
+    }),
+    tags: [['e', manifestEventId]],
+  };
+}
+
 function parseTransferEvent(event) {
   const payload = JSON.parse(event.content);
   assert.equal(payload.protocol, TRANSFER_PROTOCOL, 'protocol mismatch');
@@ -395,7 +411,7 @@ test('manifest envelope roundtrip', () => {
   });
   assert.equal(env.kind, MANIFEST_KIND);
 
-  const parsed = parseEnvelope(env);
+  const parsed = parseTransferEvent(env);
   assert.equal(parsed.type,               'manifest');
   assert.equal(parsed.manifest.rootId,    'root-manifest');
   assert.equal(parsed.manifest.totalBytes, payload.length);
@@ -408,7 +424,7 @@ test('slice envelope roundtrip — first slice', () => {
   const env     = buildSliceEnvelope(slices[0], 'manifest-id-placeholder');
   assert.equal(env.kind, SLICE_KIND);
 
-  const parsed = parseEnvelope(env);
+  const parsed = parseTransferEvent(env);
   assert.equal(parsed.type,             'slice');
   assert.equal(parsed.slice.rootId,     'root-slice');
   assert.equal(parsed.slice.seq,        0);
@@ -443,7 +459,7 @@ for (const cfg of SLICE_CONFIGS) {
 
     // packetize
     const slices = packetize(rootId, payload, sliceSize);
-    console.log(`  [PIP] ${cfg.name}  sliceSize=${sliceSize}  slices=${slices.length}`);
+    console.log(`  ${cfg.name}  sliceSize=${sliceSize}  slices=${slices.length}`);
 
     // build manifest + slice envelopes
     const manifestEnv = buildManifestEnvelope({
@@ -454,7 +470,7 @@ for (const cfg of SLICE_CONFIGS) {
     const sliceEnvs = slices.map(s => buildSliceEnvelope(s, 'synthetic-manifest-id'));
 
     // parse manifest
-    const parsedManifest = parseEnvelope(manifestEnv);
+    const parsedManifest = parseTransferEvent(manifestEnv);
     assert.equal(parsedManifest.type,                 'manifest');
     assert.equal(parsedManifest.manifest.rootId,      rootId);
     assert.equal(parsedManifest.manifest.totalBytes,  payload.length);
@@ -462,7 +478,7 @@ for (const cfg of SLICE_CONFIGS) {
 
     // parse slices (shuffle to prove order-independence)
     const parsedSlices = sliceEnvs
-      .map(e => parseEnvelope(e).slice)
+      .map(e => parseTransferEvent(e).slice)
       .sort(() => 0.5 - Math.sin(slices.length + sliceSize));
 
     // reconstruct
@@ -479,7 +495,7 @@ for (const cfg of SLICE_CONFIGS) {
     assert.equal(reconstructedSha, referenceSha,
       `${cfg.name}: SHA-256 mismatch\n  expected  ${referenceSha}\n  got       ${reconstructedSha}`);
 
-    console.log(`  [PIP] ${cfg.name}  SHA-256 VERIFIED: ${reconstructedSha}`);
+    console.log(`  ${cfg.name}  SHA-256 VERIFIED: ${reconstructedSha}`);
   });
 }
 
@@ -518,6 +534,7 @@ test('PIP git-bare SHA-256 transfer via bridge envelope', () => {
   const sliceSize    = 128;
   const rootId       = 'git-bare-pip-bridge';
 
+  console.log(`bridge transfer start root_id=${rootId} slice_size=${sliceSize} payload_bytes=${payload.length}`);
   const slices = packetize(rootId, payload, sliceSize);
   const manifestEnv = buildManifestEnvelope({
     rootId,
@@ -525,6 +542,7 @@ test('PIP git-bare SHA-256 transfer via bridge envelope', () => {
     totalSlices: slices.length,
   });
   const sliceEnvs = slices.map(s => buildSliceEnvelope(s, 'bridge-manifest-id'));
+  console.log(`bridge transfer encoded manifest kind=${manifestEnv.kind} slices=${sliceEnvs.length}`);
 
   // Encode through bridge
   const bridgeMessages = [
@@ -537,7 +555,8 @@ test('PIP git-bare SHA-256 transfer via bridge envelope', () => {
   const receivedSlices = [];
   for (const msg of bridgeMessages) {
     const event  = decodeBridgeMessage(msg);
-    const parsed = parseEnvelope(event);
+    const parsed = parseTransferEvent(event);
+    console.log(`bridge transfer parsed kind=${parsed.type}`);
     if (parsed.type === 'manifest') receivedManifest = parsed.manifest;
     else                             receivedSlices.push(parsed.slice);
   }
@@ -549,10 +568,11 @@ test('PIP git-bare SHA-256 transfer via bridge envelope', () => {
 
   const reconstructed    = reconstruct(receivedSlices);
   const reconstructedSha = sha256Hex(reconstructed);
+  console.log(`bridge transfer reconstructed_bytes=${reconstructed.length} sha256=${reconstructedSha}`);
   assert.equal(reconstructedSha, referenceSha,
     `bridge transfer SHA-256 mismatch\n  expected  ${referenceSha}\n  got       ${reconstructedSha}`);
 
-  console.log(`  [PIP] bridge transfer SHA-256 VERIFIED: ${reconstructedSha}`);
+  console.log(`  bridge transfer SHA-256 VERIFIED: ${reconstructedSha}`);
 });
 
 test('PIP git-bare verbose bare-repo roundtrip', () => {
@@ -583,30 +603,30 @@ test('PIP git-bare verbose bare-repo roundtrip', () => {
     gitRun(['bundle', 'create', bundlePath, 'main'], srcDir);
     const bundleBytes = new Uint8Array(readFileSync(bundlePath));
     const referenceSha = sha256Hex(bundleBytes);
-    console.log(`[PIP] created bundle bytes=${bundleBytes.length} sha256=${referenceSha}`);
-    console.log(`[PIP] created HEAD ${originalHead}`);
+    console.log(`created bundle bytes=${bundleBytes.length} sha256=${referenceSha}`);
+    console.log(`created HEAD ${originalHead}`);
 
     const rootId = 'git-bare-pip-verbose';
     const sliceSize = 64;
-    const { manifest, sliceEvents, slices } = encodePayloadAsTransferEvents(rootId, bundleBytes, sliceSize);
-    console.log(`[PIP] broadcast root_id=${rootId} slices=${slices.length} slice_size=${sliceSize}`);
-    console.log(`[PIP] encoded bare repo into manifest=${manifest.id ?? 'manifest-id'} slices=${sliceEvents.length}`);
-    console.log(`[PIP] manifest event:\n${JSON.stringify(manifest, null, 2)}`);
+    const { manifestEvent, sliceEvents, slices } = encodePayloadAsTransferEvents(rootId, bundleBytes, sliceSize);
+    console.log(`broadcast root_id=${rootId} slices=${slices.length} slice_size=${sliceSize}`);
+    console.log(`encoded bare repo into manifest=${manifestEvent.id ?? 'manifest-id'} slices=${sliceEvents.length}`);
+    console.log(`manifest event:\n${JSON.stringify(manifestEvent, null, 2)}`);
     sliceEvents.forEach((event, index) => {
-      console.log(`[PIP] slice event seq=${index}:\n${JSON.stringify(event, null, 2)}`);
+      console.log(`slice event seq=${index}:\n${JSON.stringify(event, null, 2)}`);
     });
 
-    const parsedManifest = parseEnvelope(manifest);
+    const parsedManifest = parseTransferEvent(manifestEvent);
     assert.equal(parsedManifest.type, 'manifest');
-    console.log(`[PIP] received manifest root_id=${parsedManifest.manifest.rootId}`);
+    console.log(`received manifest root_id=${parsedManifest.manifest.rootId}`);
 
-    const receivedSlices = sliceEvents.map((env) => parseEnvelope(env).slice);
-    console.log(`[PIP] received slices=${receivedSlices.length}`);
+    const receivedSlices = sliceEvents.map((env) => parseTransferEvent(env).slice);
+    console.log(`received slices=${receivedSlices.length}`);
 
     const shuffled = [...receivedSlices].reverse();
     const reconstructed = reconstruct(shuffled);
     const reconstructedSha = sha256Hex(reconstructed);
-    console.log(`[PIP] reconstructed bytes=${reconstructed.length} sha256=${reconstructedSha}`);
+    console.log(`reconstructed bytes=${reconstructed.length} sha256=${reconstructedSha}`);
 
     assert.equal(reconstructedSha, referenceSha);
 
@@ -623,7 +643,7 @@ test('PIP git-bare verbose bare-repo roundtrip', () => {
       { env: { GIT_DIR: bareDir } },
     );
     assert.equal(restoredHead, originalHead);
-    console.log(`[PIP] restored bare repo HEAD ${restoredHead}`);
+    console.log(`restored bare repo HEAD ${restoredHead}`);
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
