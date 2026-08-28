@@ -5,15 +5,17 @@ import test from 'node:test';
 
 const WASM_LIKE_BOOTSTRAP =
   '/dns4/example.com/tcp/443/wss/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN';
+const NATIVE_LIKE_BOOTSTRAP =
+  '/ip4/127.0.0.1/tcp/4001/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN';
 
-function runNativePeer() {
+function runNativePeer(bootstrap = WASM_LIKE_BOOTSTRAP) {
   return new Promise((resolve, reject) => {
     console.log('[native-node:test] launching cargo run --features p2p --bin p2p-node');
     const child = spawn('cargo', ['run', '--features', 'p2p', '--bin', 'p2p-node'], {
       cwd: fileURLToPath(new URL('..', import.meta.url)),
       env: {
         ...process.env,
-        P2P_BOOTSTRAP: WASM_LIKE_BOOTSTRAP,
+        P2P_BOOTSTRAP: bootstrap,
       },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -74,12 +76,23 @@ function runNativePeer() {
   });
 }
 
-test('native p2p node reports wasm-like bootstrap peers', async () => {
-  const result = await runNativePeer();
+async function assertNativePeerBootstrapSummary(bootstrap, expectedSummary) {
+  const result = await runNativePeer(bootstrap);
 
   assert.equal(result.code, 0, `stderr:\n${result.stderr}\nstdout:\n${result.stdout}`);
   assert.match(result.stdout, /READY peer_id=/);
-  assert.match(result.stdout, /BOOTSTRAP peers=1 wasm_like=1/);
+  assert.match(result.stdout, expectedSummary);
   assert.match(result.stdout, /STATUS nostr_pubkey=/);
   assert.match(result.stdout, /nat=observing/);
+}
+
+test('native p2p node reports wasm-like bootstrap peers', async () => {
+  await assertNativePeerBootstrapSummary(WASM_LIKE_BOOTSTRAP, /BOOTSTRAP peers=1 wasm_like=1/);
+});
+
+test('native p2p node counts wasm-like peers inside a mixed bootstrap mesh', async () => {
+  await assertNativePeerBootstrapSummary(
+    [WASM_LIKE_BOOTSTRAP, NATIVE_LIKE_BOOTSTRAP].join(','),
+    /BOOTSTRAP peers=2 wasm_like=1/,
+  );
 });
