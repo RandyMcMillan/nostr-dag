@@ -105,6 +105,9 @@ just demo
 # Start the standalone native peer CLI
 cargo run --features p2p --bin p2p-node
 
+# Optional: override the bootstrap peer list used for relay/hole-punch setup
+P2P_BOOTSTRAP="/ip4/host/tcp/port/p2p/..." cargo run --features p2p --bin p2p-node
+
 # Or use Make equivalents
 make build / test / wasm / site / server / demo
 ```

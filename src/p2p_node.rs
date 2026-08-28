@@ -44,6 +44,42 @@ pub fn classify_peer_topic_role_str(address: &str) -> PeerTopicRole {
 }
 
 #[cfg(feature = "p2p")]
+pub fn classify_peer_topic_role_from_addrs(addrs: impl IntoIterator<Item = Multiaddr>) -> PeerTopicRole {
+    if addrs
+        .into_iter()
+        .any(|addr| matches!(classify_peer_topic_role(&addr), PeerTopicRole::WasmLike))
+    {
+        PeerTopicRole::WasmLike
+    } else {
+        PeerTopicRole::NativeLike
+    }
+}
+
+#[cfg(feature = "p2p")]
+pub const DEFAULT_BOOTSTRAP_PEERS: &[&str] = &[
+    "/ip4/104.131.131.82/tcp/4001/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ",
+    "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
+    "/dnsaddr/bootstrap.libp2p.io/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
+    "/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
+    "/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
+];
+
+#[cfg(feature = "p2p")]
+pub fn parse_bootstrap_peers(raw: Option<&str>) -> Vec<Multiaddr> {
+    let source = raw.unwrap_or("").trim();
+    let candidates: Vec<&str> = if source.is_empty() {
+        DEFAULT_BOOTSTRAP_PEERS.to_vec()
+    } else {
+        source.split(',').map(str::trim).filter(|item| !item.is_empty()).collect()
+    };
+
+    candidates
+        .into_iter()
+        .filter_map(|item| item.parse::<Multiaddr>().ok())
+        .collect()
+}
+
+#[cfg(feature = "p2p")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NodeCommand {
     Broadcast(String),
@@ -379,6 +415,13 @@ mod tests {
         );
         assert_eq!(
             classify_peer_topic_role_str("/webrtc/p2p/abc"),
+            PeerTopicRole::WasmLike
+        );
+        assert_eq!(
+            classify_peer_topic_role_from_addrs(vec![
+                "/ip4/127.0.0.1/tcp/4001".parse().unwrap(),
+                "/ip4/127.0.0.1/tcp/4001/p2p-circuit".parse().unwrap()
+            ]),
             PeerTopicRole::WasmLike
         );
     }

@@ -15,14 +15,14 @@ use std::time::Duration;
 use libp2p::{
     futures::StreamExt,
     gossipsub::{self, IdentTopic, MessageAuthenticity},
-    identity, mdns, noise,
+    dcutr, identify, identity, mdns, noise, relay,
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, yamux, Multiaddr, PeerId,
 };
 use nostr_dag::p2p::{NETWORK_TIME_PROTOCOL, NETWORK_TIME_VERSION, NOSTR_DAG_TOPIC};
 use nostr_dag::p2p_node::{
-    classify_peer_topic_role, format_inbound_summary, parse_node_command, NodeCommand, PeerRuntime,
-    PeerTopicRole, HELP_TEXT,
+    classify_peer_topic_role, classify_peer_topic_role_from_addrs, format_inbound_summary,
+    parse_bootstrap_peers, parse_node_command, NodeCommand, PeerRuntime, PeerTopicRole, HELP_TEXT,
 };
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::mpsc;
@@ -32,6 +32,9 @@ use tracing::{debug, info, warn};
 struct Behaviour {
     gossipsub: gossipsub::Behaviour,
     mdns: mdns::tokio::Behaviour,
+    relay: relay::client::Behaviour,
+    identify: identify::Behaviour,
+    dcutr: dcutr::Behaviour,
 }
 
 #[tokio::main]
@@ -49,6 +52,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut runtime = PeerRuntime::new_with_self_participation(runtime_keys);
     let local_peer_id = local_key.public().to_peer_id();
     let topic = IdentTopic::new(NOSTR_DAG_TOPIC);
+    let bootstrap_peers = parse_bootstrap_peers(std::env::var("P2P_BOOTSTRAP").ok().as_deref());
 
     let gossipsub_config = gossipsub::ConfigBuilder::default()
         .heartbeat_interval(Duration::from_secs(10))
@@ -63,8 +67,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     gossipsub.subscribe(&topic)?;
 
     let mdns = mdns::tokio::Behaviour::new(mdns::Config::default(), local_peer_id)?;
-
-    let behaviour = Behaviour { gossipsub, mdns };
+    let identify = identify::Behaviour::new(identify::Config::new(
+        format!("nostr-dag/{}", env!("CARGO_PKG_VERSION")),
+        local_key.public(),
+    ));
+    let dcutr = dcutr::Behaviour::new(local_peer_id);
 
     let mut swarm = libp2p::SwarmBuilder::with_existing_identity(local_key)
         .with_tokio()
@@ -73,11 +80,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             noise::Config::new,
             yamux::Config::default,
         )?
-        .with_behaviour(|_| behaviour)?
+        .with_relay_client(noise::Config::new, yamux::Config::default)?
+        .with_behaviour(|_, relay| Behaviour {
+            gossipsub,
+            mdns,
+            relay,
+            identify,
+            dcutr,
+        })?
         .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(Duration::from_secs(60)))
         .build();
 
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse::<Multiaddr>()?)?;
+    for addr in &bootstrap_peers {
+        if let Err(err) = swarm.dial(addr.clone()) {
+            warn!(%addr, ?err, "bootstrap dial failed");
+        } else {
+            info!(%addr, "dialled bootstrap peer");
+        }
+    }
 
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<NodeCommand>(64);
     let (stdin_ready_tx, stdin_ready_rx) = tokio::sync::oneshot::channel::<()>();
@@ -105,10 +126,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         "READY peer_id={local_peer_id} nostr_pubkey={} topic={NOSTR_DAG_TOPIC}",
         runtime.public_key()
     );
+    println!("BOOTSTRAP peers={}", bootstrap_peers.len());
     println!("HELP\n{HELP_TEXT}");
 
     let mut discovered_peers = HashSet::<PeerId>::new();
     let mut peer_topic_roles = HashMap::<PeerId, PeerTopicRole>::new();
+    let mut relay_peers = HashSet::<PeerId>::new();
     let mut listen_addrs: Vec<String> = Vec::new();
 
     if let Ok(addr) = std::env::var("P2P_DIAL") {
@@ -143,9 +166,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     }
                     Some(NodeCommand::Status) => {
                         println!(
-                            "{} discovered_peers={} wasm_like_peers={}",
+                            "{} discovered_peers={} relay_peers={} wasm_like_peers={}",
                             runtime.status_line(&listen_addrs, swarm.connected_peers().count()),
                             discovered_peers.len(),
+                            relay_peers.len(),
                             peer_topic_roles
                                 .values()
                                 .filter(|role| matches!(role, PeerTopicRole::WasmLike))
@@ -210,6 +234,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     }
                     SwarmEvent::ConnectionClosed { peer_id, .. } => {
                         peer_topic_roles.remove(&peer_id);
+                        relay_peers.remove(&peer_id);
+                    }
+                    SwarmEvent::Behaviour(BehaviourEvent::Identify(identify::Event::Received {
+                        peer_id,
+                        info,
+                        ..
+                    })) => {
+                        let role = classify_peer_topic_role_from_addrs(info.listen_addrs.clone());
+                        peer_topic_roles.insert(peer_id, role);
+                        if matches!(role, PeerTopicRole::WasmLike) {
+                            println!(
+                                "IDENTIFIED wasm-topic peer peer={} addrs={}",
+                                peer_id,
+                                info.listen_addrs
+                                    .iter()
+                                    .map(|addr| addr.to_string())
+                                    .collect::<Vec<_>>()
+                                    .join(" | ")
+                            );
+                        }
+                    }
+                    SwarmEvent::Behaviour(BehaviourEvent::Dcutr(dcutr::Event {
+                        remote_peer_id,
+                        result,
+                        ..
+                    })) => {
+                        match result {
+                            Ok(connection_id) => println!(
+                                "HOLE_PUNCH success peer={} connection={connection_id:?}",
+                                remote_peer_id
+                            ),
+                            Err(error) => warn!(%remote_peer_id, ?error, "HOLE_PUNCH failed"),
+                        }
+                    }
+                    SwarmEvent::Behaviour(BehaviourEvent::Relay(relay::client::Event::ReservationReqAccepted { relay_peer_id, .. })) => {
+                        relay_peers.insert(relay_peer_id);
+                        println!("RELAY reserved peer={relay_peer_id}");
                     }
                     SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(
                         gossipsub::Event::Message { propagation_source, message, .. },
