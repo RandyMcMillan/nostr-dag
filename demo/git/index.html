@@ -1090,8 +1090,10 @@
         footer.log('git', `refreshOneRepo read done ${repo.name}`, 'debug');
         if (route) {
           const probeOk = await probe;
-          setRepoPing(repo.name, probeOk ? Math.round(performance.now() - probeStart) : null);
+          const probeMs = probeOk ? Math.round(performance.now() - probeStart) : null;
+          setRepoPing(repo.name, probeMs);
           setRepoHealth(repo.name, probeOk ? 'available' : 'unavailable');
+          footer.log('git', `probe ${repo.name} ${probeOk ? 'ok' : 'fail'} ping=${probeMs ?? 'n/a'} ms`, 'debug');
         }
         renderApp(repos.map((entry) => {
           const cache = loadRepoCache();
@@ -1139,9 +1141,11 @@
             const data = await readRepo(repo, repoRoute);
             cacheRepoData(repo.name, data);
             const probeOk = await probe;
-            setRepoPing(repo.name, probeOk ? Math.round(performance.now() - probeStart) : null);
+            const probeMs = probeOk ? Math.round(performance.now() - probeStart) : null;
+            setRepoPing(repo.name, probeMs);
             setRepoHealth(repo.name, probeOk ? 'available' : 'unavailable');
             setRepoStatus(repo.name, 'ready');
+            footer.log('git', `probe ${repo.name} ${probeOk ? 'ok' : 'fail'} ping=${probeMs ?? 'n/a'} ms`, 'debug');
             footer.log('git', `ready ${repo.name}`, 'info', 'available');
             dataByRepo.set(repo.name, data);
             if (repoRoute) {
@@ -1178,6 +1182,7 @@
         setStatus(`loading ${route.repo.name}...`, 'checking');
         setRepoHealth(route.repo.name, 'checking');
         renderApp();
+        const probeStart = performance.now();
         const probe = probeRemoteHost(route.repo).catch(() => false);
         await ensureRepo(route.repo, route);
         footer.log('git', `refreshDetail ensure done ${route.repo.name}`, 'debug');
@@ -1185,10 +1190,12 @@
         cacheRepoData(route.repo.name, data);
         footer.log('git', `refreshDetail read done ${route.repo.name}`, 'debug');
         const available = await probe;
+        const probeMs = available ? Math.round(performance.now() - probeStart) : null;
+        setRepoPing(route.repo.name, probeMs);
         setRepoHealth(route.repo.name, available ? 'available' : 'unavailable');
         renderApp(data);
         setStatus('ready', 'available');
-        footer.log('git', `refreshDetail complete ${route.repo.name} available=${available}`, 'debug');
+        footer.log('git', `refreshDetail complete ${route.repo.name} available=${available} ping=${probeMs ?? 'n/a'} ms`, 'debug');
       } catch (e) {
         setRepoHealth(route.repo.name, 'unavailable');
         setStatus(`unavailable: ${e.message}`, 'unavailable');
