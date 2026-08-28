@@ -703,29 +703,60 @@ function createStaticServer(bareRepoBundleBytes = null, bareRepoRelayUrls = []) 
           ]);
         };
 
+        let relayQueryStop = false;
+        let relayQueryWake = null;
+        const stopRelayQuery = () => {
+          relayQueryStop = true;
+          if (relayQueryWake) {
+            relayQueryWake();
+            relayQueryWake = null;
+          }
+        };
+        transferCollector.done.then(() => stopRelayQuery());
+
         const relayQueryPromise = (async () => {
           try {
             const deadline = Date.now() + 120_000;
             const queryIds = [manifestEvent.id, ...sliceEvents.map((event) => event.id)];
             const seenIds = new Set();
-            while (Date.now() < deadline && !window.__bareRepoReconstructed) {
+            let lastLoggedRemaining = null;
+            while (Date.now() < deadline && !relayQueryStop && !window.__bareRepoReconstructed) {
+              const remainingMs = Math.max(0, deadline - Date.now());
+              const remainingSeconds = Math.ceil(remainingMs / 1000);
+              if (remainingSeconds !== lastLoggedRemaining) {
+                lastLoggedRemaining = remainingSeconds;
+                console.log('[native-wasm:bare:trace] relay query countdown ' + remainingSeconds + 's remaining');
+              }
               const events = await relayPool.querySync(
                 DEFAULT_RELAYS,
                 { ids: queryIds, limit: queryIds.length },
-                { maxWait: 5000, label: 'bare-repo-transfer' },
+                { maxWait: 2000, label: 'bare-repo-transfer' },
               );
               for (const event of events || []) {
                 if (!event?.id || seenIds.has(event.id)) continue;
                 seenIds.add(event.id);
                 await transferCollector.ingest('relay', event);
               }
-              if (window.__bareRepoReconstructed) return true;
-              await new Promise((resolve) => setTimeout(resolve, 1000));
+              if (relayQueryStop || window.__bareRepoReconstructed) return true;
+              await new Promise((resolve) => {
+                relayQueryWake = resolve;
+                const timeoutId = setTimeout(() => {
+                  if (relayQueryWake === resolve) relayQueryWake = null;
+                  resolve();
+                }, 1000);
+                if (relayQueryStop || window.__bareRepoReconstructed) {
+                  clearTimeout(timeoutId);
+                  if (relayQueryWake === resolve) relayQueryWake = null;
+                  resolve();
+                }
+              });
             }
             return window.__bareRepoReconstructed;
           } catch (error) {
             window.__p2pErrors.push(String(error?.message || error));
             return false;
+          } finally {
+            stopRelayQuery();
           }
         })();
 
@@ -747,6 +778,8 @@ function createStaticServer(bareRepoBundleBytes = null, bareRepoRelayUrls = []) 
         window.__bareRepoPublished = true;
         console.log('[native-wasm:bare:trace] bare repo publish complete');
         const reconstructed = await transferCollector.done;
+        stopRelayQuery();
+        await relayQueryPromise.catch(() => false);
         if (reconstructed?.bytes) {
           window.__bareRepoReconstructed = true;
           window.__bareRepoReconstructionSource = reconstructed.source;
@@ -1026,7 +1059,7 @@ async function runChromiumBareRepoExchange(browserBaseUrl, nativeDialAddr, bundl
   });
   try {
     const pageUrl = `${browserBaseUrl}/p2p-bare-repo-test.html?nativeWs=${encodeURIComponent(nativeDialAddr)}&bundleB64=${encodeURIComponent(bundleB64)}`;
-    console.log(`[native-wasm:test] navigating bare-repo browser to ${pageUrl}`);
+    // console.log(`[native-wasm:test] navigating bare-repo browser to ${pageUrl}`);
     await page.goto(pageUrl, { waitUntil: 'domcontentloaded' });
 
     await page.waitForFunction(() => window.__p2pReady === true, null, { timeout: 120_000 });
