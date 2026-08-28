@@ -1410,6 +1410,53 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       return !alreadyProcessed;
     }
 
+    const RELAY_PUBLISH_DELAY_MS = 250;
+    let relayPublishRound = 0;
+
+    const sleep = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
+    async function publishToRelaysRoundRobin(event, direction, relayHints = []) {
+      const publishRelays = prioritizeRelayUrls([
+        ...collectBridgeRelayHints(relayHints),
+        ...currentRelayUrls(),
+        ...DEFAULT_RELAYS,
+      ]);
+      if (!publishRelays.length) {
+        throw new Error('no relays configured');
+      }
+
+      const startIndex = relayPublishRound % publishRelays.length;
+      relayPublishRound += 1;
+      const orderedRelays = [
+        ...publishRelays.slice(startIndex),
+        ...publishRelays.slice(0, startIndex),
+      ];
+
+      let succeeded = 0;
+      for (let index = 0; index < orderedRelays.length; index += 1) {
+        const relay = orderedRelays[index];
+        window.__sharedFooter?.log('bridge', `${direction} ${event.kind} ${event.id} relay ${relay}`, 'trace', 'checking');
+        try {
+          await pool.publish([relay], event);
+          succeeded += 1;
+        } catch (error) {
+          window.__sharedFooter?.log('bridge', `${direction} ${event.kind} ${event.id} relay ${relay} failed: ${error?.message || error}`, 'warn', 'unavailable');
+        }
+        if (index < orderedRelays.length - 1) {
+          await sleep(RELAY_PUBLISH_DELAY_MS);
+        }
+      }
+
+      metrics.relayPublishesAttempted += orderedRelays.length;
+      metrics.relayPublishesSucceeded += succeeded;
+      refreshMetrics();
+      scheduleBridgeCachePersist();
+      window.__sharedFooter?.log('bridge', `${direction} ${event.kind} ${event.id} via ${orderedRelays.join(', ')}`, 'info', 'available');
+      window.__sharedFooter?.log('bridge', `publish responses ${event.id}: ${succeeded}/${orderedRelays.length} ok`, succeeded === orderedRelays.length ? 'info' : 'warn', succeeded === orderedRelays.length ? 'available' : 'checking');
+      scheduleBridgeVerification(event, orderedRelays, direction);
+      return orderedRelays;
+    }
+
     async function publishToLibp2p(event, direction, meta = {}) {
       if (!node) {
         window.__sharedFooter?.log('bridge', `publishToLibp2p: node not ready, dropping ${direction} ${event.kind} ${event.id}`, 'warn', 'unavailable');
@@ -1436,26 +1483,8 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     }
 
     async function publishToRelays(event, direction, relayHints = []) {
-      const publishRelays = prioritizeRelayUrls([
-        ...collectBridgeRelayHints(relayHints),
-        ...currentRelayUrls(),
-        ...DEFAULT_RELAYS,
-      ]);
-      if (!publishRelays.length) {
-        throw new Error('no relays configured');
-      }
-      const publishTargets = publishRelays.map((relay) => pool.publish([relay], event));
-      const results = await Promise.allSettled(publishTargets);
-      const successes = results.filter((result) => result.status === 'fulfilled');
-      const failures = results.filter((result) => result.status === 'rejected');
-      metrics.relayPublishesAttempted += results.length;
-      metrics.relayPublishesSucceeded += successes.length;
-      refreshMetrics();
-      scheduleBridgeCachePersist();
-      window.__sharedFooter?.log('bridge', `${direction} ${event.kind} ${event.id} via ${publishRelays.join(', ')}`, 'info', 'available');
-      window.__sharedFooter?.log('bridge', `publish responses ${event.id}: ${successes.length}/${results.length} ok`, failures.length ? 'warn' : 'info', failures.length ? 'checking' : 'available');
-      scheduleBridgeVerification(event, publishRelays, direction);
-      return successes[0]?.value || null;
+      const publishRelays = await publishToRelaysRoundRobin(event, direction, relayHints);
+      return publishRelays[0] || null;
     }
 
     async function broadcastBridgePresence(relayHints = currentRelayUrls()) {
@@ -1475,23 +1504,8 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
 
       logRawNostrEvent('bridge presence raw', event);
       window.__sharedFooter?.log('bridge', `broadcast bridge presence ${event.id} to ${publishRelays.length} relays`, 'info', 'checking');
-      const results = await Promise.allSettled(publishRelays.map(async (relay) => {
-        window.__sharedFooter?.log('bridge', `presence publish request ${relay} ${event.id}`, 'trace', 'checking');
-        const response = await pool.publish([relay], event);
-        window.__sharedFooter?.log('bridge', `presence publish response ${relay} ${event.id}: ${response}`, 'info', 'available');
-      }));
-      const failed = results.filter((result) => result.status === 'rejected');
-      metrics.relayPublishesAttempted += results.length;
-      metrics.relayPublishesSucceeded += results.length - failed.length;
-      refreshMetrics();
-      scheduleBridgeCachePersist();
-      if (failed.length) {
-        for (const result of failed) {
-          window.__sharedFooter?.log('bridge', `presence publish failed: ${result.reason?.message || result.reason || 'unknown error'}`, 'warn', 'unavailable');
-        }
-      }
-      window.__sharedFooter?.log('bridge', `bridge presence broadcast complete (${results.length - failed.length}/${results.length})`, failed.length ? 'warn' : 'info', failed.length ? 'checking' : 'available');
-      scheduleBridgeVerification(event, publishRelays, 'presence');
+      await publishToRelaysRoundRobin(event, 'presence', relayHints);
+      window.__sharedFooter?.log('bridge', `bridge presence broadcast complete (${publishRelays.length}/${publishRelays.length})`, 'info', 'available');
     }
 
     async function handleNostrEvent(event, source = 'relay', sourceRelay = null) {
