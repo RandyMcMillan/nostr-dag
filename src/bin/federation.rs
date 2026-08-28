@@ -27,8 +27,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .init();
 
-    let secret_key = env::var("FEDERATION_KEY")
-        .map_err(|_| "FEDERATION_KEY env var required (nsec or hex)")?;
+    let secret_key =
+        env::var("FEDERATION_KEY").map_err(|_| "FEDERATION_KEY env var required (nsec or hex)")?;
     let keys = parse_keys(&secret_key)?;
 
     let relay_url = env::var("RELAY_URL").unwrap_or_else(|_| "ws://localhost:8080".to_string());
@@ -62,9 +62,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .kinds([CHANNEL_MESSAGE_KIND, DAG_EVENT_KIND])
         .limit(1000);
 
-    let sub_id = pool
-        .subscribe(filter, SubscribeOptions::default())
-        .await?;
+    let sub_id = pool.subscribe(filter, SubscribeOptions::default()).await?;
     info!(?sub_id, "Subscribed to channel messages and DAG events");
 
     let dag_clone = dag.clone();

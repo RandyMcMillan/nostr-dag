@@ -17,7 +17,7 @@
 //! The store is opened with [`EventStore::open`] and is safe to share across
 //! threads via `Arc<Mutex<EventStore>>`.
 
-use rusqlite::{Connection, OptionalExtension, Result, params};
+use rusqlite::{params, Connection, OptionalExtension, Result};
 
 /// Wrapper around a SQLite connection that holds the nostr-dag schema.
 pub struct EventStore {
@@ -41,8 +41,9 @@ impl EventStore {
     // -----------------------------------------------------------------------
 
     fn migrate(&self) -> Result<()> {
-        self.conn.execute_batch(
-            "
+        self.conn
+            .execute_batch(
+                "
             -- Every raw Nostr event seen, verbatim.
             CREATE TABLE IF NOT EXISTS events (
                 id           TEXT PRIMARY KEY,   -- hex sha256
@@ -129,8 +130,8 @@ impl EventStore {
             CREATE INDEX IF NOT EXISTS idx_dag_edges_child   ON dag_edges(child_id);
             CREATE INDEX IF NOT EXISTS idx_dag_seen_by_event ON dag_seen_by(event_id);
             ",
-        )
-        .and_then(|_| self.migrate_dag_edges_schema())
+            )
+            .and_then(|_| self.migrate_dag_edges_schema())
     }
 
     fn migrate_dag_edges_schema(&self) -> Result<()> {
@@ -160,7 +161,7 @@ impl EventStore {
             SELECT parent_id, child_id, depth FROM dag_edges_legacy;
             DROP TABLE dag_edges_legacy;
             PRAGMA foreign_keys=ON;
-            "
+            ",
         )
     }
 
@@ -265,7 +266,17 @@ impl EventStore {
             "INSERT OR IGNORE INTO events
              (id, pubkey, kind, created_at, content, sig, raw_json, first_seen_at, source_relay)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            params![id, pubkey, kind, created_at, content, sig, raw_json, now_ms, source_relay],
+            params![
+                id,
+                pubkey,
+                kind,
+                created_at,
+                content,
+                sig,
+                raw_json,
+                now_ms,
+                source_relay
+            ],
         )?;
 
         // Insert normalised tag rows.
@@ -538,7 +549,16 @@ mod tests {
         // Insert the parent first so the FK is satisfied.
         store
             .upsert_event(
-                parent_id, "pubkey1", 21000, 1_000, "", "sig1", "{}", &[], None, 1_000,
+                parent_id,
+                "pubkey1",
+                21000,
+                1_000,
+                "",
+                "sig1",
+                "{}",
+                &[],
+                None,
+                1_000,
             )
             .unwrap();
 
@@ -601,9 +621,7 @@ mod tests {
         store
             .set_event_relay_verified("evt1", "wss://r.example.com", true)
             .unwrap();
-        let events = store
-            .events_for_relay("wss://r.example.com", 10)
-            .unwrap();
+        let events = store.events_for_relay("wss://r.example.com", 10).unwrap();
         assert_eq!(events.len(), 1);
     }
 
@@ -611,12 +629,36 @@ mod tests {
     fn dag_seen_by() {
         let store = mem();
         store
-            .upsert_event("evt1", "pk1", 21000, 1_000, "", "sig", "{}", &[], None, 1_000)
+            .upsert_event(
+                "evt1",
+                "pk1",
+                21000,
+                1_000,
+                "",
+                "sig",
+                "{}",
+                &[],
+                None,
+                1_000,
+            )
             .unwrap();
         store
-            .upsert_event("ack1", "pk2", 21000, 1_100, "", "sig2", "{}", &[], None, 1_100)
+            .upsert_event(
+                "ack1",
+                "pk2",
+                21000,
+                1_100,
+                "",
+                "sig2",
+                "{}",
+                &[],
+                None,
+                1_100,
+            )
             .unwrap();
-        store.upsert_dag_seen_by("evt1", "pk2", Some("ack1")).unwrap();
+        store
+            .upsert_dag_seen_by("evt1", "pk2", Some("ack1"))
+            .unwrap();
         let seen = store.seen_by_for_event("evt1").unwrap();
         assert_eq!(seen, vec!["pk2".to_string()]);
     }
@@ -627,7 +669,18 @@ mod tests {
         store.upsert_relay("wss://r.example.com", 1_000).unwrap();
         store.upsert_user("pk1", 1_000).unwrap();
         store
-            .upsert_event("src1", "pk1", 10002, 1_000, "", "sig", "{}", &[], None, 1_000)
+            .upsert_event(
+                "src1",
+                "pk1",
+                10002,
+                1_000,
+                "",
+                "sig",
+                "{}",
+                &[],
+                None,
+                1_000,
+            )
             .unwrap();
         store
             .upsert_user_relay("pk1", "wss://r.example.com", "src1", Some("write"), 1_000)
@@ -679,9 +732,23 @@ mod tests {
 
         let store = EventStore::open(path.to_str().expect("path")).expect("migrated store");
         store
-            .upsert_event("child1", "pk1", 21000, 1_000, "", "sig", "{}", &[], None, 1_000)
+            .upsert_event(
+                "child1",
+                "pk1",
+                21000,
+                1_000,
+                "",
+                "sig",
+                "{}",
+                &[],
+                None,
+                1_000,
+            )
             .unwrap();
-        assert_eq!(store.children_of("parent1").unwrap(), vec!["child1".to_string()]);
+        assert_eq!(
+            store.children_of("parent1").unwrap(),
+            vec!["child1".to_string()]
+        );
 
         let _ = std::fs::remove_file(&path);
     }

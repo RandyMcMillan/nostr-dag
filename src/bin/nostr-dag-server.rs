@@ -14,12 +14,12 @@ use serde::{Deserialize, Serialize};
 use tokio::fs;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{Semaphore, watch};
+use tokio::sync::{watch, Semaphore};
 use tokio::task::JoinSet;
 use tracing::{debug, error, info, trace};
 
-use nostr_dag::FAVICON_ICO;
 use nostr_dag::store::EventStore;
+use nostr_dag::FAVICON_ICO;
 
 #[cfg(feature = "p2p")]
 use nostr_dag::p2p::native::SwarmHandle;
@@ -81,7 +81,9 @@ struct EventStoreState {
 impl EventStoreState {
     fn new(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let store = EventStore::open(path)?;
-        Ok(Self { inner: Mutex::new(store) })
+        Ok(Self {
+            inner: Mutex::new(store),
+        })
     }
 }
 
@@ -105,10 +107,7 @@ impl LoggerStore {
     }
 
     fn all(&self) -> Vec<LoggerEntry> {
-        self.entries
-            .lock()
-            .expect("logger store poisoned")
-            .clone()
+        self.entries.lock().expect("logger store poisoned").clone()
     }
 }
 
@@ -132,8 +131,7 @@ impl PeerStore {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("server=info".parse()?),
+            tracing_subscriber::EnvFilter::from_default_env().add_directive("server=info".parse()?),
         )
         .init();
 
@@ -146,13 +144,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db_path = env::var("DB_PATH").unwrap_or_else(|_| DEFAULT_DB_PATH.to_string());
     let logger_store = Arc::new(LoggerStore::default());
     let peer_store = Arc::new(PeerStore::default());
-    let event_store = Arc::new(
-        EventStoreState::new(&db_path).unwrap_or_else(|err| {
-            error!(?err, %db_path, "failed to open event store, using in-memory fallback");
-            EventStoreState::new(":memory:").expect("in-memory event store")
-        }),
+    let event_store = Arc::new(EventStoreState::new(&db_path).unwrap_or_else(|err| {
+        error!(?err, %db_path, "failed to open event store, using in-memory fallback");
+        EventStoreState::new(":memory:").expect("in-memory event store")
+    }));
+    let http_client = Arc::new(
+        reqwest::Client::builder()
+            .user_agent("nostr-dag/0.9.1")
+            .build()?,
     );
-    let http_client = Arc::new(reqwest::Client::builder().user_agent("nostr-dag/0.9.1").build()?);
     let (shutdown_tx, shutdown_rx) = watch::channel(());
 
     // Optionally start a native libp2p node and forward received messages into
@@ -195,18 +195,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 let sig = sig.to_string();
                                 let raw = msg.clone();
                                 let store_result = tokio::task::spawn_blocking(move || {
-                                    let store = es_for_store.inner.lock().expect("event store poisoned");
+                                    let store =
+                                        es_for_store.inner.lock().expect("event store poisoned");
                                     store.upsert_event(
-                                        &id,
-                                        &pubkey,
-                                        kind,
-                                        created,
-                                        &content,
-                                        &sig,
-                                        &raw,
-                                        &tags,
-                                        None,
-                                        now,
+                                        &id, &pubkey, kind, created, &content, &sig, &raw, &tags,
+                                        None, now,
                                     )
                                 })
                                 .await;
@@ -318,18 +311,40 @@ async fn handle_connection(
         response_redirect(&location)
     } else if method == "POST" && (path == LOGGER_ROUTE_PREFIX || path.starts_with("/logger/")) {
         match handle_logger_post(body, &logger_store) {
-            Ok(()) => response_bytes(204, "No Content", Vec::new(), "text/plain; charset=utf-8", true),
+            Ok(()) => response_bytes(
+                204,
+                "No Content",
+                Vec::new(),
+                "text/plain; charset=utf-8",
+                true,
+            ),
             Err(err) => {
                 error!(?err, "logger ingest failed");
-                response_text(400, "Bad Request", "Bad Request", "text/plain; charset=utf-8")
+                response_text(
+                    400,
+                    "Bad Request",
+                    "Bad Request",
+                    "text/plain; charset=utf-8",
+                )
             }
         }
     } else if method == "POST" && (path == PEERS_ROUTE_PREFIX || path.starts_with("/peers/")) {
         match handle_peer_post(body, &peer_store) {
-            Ok(()) => response_bytes(204, "No Content", Vec::new(), "text/plain; charset=utf-8", true),
+            Ok(()) => response_bytes(
+                204,
+                "No Content",
+                Vec::new(),
+                "text/plain; charset=utf-8",
+                true,
+            ),
             Err(err) => {
                 error!(?err, "peer ingest failed");
-                response_text(400, "Bad Request", "Bad Request", "text/plain; charset=utf-8")
+                response_text(
+                    400,
+                    "Bad Request",
+                    "Bad Request",
+                    "text/plain; charset=utf-8",
+                )
             }
         }
     } else if method == "GET" && path == NIP11_ROUTE_PREFIX {
@@ -353,55 +368,95 @@ async fn handle_connection(
         }
     } else if method == "POST" && (path == EVENTS_ROUTE_PREFIX || path.starts_with("/events/")) {
         match handle_events_post(body, &event_store).await {
-            Ok(()) => response_bytes(204, "No Content", Vec::new(), "text/plain; charset=utf-8", true),
+            Ok(()) => response_bytes(
+                204,
+                "No Content",
+                Vec::new(),
+                "text/plain; charset=utf-8",
+                true,
+            ),
             Err(err) => {
                 error!(?err, "event ingest failed");
-                response_text(400, "Bad Request", "Bad Request", "text/plain; charset=utf-8")
+                response_text(
+                    400,
+                    "Bad Request",
+                    "Bad Request",
+                    "text/plain; charset=utf-8",
+                )
             }
         }
     } else if method != "GET" && method != "HEAD" {
         info!(%method, %path, "rejecting unsupported method");
-        response_text(405, "Method Not Allowed", "Method Not Allowed", "text/plain; charset=utf-8")
+        response_text(
+            405,
+            "Method Not Allowed",
+            "Method Not Allowed",
+            "text/plain; charset=utf-8",
+        )
     } else if path == LOGGER_ROUTE_PREFIX || path.starts_with("/logger/") {
         match handle_logger_get(path, &logger_store) {
             Ok((body, content_type)) => response_bytes(200, "OK", body, content_type, head_only),
-            Err(RouteError::BadRequest) => {
-                response_text(400, "Bad Request", "Bad Request", "text/plain; charset=utf-8")
-            }
+            Err(RouteError::BadRequest) => response_text(
+                400,
+                "Bad Request",
+                "Bad Request",
+                "text/plain; charset=utf-8",
+            ),
             Err(RouteError::NotFound) => {
                 response_text(404, "Not Found", "Not Found", "text/plain; charset=utf-8")
             }
             Err(RouteError::Io(err)) => {
                 error!(?err, path = %path, "failed to serve logger payload");
-                response_text(500, "Internal Server Error", "Internal Server Error", "text/plain; charset=utf-8")
+                response_text(
+                    500,
+                    "Internal Server Error",
+                    "Internal Server Error",
+                    "text/plain; charset=utf-8",
+                )
             }
         }
     } else if path == PEERS_ROUTE_PREFIX || path.starts_with("/peers/") {
         match handle_peer_get(path, &peer_store) {
             Ok((body, content_type)) => response_bytes(200, "OK", body, content_type, head_only),
-            Err(RouteError::BadRequest) => {
-                response_text(400, "Bad Request", "Bad Request", "text/plain; charset=utf-8")
-            }
+            Err(RouteError::BadRequest) => response_text(
+                400,
+                "Bad Request",
+                "Bad Request",
+                "text/plain; charset=utf-8",
+            ),
             Err(RouteError::NotFound) => {
                 response_text(404, "Not Found", "Not Found", "text/plain; charset=utf-8")
             }
             Err(RouteError::Io(err)) => {
                 error!(?err, path = %path, "failed to serve peer payload");
-                response_text(500, "Internal Server Error", "Internal Server Error", "text/plain; charset=utf-8")
+                response_text(
+                    500,
+                    "Internal Server Error",
+                    "Internal Server Error",
+                    "text/plain; charset=utf-8",
+                )
             }
         }
     } else if path == EVENTS_ROUTE_PREFIX || path.starts_with("/events/") {
         match handle_events_get(path, &request, &event_store).await {
             Ok((body, content_type)) => response_bytes(200, "OK", body, content_type, head_only),
-            Err(RouteError::BadRequest) => {
-                response_text(400, "Bad Request", "Bad Request", "text/plain; charset=utf-8")
-            }
+            Err(RouteError::BadRequest) => response_text(
+                400,
+                "Bad Request",
+                "Bad Request",
+                "text/plain; charset=utf-8",
+            ),
             Err(RouteError::NotFound) => {
                 response_text(404, "Not Found", "Not Found", "text/plain; charset=utf-8")
             }
             Err(RouteError::Io(err)) => {
                 error!(?err, path = %path, "failed to serve events payload");
-                response_text(500, "Internal Server Error", "Internal Server Error", "text/plain; charset=utf-8")
+                response_text(
+                    500,
+                    "Internal Server Error",
+                    "Internal Server Error",
+                    "text/plain; charset=utf-8",
+                )
             }
         }
     } else {
@@ -416,11 +471,21 @@ async fn handle_connection(
             }
             Err(RouteError::BadRequest) => {
                 info!(%path, "bad request path");
-                response_text(400, "Bad Request", "Bad Request", "text/plain; charset=utf-8")
+                response_text(
+                    400,
+                    "Bad Request",
+                    "Bad Request",
+                    "text/plain; charset=utf-8",
+                )
             }
             Err(RouteError::Io(err)) => {
                 error!(?err, path = %path, "failed to read file");
-                response_text(500, "Internal Server Error", "Internal Server Error", "text/plain; charset=utf-8")
+                response_text(
+                    500,
+                    "Internal Server Error",
+                    "Internal Server Error",
+                    "text/plain; charset=utf-8",
+                )
             }
         }
     };
@@ -430,7 +495,10 @@ async fn handle_connection(
     Ok(())
 }
 
-async fn read_http_request(stream: &mut TcpStream, shutdown_rx: &mut watch::Receiver<()>) -> io::Result<Vec<u8>> {
+async fn read_http_request(
+    stream: &mut TcpStream,
+    shutdown_rx: &mut watch::Receiver<()>,
+) -> io::Result<Vec<u8>> {
     let mut buffer = Vec::with_capacity(8192);
     let mut chunk = [0u8; 4096];
 
@@ -476,7 +544,10 @@ fn request_lengths(buffer: &[u8]) -> Option<(usize, usize)> {
 }
 
 fn request_body(request: &str) -> &str {
-    request.split_once("\r\n\r\n").map(|(_, body)| body).unwrap_or("")
+    request
+        .split_once("\r\n\r\n")
+        .map(|(_, body)| body)
+        .unwrap_or("")
 }
 
 fn handle_logger_post(body: &str, logger_store: &Arc<LoggerStore>) -> Result<(), RouteError> {
@@ -503,7 +574,10 @@ fn handle_peer_post(body: &str, peer_store: &Arc<PeerStore>) -> Result<(), Route
     Ok(())
 }
 
-fn handle_logger_get(path: &str, logger_store: &Arc<LoggerStore>) -> Result<(Vec<u8>, &'static str), RouteError> {
+fn handle_logger_get(
+    path: &str,
+    logger_store: &Arc<LoggerStore>,
+) -> Result<(Vec<u8>, &'static str), RouteError> {
     let level = path.trim_start_matches("/logger/").trim();
     let payload = if level.is_empty() || level == "all" {
         logger_store.all()
@@ -515,7 +589,10 @@ fn handle_logger_get(path: &str, logger_store: &Arc<LoggerStore>) -> Result<(Vec
         .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))
 }
 
-fn handle_peer_get(path: &str, peer_store: &Arc<PeerStore>) -> Result<(Vec<u8>, &'static str), RouteError> {
+fn handle_peer_get(
+    path: &str,
+    peer_store: &Arc<PeerStore>,
+) -> Result<(Vec<u8>, &'static str), RouteError> {
     let suffix = path.trim_start_matches("/peers").trim_start_matches('/');
     let peers = peer_store.all();
     let payload = if suffix.is_empty() || suffix == "all" {
@@ -542,11 +619,13 @@ fn handle_peer_get(path: &str, peer_store: &Arc<PeerStore>) -> Result<(Vec<u8>, 
 /// `created_at`, `content`, `sig`, and `tags`.  An optional
 /// `source_relay` top-level string field may be included by the client.
 async fn handle_events_post(body: &str, state: &Arc<EventStoreState>) -> Result<(), RouteError> {
-    let v: serde_json::Value =
-        serde_json::from_str(body).map_err(|_| RouteError::BadRequest)?;
+    let v: serde_json::Value = serde_json::from_str(body).map_err(|_| RouteError::BadRequest)?;
 
     let id = v["id"].as_str().ok_or(RouteError::BadRequest)?.to_string();
-    let pubkey = v["pubkey"].as_str().ok_or(RouteError::BadRequest)?.to_string();
+    let pubkey = v["pubkey"]
+        .as_str()
+        .ok_or(RouteError::BadRequest)?
+        .to_string();
     let kind = v["kind"].as_i64().ok_or(RouteError::BadRequest)?;
     let created = v["created_at"].as_i64().ok_or(RouteError::BadRequest)?;
     let content = v["content"].as_str().unwrap_or("").to_string();
@@ -601,7 +680,10 @@ async fn handle_events_get(
     request: &str,
     state: &Arc<EventStoreState>,
 ) -> Result<(Vec<u8>, &'static str), RouteError> {
-    let suffix = path.trim_start_matches("/events").trim_start_matches('/').to_string();
+    let suffix = path
+        .trim_start_matches("/events")
+        .trim_start_matches('/')
+        .to_string();
     let limit = query_param(request, "limit")
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(100)
@@ -791,13 +873,20 @@ async fn route_path(site_dir: &str, path: &str) -> Result<(Vec<u8>, &'static str
     Ok((body, content_type))
 }
 
-async fn canonical_directory_redirect(site_dir: &str, path: &str, request_target: &str) -> Option<String> {
+async fn canonical_directory_redirect(
+    site_dir: &str,
+    path: &str,
+    request_target: &str,
+) -> Option<String> {
     let normalized = normalize_path(path).ok()?;
     if normalized.as_os_str().is_empty() {
         return None;
     }
     let candidate = PathBuf::from(site_dir).join(normalized);
-    let is_dir = fs::metadata(&candidate).await.map(|meta| meta.is_dir()).unwrap_or(false);
+    let is_dir = fs::metadata(&candidate)
+        .await
+        .map(|meta| meta.is_dir())
+        .unwrap_or(false);
     if !is_dir {
         return None;
     }
@@ -823,7 +912,9 @@ fn normalize_path(path: &str) -> Result<PathBuf, RouteError> {
 }
 
 fn strip_query(path: &str) -> &str {
-    path.split_once(['?', '#']).map(|(head, _)| head).unwrap_or(path)
+    path.split_once(['?', '#'])
+        .map(|(head, _)| head)
+        .unwrap_or(path)
 }
 
 fn query_suffix(path: &str) -> &str {
@@ -834,7 +925,11 @@ fn query_suffix(path: &str) -> &str {
 }
 
 fn content_type_for_path(path: &Path) -> &'static str {
-    match path.extension().and_then(|ext| ext.to_str()).unwrap_or_default() {
+    match path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or_default()
+    {
         "html" => "text/html; charset=utf-8",
         "js" => "text/javascript; charset=utf-8",
         // Shared browser modules use `.mjs` so local preview and Pages serve them as JavaScript.
@@ -852,7 +947,13 @@ fn content_type_for_path(path: &Path) -> &'static str {
 }
 
 fn response_text(status: u16, reason: &str, body: &str, content_type: &'static str) -> Vec<u8> {
-    response_bytes(status, reason, body.as_bytes().to_vec(), content_type, false)
+    response_bytes(
+        status,
+        reason,
+        body.as_bytes().to_vec(),
+        content_type,
+        false,
+    )
 }
 
 fn response_redirect(location: &str) -> Vec<u8> {

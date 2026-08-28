@@ -7,7 +7,9 @@
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NostrRemote {
-    Announcement { naddr: String },
+    Announcement {
+        naddr: String,
+    },
     Coordinate {
         owner: String,
         relay_hint: Option<String>,
@@ -81,7 +83,9 @@ pub fn git_remote_transport_url(input: &str) -> Result<String, Nip34Error> {
 }
 
 fn parse_clone_url_with_scheme(input: &str, scheme: &str) -> Result<NostrRemote, Nip34Error> {
-    let rest = input.strip_prefix(scheme).ok_or(Nip34Error::InvalidScheme)?;
+    let rest = input
+        .strip_prefix(scheme)
+        .ok_or(Nip34Error::InvalidScheme)?;
 
     if rest.is_empty() {
         return Err(Nip34Error::EmptyAuthority);

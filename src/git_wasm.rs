@@ -35,9 +35,7 @@ pub mod wasm {
         file: &str,
         commit_ish: &str,
     ) -> Result<String, JsValue> {
-        let url = format!(
-            "{base_url}/git/blame?repo={repo}&file={file}&commit={commit_ish}"
-        );
+        let url = format!("{base_url}/git/blame?repo={repo}&file={file}&commit={commit_ish}");
         fetch_text(&url).await
     }
 

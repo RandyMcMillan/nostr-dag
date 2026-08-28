@@ -8,7 +8,10 @@ use serde::{Deserialize, Serialize};
 pub const BRIDGE_PROTOCOL: &str = "nostr-dag-bridge";
 pub const BRIDGE_PROTOCOL_VERSION: u64 = 1;
 
-#[cfg_attr(feature = "native", derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize))]
+#[cfg_attr(
+    feature = "native",
+    derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)
+)]
 #[cfg_attr(not(feature = "native"), derive(Debug, Clone, PartialEq, Eq))]
 pub struct BridgeEnvelope {
     pub protocol: String,
@@ -24,7 +27,11 @@ pub struct BridgeEnvelope {
 }
 
 impl BridgeEnvelope {
-    pub fn new(event: Event, direction: impl Into<String>, relay_hints: impl IntoIterator<Item = String>) -> Self {
+    pub fn new(
+        event: Event,
+        direction: impl Into<String>,
+        relay_hints: impl IntoIterator<Item = String>,
+    ) -> Self {
         Self {
             protocol: BRIDGE_PROTOCOL.to_string(),
             version: BRIDGE_PROTOCOL_VERSION,
@@ -64,15 +71,30 @@ pub struct BridgeRoundTripMetrics {
 
 #[cfg(feature = "native")]
 impl BridgeRoundTripMetrics {
-    pub fn record_sample(&mut self, elapsed_ms: u64, event_id: impl Into<String>, relay: impl Into<String>) {
+    pub fn record_sample(
+        &mut self,
+        elapsed_ms: u64,
+        event_id: impl Into<String>,
+        relay: impl Into<String>,
+    ) {
         let event_id = event_id.into();
         let relay = relay.into();
         self.sample_count = self.sample_count.saturating_add(1);
         self.total_ms = self.total_ms.saturating_add(elapsed_ms);
         self.last_ms = Some(elapsed_ms);
-        self.min_ms = Some(self.min_ms.map_or(elapsed_ms, |current| current.min(elapsed_ms)));
-        self.max_ms = Some(self.max_ms.map_or(elapsed_ms, |current| current.max(elapsed_ms)));
-        self.last_event_id = if event_id.is_empty() { None } else { Some(event_id) };
+        self.min_ms = Some(
+            self.min_ms
+                .map_or(elapsed_ms, |current| current.min(elapsed_ms)),
+        );
+        self.max_ms = Some(
+            self.max_ms
+                .map_or(elapsed_ms, |current| current.max(elapsed_ms)),
+        );
+        self.last_event_id = if event_id.is_empty() {
+            None
+        } else {
+            Some(event_id)
+        };
         self.last_relay = if relay.is_empty() { None } else { Some(relay) };
     }
 
@@ -109,7 +131,10 @@ pub fn serialize_bridge_envelope(envelope: &BridgeEnvelope) -> Result<String, se
 
 pub fn unwrap_bridge_envelope(message: &str) -> Option<BridgeEnvelope> {
     let parsed: serde_json::Value = serde_json::from_str(message).ok()?;
-    let protocol = parsed.get("protocol").or_else(|| parsed.get("source"))?.as_str()?;
+    let protocol = parsed
+        .get("protocol")
+        .or_else(|| parsed.get("source"))?
+        .as_str()?;
     if protocol != BRIDGE_PROTOCOL && protocol != "nostr-dag-bridge" {
         return None;
     }
@@ -117,17 +142,34 @@ pub fn unwrap_bridge_envelope(message: &str) -> Option<BridgeEnvelope> {
     let event_value = parsed
         .get("event")
         .cloned()
-        .or_else(|| parsed.get("payload").and_then(serde_json::Value::as_object).and_then(|payload| payload.get("event")).cloned())
+        .or_else(|| {
+            parsed
+                .get("payload")
+                .and_then(serde_json::Value::as_object)
+                .and_then(|payload| payload.get("event"))
+                .cloned()
+        })
         .or_else(|| parsed.get("payload").cloned())?;
     let event: Event = serde_json::from_value(event_value).ok()?;
 
     Some(BridgeEnvelope {
         protocol: protocol.to_string(),
-        version: parsed.get("version").and_then(serde_json::Value::as_u64).unwrap_or(BRIDGE_PROTOCOL_VERSION),
-        direction: parsed.get("direction").and_then(serde_json::Value::as_str).unwrap_or("libp2p->nostr").to_string(),
+        version: parsed
+            .get("version")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(BRIDGE_PROTOCOL_VERSION),
+        direction: parsed
+            .get("direction")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("libp2p->nostr")
+            .to_string(),
         event,
         relay_hints: collect_bridge_relay_hints(&parsed),
-        topic: parsed.get("topic").and_then(serde_json::Value::as_str).unwrap_or("").to_string(),
+        topic: parsed
+            .get("topic")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .to_string(),
         origin_peer_id: parsed
             .get("origin_peer_id")
             .or_else(|| parsed.get("originPeerId"))
@@ -140,8 +182,15 @@ pub fn unwrap_bridge_envelope(message: &str) -> Option<BridgeEnvelope> {
             .and_then(serde_json::Value::as_str)
             .unwrap_or("")
             .to_string(),
-        hop_count: parsed.get("hop_count").or_else(|| parsed.get("hopCount")).and_then(serde_json::Value::as_u64).unwrap_or(0),
-        ts: parsed.get("ts").and_then(serde_json::Value::as_u64).unwrap_or_else(now_ms),
+        hop_count: parsed
+            .get("hop_count")
+            .or_else(|| parsed.get("hopCount"))
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0),
+        ts: parsed
+            .get("ts")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or_else(now_ms),
     })
 }
 
@@ -251,7 +300,10 @@ mod tests {
         assert_eq!(decoded.origin_peer_id, "peer-a");
         assert_eq!(decoded.forwarded_by, "peer-b");
         assert_eq!(decoded.hop_count, 3);
-        assert_eq!(decoded.relay_hints, vec!["wss://relay.one".to_string(), "wss://relay.two".to_string()]);
+        assert_eq!(
+            decoded.relay_hints,
+            vec!["wss://relay.one".to_string(), "wss://relay.two".to_string()]
+        );
         assert_eq!(decoded.event.id, event.id);
     }
 
@@ -263,11 +315,14 @@ mod tests {
         });
 
         let hints = collect_bridge_relay_hints(&value);
-        assert_eq!(hints, vec![
-            "wss://relay.one".to_string(),
-            "wss://relay.two".to_string(),
-            "wss://relay.three".to_string(),
-        ]);
+        assert_eq!(
+            hints,
+            vec![
+                "wss://relay.one".to_string(),
+                "wss://relay.two".to_string(),
+                "wss://relay.three".to_string(),
+            ]
+        );
     }
 
     #[test]

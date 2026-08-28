@@ -168,7 +168,10 @@ fn read_u64_field(payload: &serde_json::Value, field: &'static str) -> Result<u6
         .ok_or(TransferError::MissingField(field))
 }
 
-fn read_string_field(payload: &serde_json::Value, field: &'static str) -> Result<String, TransferError> {
+fn read_string_field(
+    payload: &serde_json::Value,
+    field: &'static str,
+) -> Result<String, TransferError> {
     payload
         .get(field)
         .and_then(serde_json::Value::as_str)
@@ -199,7 +202,11 @@ fn validate_protocol(payload: &serde_json::Value) -> Result<(), TransferError> {
 /// - all slices share the same `root_id`
 /// - `seq` values are zero-based and contiguous
 /// - empty payloads still emit a single empty slice so reconstruction remains well-defined
-pub fn packetize_payload(root_id: &str, payload: &[u8], max_slice_bytes: usize) -> Vec<TransferSlice> {
+pub fn packetize_payload(
+    root_id: &str,
+    payload: &[u8],
+    max_slice_bytes: usize,
+) -> Vec<TransferSlice> {
     let chunk_size = max_slice_bytes.max(1);
     let total_slices = payload.len().div_ceil(chunk_size).max(1);
 
@@ -281,39 +288,39 @@ pub fn parse_transfer_event(event: &nostr::Event) -> Result<TransferEventPayload
     let root_id = read_string_field(&payload, "root_id")?;
 
     if event.kind == TRANSFER_MANIFEST_KIND {
-            let total_bytes = read_u64_field(&payload, "total_bytes")? as usize;
-            let total_slices = read_u64_field(&payload, "total_slices")? as usize;
-            return Ok(TransferEventPayload::Manifest(TransferManifest {
-                root_id,
-                total_bytes,
-                total_slices,
-            }));
+        let total_bytes = read_u64_field(&payload, "total_bytes")? as usize;
+        let total_slices = read_u64_field(&payload, "total_slices")? as usize;
+        return Ok(TransferEventPayload::Manifest(TransferManifest {
+            root_id,
+            total_bytes,
+            total_slices,
+        }));
     }
 
     if event.kind == TRANSFER_SLICE_KIND {
-            let seq = read_u64_field(&payload, "seq")? as usize;
-            let total_slices = read_u64_field(&payload, "total_slices")? as usize;
-            let data = payload
-                .get("data")
-                .and_then(serde_json::Value::as_array)
-                .ok_or(TransferError::MissingField("data"))?
-                .iter()
-                .map(|value| {
-                    let byte = value.as_u64().ok_or_else(|| {
-                        TransferError::InvalidPayload("slice data must be byte array".to_string())
-                    })?;
-                    u8::try_from(byte).map_err(|_| {
-                        TransferError::InvalidPayload("slice data byte out of range".to_string())
-                    })
+        let seq = read_u64_field(&payload, "seq")? as usize;
+        let total_slices = read_u64_field(&payload, "total_slices")? as usize;
+        let data = payload
+            .get("data")
+            .and_then(serde_json::Value::as_array)
+            .ok_or(TransferError::MissingField("data"))?
+            .iter()
+            .map(|value| {
+                let byte = value.as_u64().ok_or_else(|| {
+                    TransferError::InvalidPayload("slice data must be byte array".to_string())
+                })?;
+                u8::try_from(byte).map_err(|_| {
+                    TransferError::InvalidPayload("slice data byte out of range".to_string())
                 })
-                .collect::<Result<Vec<_>, _>>()?;
+            })
+            .collect::<Result<Vec<_>, _>>()?;
 
-            return Ok(TransferEventPayload::Slice(TransferSlice {
-                root_id,
-                seq,
-                total_slices,
-                data,
-            }));
+        return Ok(TransferEventPayload::Slice(TransferSlice {
+            root_id,
+            seq,
+            total_slices,
+            data,
+        }));
     }
 
     Err(TransferError::UnsupportedKind(format!("{:?}", event.kind)))
@@ -415,7 +422,9 @@ mod transfer_tests {
         let original = b"nostr dag p2p transfer payload";
         let slices = packetize_payload("root-1", original, 5);
         assert!(slices.len() > 1);
-        assert!(slices.iter().all(|slice| slice.total_slices == slices.len()));
+        assert!(slices
+            .iter()
+            .all(|slice| slice.total_slices == slices.len()));
 
         let reconstructed = reconstruct_payload(&slices).unwrap();
         assert_eq!(reconstructed, original);
@@ -466,7 +475,10 @@ mod transfer_tests {
         let manifest_event = build_transfer_manifest_event(&keys, &manifest).unwrap();
 
         let parsed_manifest = parse_transfer_event(&manifest_event).unwrap();
-        assert_eq!(parsed_manifest, TransferEventPayload::Manifest(manifest.clone()));
+        assert_eq!(
+            parsed_manifest,
+            TransferEventPayload::Manifest(manifest.clone())
+        );
 
         let slice_event = build_transfer_slice_event(&keys, &slices[0], manifest_event.id).unwrap();
         let parsed_slice = parse_transfer_event(&slice_event).unwrap();
@@ -602,7 +614,11 @@ mod git_bare_pip_tests {
             .unwrap();
             git_run(&["add", "-A"], src_dir);
             git_run(
-                &["commit", "-m", &format!("depth level {level}: add level-{level:03}.txt")],
+                &[
+                    "commit",
+                    "-m",
+                    &format!("depth level {level}: add level-{level:03}.txt"),
+                ],
                 src_dir,
             );
         }
@@ -662,7 +678,13 @@ mod git_bare_pip_tests {
         // pass `GIT_DIR` explicitly or suppress the guard with a config flag.
         // Use `for-each-ref` to list the HEAD ref regardless of branch name.
         let out = Command::new("git")
-            .args(["-c", "safe.bareRepository=all", "for-each-ref", "--format=%(objectname)", "refs/heads/"])
+            .args([
+                "-c",
+                "safe.bareRepository=all",
+                "for-each-ref",
+                "--format=%(objectname)",
+                "refs/heads/",
+            ])
             .env("GIT_DIR", dst_dir)
             .current_dir(dst_dir)
             .output()
@@ -713,13 +735,13 @@ mod git_bare_pip_tests {
 
         // Transfer at several slice sizes to exercise different depth levels.
         let slice_sizes: &[usize] = &[
-            bundle_bytes.len(),            // 1 slice  — depth 1
-            bundle_bytes.len() / 2 + 1,   // ~2 slices — depth 2
-            bundle_bytes.len() / 4 + 1,   // ~4 slices — depth 4
-            bundle_bytes.len() / 8 + 1,   // ~8 slices — depth 8
-            bundle_bytes.len() / 16 + 1,  // ~16 slices — depth 16
-            512,                           // fine-grained slices
-            64,                            // very fine-grained slices
+            bundle_bytes.len(),          // 1 slice  — depth 1
+            bundle_bytes.len() / 2 + 1,  // ~2 slices — depth 2
+            bundle_bytes.len() / 4 + 1,  // ~4 slices — depth 4
+            bundle_bytes.len() / 8 + 1,  // ~8 slices — depth 8
+            bundle_bytes.len() / 16 + 1, // ~16 slices — depth 16
+            512,                         // fine-grained slices
+            64,                          // very fine-grained slices
         ];
 
         for &slice_size in slice_sizes {
@@ -739,21 +761,22 @@ mod git_bare_pip_tests {
 
             // --- encode to Nostr events ---
             let keys = nostr::Keys::generate();
-            let manifest_event = build_transfer_manifest_event(&keys, &manifest)
-                .expect("build manifest event");
+            let manifest_event =
+                build_transfer_manifest_event(&keys, &manifest).expect("build manifest event");
             let slice_events: Vec<nostr::Event> = slices
                 .iter()
-                .map(|s| build_transfer_slice_event(&keys, s, manifest_event.id)
-                    .expect("build slice event"))
+                .map(|s| {
+                    build_transfer_slice_event(&keys, s, manifest_event.id)
+                        .expect("build slice event")
+                })
                 .collect();
 
             // --- decode from Nostr events ---
-            let parsed_manifest = match parse_transfer_event(&manifest_event)
-                .expect("parse manifest")
-            {
-                TransferEventPayload::Manifest(m) => m,
-                other => panic!("expected Manifest, got {other:?}"),
-            };
+            let parsed_manifest =
+                match parse_transfer_event(&manifest_event).expect("parse manifest") {
+                    TransferEventPayload::Manifest(m) => m,
+                    other => panic!("expected Manifest, got {other:?}"),
+                };
             assert_eq!(parsed_manifest.root_id, root_id);
             assert_eq!(parsed_manifest.total_bytes, bundle_bytes.len());
             assert_eq!(parsed_manifest.total_slices, slice_count);
@@ -770,8 +793,7 @@ mod git_bare_pip_tests {
             recovered.sort_by_key(|s| s.seq.wrapping_mul(1_000_003).wrapping_add(17));
 
             // --- reconstruct ---
-            let reconstructed = reconstruct_payload(&recovered)
-                .expect("reconstruct payload");
+            let reconstructed = reconstruct_payload(&recovered).expect("reconstruct payload");
             assert_eq!(
                 reconstructed.len(),
                 bundle_bytes.len(),
@@ -869,18 +891,14 @@ pub mod native {
     use libp2p::{
         futures::StreamExt,
         gossipsub::{self, IdentTopic, MessageAuthenticity},
-        identity,
-        mdns,
-        noise,
+        identity, mdns, noise,
         swarm::{NetworkBehaviour, SwarmEvent},
-        tcp,
-        yamux,
-        Multiaddr,
+        tcp, yamux, Multiaddr,
     };
     use tokio::sync::mpsc;
     use tracing::{debug, info, warn};
 
-    use super::{NOSTR_DAG_TOPIC, maybe_build_native_time_response};
+    use super::{maybe_build_native_time_response, NOSTR_DAG_TOPIC};
 
     #[derive(NetworkBehaviour)]
     struct Behaviour {
@@ -898,7 +916,9 @@ pub mod native {
     impl SwarmHandle {
         /// Start a new libp2p node, listen on a random TCP port, and return a
         /// handle plus a receiver for inbound messages.
-        pub async fn start() -> Result<(Self, mpsc::Receiver<String>), Box<dyn std::error::Error + Send + Sync>> {
+        pub async fn start(
+        ) -> Result<(Self, mpsc::Receiver<String>), Box<dyn std::error::Error + Send + Sync>>
+        {
             let local_key = identity::Keypair::generate_ed25519();
 
             let topic = IdentTopic::new(NOSTR_DAG_TOPIC);
@@ -932,9 +952,7 @@ pub mod native {
                     yamux::Config::default,
                 )?
                 .with_behaviour(|_| behaviour)?
-                .with_swarm_config(|cfg| {
-                    cfg.with_idle_connection_timeout(Duration::from_secs(60))
-                })
+                .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(Duration::from_secs(60)))
                 .build();
 
             swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse::<Multiaddr>()?)?;
@@ -1058,18 +1076,15 @@ pub mod wasm_node {
     use futures::StreamExt;
     use libp2p::{
         gossipsub::{self, IdentTopic, MessageAuthenticity},
-        identity,
-        noise,
+        identity, noise,
         swarm::{NetworkBehaviour, SwarmEvent},
-        websocket_websys,
-        yamux,
-        Transport,
+        websocket_websys, yamux, Transport,
     };
     use wasm_bindgen::prelude::*;
     use wasm_bindgen_futures::spawn_local;
     use web_sys::js_sys::Function;
 
-    use super::{NOSTR_DAG_TOPIC, maybe_build_wasm_time_response};
+    use super::{maybe_build_wasm_time_response, NOSTR_DAG_TOPIC};
 
     #[derive(NetworkBehaviour)]
     struct Behaviour {
@@ -1143,8 +1158,8 @@ pub mod wasm_node {
 
     // Thread-local channel used to hand messages from `broadcast` into the
     // swarm event loop.
-    use std::cell::RefCell;
     use futures::channel::{mpsc as fmpsc, oneshot};
+    use std::cell::RefCell;
 
     thread_local! {
         static OUTBOUND_TX: RefCell<Option<fmpsc::Sender<String>>> = RefCell::new(None);
@@ -1166,7 +1181,8 @@ pub mod wasm_node {
             gossipsub_config,
         )
         .map_err(|e| JsValue::from_str(&format!("gossipsub init: {e}")))?;
-        gossipsub.subscribe(&topic)
+        gossipsub
+            .subscribe(&topic)
             .map_err(|e| JsValue::from_str(&format!("subscribe: {e}")))?;
 
         let behaviour = Behaviour { gossipsub };

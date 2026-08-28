@@ -19,9 +19,7 @@ use nostr::{Event, EventId, PublicKey};
 use tracing::{debug, info, warn};
 
 use crate::dag::Dag;
-use crate::event::{
-    create_seal_event, PIP_ATTEST_KIND, PIP_JOIN_KIND,
-};
+use crate::event::{create_seal_event, PIP_ATTEST_KIND, PIP_JOIN_KIND};
 use nostr::Keys;
 
 /// Result of processing a [`PIP_ATTEST_KIND`] event.
@@ -159,10 +157,7 @@ impl BlobQuorum {
         // Duplicate check
         if self.attestations.contains_key(&event.pubkey) {
             debug!(participant = %event.pubkey, "duplicate attestation ignored");
-            return AttestResult::Rejected(format!(
-                "duplicate attestation from {}",
-                event.pubkey
-            ));
+            return AttestResult::Rejected(format!("duplicate attestation from {}", event.pubkey));
         }
 
         self.attestations.insert(event.pubkey, event.id);
@@ -316,11 +311,7 @@ mod tests {
     const SHA256: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
     fn quorum_of(keys: &[Keys]) -> BlobQuorum {
-        BlobQuorum::new(
-            keys.iter().map(|k| k.public_key()),
-            ROOT_ID,
-            SHA256,
-        )
+        BlobQuorum::new(keys.iter().map(|k| k.public_key()), ROOT_ID, SHA256)
     }
 
     // ─── helpers ──────────────────────────────────────────────────────────────
@@ -363,7 +354,10 @@ mod tests {
             last = Some(q.attest(attest(k), &seal_keys));
         }
         let result = last.unwrap();
-        assert!(matches!(result, AttestResult::ThresholdReached { .. }), "{result:?}");
+        assert!(
+            matches!(result, AttestResult::ThresholdReached { .. }),
+            "{result:?}"
+        );
         assert!(q.is_sealed());
 
         // Seal event has the right kind
@@ -476,7 +470,11 @@ mod tests {
             .expect("failed to open git repository at CARGO_MANIFEST_DIR");
 
         // Resolve HEAD and (if present) its first parent (HEAD~1).
-        let head = repo.head().expect("no HEAD").peel_to_commit().expect("HEAD is not a commit");
+        let head = repo
+            .head()
+            .expect("no HEAD")
+            .peel_to_commit()
+            .expect("HEAD is not a commit");
         let new_tree = head.tree().expect("HEAD has no tree");
         let diff = if let Ok(parent) = head.parent(0) {
             // Build the diff between HEAD~1 tree and HEAD tree.
@@ -522,7 +520,10 @@ mod tests {
             matches!(result, AttestResult::ThresholdReached { .. }),
             "expected ThresholdReached, got {result:?}"
         );
-        assert!(q.is_sealed(), "quorum should be sealed after 4/5 attestations");
+        assert!(
+            q.is_sealed(),
+            "quorum should be sealed after 4/5 attestations"
+        );
 
         let seal = q.seal_event().unwrap();
         assert_eq!(seal.kind, PIP_SEAL_KIND, "seal must have PIP_SEAL_KIND");

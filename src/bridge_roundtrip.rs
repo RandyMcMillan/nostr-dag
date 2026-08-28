@@ -34,7 +34,9 @@ fn extract_bridge_round_trip_start_ms_from_tag(tag: &Tag) -> Option<i64> {
     let parts = tag.as_slice();
     match parts {
         [kind, value] if kind == BRIDGE_RTT_TAG => value.parse::<i64>().ok(),
-        [kind, marker, value] if kind == "x" && marker == BRIDGE_RTT_TAG => value.parse::<i64>().ok(),
+        [kind, marker, value] if kind == "x" && marker == BRIDGE_RTT_TAG => {
+            value.parse::<i64>().ok()
+        }
         _ => None,
     }
 }
@@ -47,12 +49,16 @@ mod tests {
 
     #[test]
     fn stamp_bridge_round_trip_tag_appends_marker() {
-        let tags = vec![Tag::parse(vec!["e".to_string(), "parent".to_string()]).expect("parent tag should parse")];
+        let tags = vec![Tag::parse(vec!["e".to_string(), "parent".to_string()])
+            .expect("parent tag should parse")];
         let stamped = stamp_bridge_round_trip_tag(&tags, 12_345);
 
         assert_eq!(tags.len(), 1);
         assert_eq!(stamped.len(), 2);
-        assert_eq!(stamped[1].as_slice(), &[BRIDGE_RTT_TAG.to_string(), "12345".to_string()]);
+        assert_eq!(
+            stamped[1].as_slice(),
+            &[BRIDGE_RTT_TAG.to_string(), "12345".to_string()]
+        );
     }
 
     #[test]
@@ -74,7 +80,8 @@ mod tests {
                 "x".to_string(),
                 BRIDGE_RTT_TAG.to_string(),
                 "9876".to_string(),
-            ]).expect("nested marker tag should parse")])
+            ])
+            .expect("nested marker tag should parse")])
             .sign_with_keys(&keys)
             .expect("event should sign");
 

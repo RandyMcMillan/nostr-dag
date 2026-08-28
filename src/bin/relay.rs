@@ -12,8 +12,7 @@ use tracing::{debug, info, trace};
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("relay=info".parse()?),
+            tracing_subscriber::EnvFilter::from_default_env().add_directive("relay=info".parse()?),
         )
         .init();
 

@@ -35,8 +35,7 @@ impl Dag {
         let threshold = Self::quorum_threshold(participants.len());
         info!(
             participant_count = participants.len(),
-            threshold,
-            "creating DAG"
+            threshold, "creating DAG"
         );
 
         Self {
@@ -215,12 +214,10 @@ impl Dag {
 
     pub fn tips(&self) -> impl Iterator<Item = EventId> + '_ {
         trace!("iterating DAG tips");
-        self.events.keys().copied().filter(|id| {
-            self.children
-                .get(id)
-                .map(|c| c.is_empty())
-                .unwrap_or(true)
-        })
+        self.events
+            .keys()
+            .copied()
+            .filter(|id| self.children.get(id).map(|c| c.is_empty()).unwrap_or(true))
     }
 
     pub fn canonical_order(&self) -> Vec<EventId> {
@@ -246,7 +243,10 @@ impl Dag {
     }
 
     pub fn participants(&self) -> &BTreeSet<PublicKey> {
-        trace!(participant_count = self.participants.len(), "reading participants");
+        trace!(
+            participant_count = self.participants.len(),
+            "reading participants"
+        );
         &self.participants
     }
 
@@ -642,7 +642,10 @@ mod tests {
         let fake_parent = EventId::all_zeros();
         let event = create_ack_event(&keys, &[fake_parent]).unwrap();
 
-        assert!(matches!(dag.insert(event.clone()), InsertResult::Buffered { .. }));
+        assert!(matches!(
+            dag.insert(event.clone()),
+            InsertResult::Buffered { .. }
+        ));
         assert!(matches!(dag.insert(event), InsertResult::Duplicate));
         assert_eq!(dag.pending_count(), 1);
     }

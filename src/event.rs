@@ -108,8 +108,15 @@ pub fn create_seal_event(
     sha256_hex: &str,
     attest_event_ids: &[EventId],
 ) -> Result<Event, nostr::event::builder::Error> {
-    trace!(root_id, attest_count = attest_event_ids.len(), "creating PIP seal event");
-    let ids_json: Vec<String> = attest_event_ids.iter().map(|id| format!(r#""{}""#, id.to_hex())).collect();
+    trace!(
+        root_id,
+        attest_count = attest_event_ids.len(),
+        "creating PIP seal event"
+    );
+    let ids_json: Vec<String> = attest_event_ids
+        .iter()
+        .map(|id| format!(r#""{}""#, id.to_hex()))
+        .collect();
     let ids_arr = format!("[{}]", ids_json.join(","));
     let content = format!(
         r#"{{"protocol":"nostr-dag-transfer","version":1,"type":"seal","root_id":"{root_id}","sha256":"{sha256_hex}","attest_ids":{attest_ids}}}"#,
@@ -117,8 +124,7 @@ pub fn create_seal_event(
         sha256_hex = sha256_hex,
         attest_ids = ids_arr,
     );
-    EventBuilder::new(PIP_SEAL_KIND, content)
-        .sign_with_keys(keys)
+    EventBuilder::new(PIP_SEAL_KIND, content).sign_with_keys(keys)
 }
 
 /// Build a PIP Quorum Membership (join) event (kind 39082).

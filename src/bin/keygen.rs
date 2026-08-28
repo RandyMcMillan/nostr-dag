@@ -37,7 +37,10 @@ fn main() {
     }
 
     let all_pubkeys = pubkeys.join(",");
-    info!(member_count = pubkeys.len(), "finished federation key generation");
+    info!(
+        member_count = pubkeys.len(),
+        "finished federation key generation"
+    );
 
     println!("=== Configuration ===\n");
     println!("FEDERATION_PUBKEYS={}\n", all_pubkeys);
@@ -53,5 +56,8 @@ fn main() {
     }
 
     println!("=== Frontend Config ===\n");
-    println!("Paste this into the 'Federation Pubkeys' field:\n{}", all_pubkeys);
+    println!(
+        "Paste this into the 'Federation Pubkeys' field:\n{}",
+        all_pubkeys
+    );
 }
