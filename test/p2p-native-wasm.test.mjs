@@ -564,10 +564,18 @@ function createStaticServer(bareRepoBundleBytes = null, bareRepoRelayUrls = []) 
 
         const tryComplete = async (source) => {
           if (resolved) return;
+          console.log(
+            '[native-wasm:bare:trace] reconstruction check source=' + source +
+            ' manifest_slices=' + manifest.totalSlices +
+            ' collected_slices=' + slices.size +
+            ' manifest_bytes=' + manifest.totalBytes,
+          );
           if (!manifest.totalSlices || slices.size < manifest.totalSlices) return;
+          console.log('[native-wasm:bare:trace] reconstructing bundle from ' + slices.size + ' slices');
           const ordered = [...slices.values()].sort((a, b) => a.seq - b.seq);
           const bytes = reconstruct(ordered);
           const sha256 = await sha256Hex(bytes);
+          console.log('[native-wasm:bare:trace] reconstructed bundle bytes=' + bytes.length + ' sha256=' + sha256);
           resolved = true;
           window.__bareRepoReconstructed = true;
           window.__bareRepoReconstructionSource = source;
@@ -587,6 +595,13 @@ function createStaticServer(bareRepoBundleBytes = null, bareRepoRelayUrls = []) 
             const parsed = parseTransferEvent(event);
             if (!parsed) return null;
             if (parsed.type === 'manifest') {
+              console.log(
+                '[native-wasm:bare:trace] ingest manifest source=' + source +
+                ' event=' + parsed.manifest.eventId +
+                ' root_id=' + parsed.manifest.rootId +
+                ' slices=' + parsed.manifest.totalSlices +
+                ' bytes=' + parsed.manifest.totalBytes,
+              );
               manifest.eventId = parsed.manifest.eventId;
               manifest.totalSlices = parsed.manifest.totalSlices;
               manifest.totalBytes = parsed.manifest.totalBytes;
@@ -594,6 +609,13 @@ function createStaticServer(bareRepoBundleBytes = null, bareRepoRelayUrls = []) 
               return null;
             }
             if (parsed.type === 'slice' && parsed.slice.rootId === rootId) {
+              console.log(
+                '[native-wasm:bare:trace] ingest slice source=' + source +
+                ' seq=' + parsed.slice.seq +
+                '/' + parsed.slice.totalSlices +
+                ' event=' + parsed.slice.eventId +
+                ' bytes=' + parsed.slice.data.length,
+              );
               slices.set(parsed.slice.seq, parsed.slice);
               await tryComplete(source);
             }
@@ -854,7 +876,9 @@ function createStaticServer(bareRepoBundleBytes = null, bareRepoRelayUrls = []) 
         window.__bareRepoSentSliceCount = sliceEvents.length;
         window.__bareRepoPublished = true;
         console.log('[native-wasm:bare:trace] bare repo publish complete');
+        console.log('[native-wasm:bare:trace] waiting for reconstruction and relay cleanup');
         const reconstructed = await transferCollector.done;
+        console.log('[native-wasm:bare:trace] reconstruction finished, waiting for relay cleanup');
         stopRelayQuery();
         await relayQueryPromise.catch(() => false);
         if (reconstructed?.bytes) {
