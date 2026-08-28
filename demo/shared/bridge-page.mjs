@@ -7,7 +7,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     import { measureRelayPing } from './relay-ping.mjs';
     import { createSharedLibp2pStack, deterministicPeerIdFromSeed } from './libp2p-stack.mjs';
     import { getNetworkUnixTime } from './network-time.mjs';
-    import { BRIDGE_PROTOCOL, BRIDGE_PROTOCOL_VERSION, buildBridgeEnvelope, collectBridgeRelayHints, unwrapBridgeEnvelope } from './bridge-protocol.mjs';
+    import { BRIDGE_PROTOCOL, BRIDGE_PROTOCOL_VERSION, buildBridgeEnvelope, collectBridgeRelayHints, decodeBridgeMessage } from './bridge-protocol.mjs';
     import { createListContainerController } from './list-container.mjs';
     import { createPeersListController } from './peers-list.mjs';
     import { extractBridgeRoundTripStartMs } from './bridge-roundtrip.mjs';
@@ -1534,7 +1534,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     }
 
     async function handleLibp2pMessage(message) {
-      const envelope = unwrapBridgeEnvelope(message);
+      const envelope = decodeBridgeMessage(message);
       if (!envelope) {
         window.__sharedFooter?.log('bridge', 'rejected libp2p payload with unsupported protocol', 'warn', 'unavailable');
         return;

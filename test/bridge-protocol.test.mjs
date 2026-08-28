@@ -5,7 +5,9 @@ import {
   BRIDGE_PROTOCOL,
   BRIDGE_PROTOCOL_VERSION,
   buildBridgeEnvelope,
+  decodeBridgeMessage,
   collectBridgeRelayHints,
+  encodeBridgeMessage,
   unwrapBridgeEnvelope,
 } from '../demo/shared/bridge-protocol.mjs';
 
@@ -57,6 +59,25 @@ test('buildBridgeEnvelope does not mutate the caller relay hint array', () => {
   const event = makeEvent();
   buildBridgeEnvelope(event, hints);
   assert.deepEqual(hints, ['wss://relay.one', 'wss://relay.two']);
+});
+
+test('encodeBridgeMessage and decodeBridgeMessage round-trip a bridge event', () => {
+  const event = makeEvent();
+  const json = encodeBridgeMessage(event, 'nostr->libp2p', ['wss://relay.one'], {
+    topic: 'nostr/bridge',
+    originPeerId: 'peer-a',
+    forwardedBy: 'peer-b',
+    hopCount: 2,
+  });
+
+  const parsed = decodeBridgeMessage(json);
+  assert.ok(parsed);
+  assert.equal(parsed.event.id, event.id);
+  assert.equal(parsed.direction, 'nostr->libp2p');
+  assert.equal(parsed.topic, 'nostr/bridge');
+  assert.equal(parsed.originPeerId, 'peer-a');
+  assert.equal(parsed.forwardedBy, 'peer-b');
+  assert.equal(parsed.hopCount, 2);
 });
 
 test('unwrapBridgeEnvelope round-trips a bridge envelope', () => {

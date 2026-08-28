@@ -72,9 +72,12 @@ export function unwrapBridgeEnvelope(message) {
   }
   if (!event || !isNostrEvent(event)) return null;
   return {
+    protocol: protocol || BRIDGE_PROTOCOL,
+    version: Number(message.version || 1),
     event,
     relayHints,
     direction: message.direction || 'libp2p->nostr',
+    topic: String(message.topic || ''),
     originPeerId: String(message.origin_peer_id || message.originPeerId || ''),
     forwardedBy: String(message.forwarded_by || message.forwardedBy || ''),
     hopCount: Number.isFinite(Number(message.hop_count)) ? Number(message.hop_count) : 0,
