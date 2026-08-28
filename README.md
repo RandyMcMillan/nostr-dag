@@ -115,6 +115,8 @@ node --test test/p2p-native-wasm.test.mjs
 #   1. Safari → Settings → Advanced → show the Develop menu.
 #   2. Develop → Allow Remote Automation.
 #   3. If WebDriver still refuses to start, run `safaridriver --enable` once.
+# The test auto-detects whether Safari remote automation is enabled and logs a
+# short skip message if it is not.
 
 # Optional: override the bootstrap peer list used for relay/hole-punch setup
 P2P_BOOTSTRAP="/ip4/host/tcp/port/p2p/..." cargo run --features p2p --bin p2p-node
