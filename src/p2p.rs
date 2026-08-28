@@ -492,13 +492,6 @@ pub fn decode_bridge_message(message: &str) -> Result<nostr::Event, TransferErro
 mod transfer_tests {
     use super::*;
 
-    fn print_report(title: &str, lines: &[String]) {
-        println!("[PIP] === {title} ===");
-        for line in lines {
-            println!("[PIP]   {line}");
-        }
-    }
-
     #[test]
     fn packetize_and_reconstruct_payload_roundtrip() {
         let original = b"nostr dag p2p transfer payload";
@@ -1247,13 +1240,6 @@ pub mod native {
     #[cfg(test)]
     mod tests {
         use super::*;
-
-        fn print_report(title: &str, lines: &[String]) {
-            println!("[PIP] === {title} ===");
-            for line in lines {
-                println!("[PIP]   {line}");
-            }
-        }
         use crate::p2p::deterministic_native_nostr_keys;
 
         /// Two nodes discover each other via mDNS and exchange a message.
