@@ -37,16 +37,6 @@ on:
         required: false
         default: true
         type: boolean
-      macos_13:
-        description: 'Include macos-13'
-        required: false
-        default: true
-        type: boolean
-      macos_12:
-        description: 'Include macos-12'
-        required: false
-        default: true
-        type: boolean
       macos_26_large:
         description: 'Include macos-26-large'
         required: false
@@ -94,8 +84,6 @@ jobs:
           MACOS_15: ${{ github.event_name == 'workflow_dispatch' && inputs.macos_15 || github.event_name != 'workflow_dispatch' }}
           MACOS_15_INTEL: ${{ github.event_name == 'workflow_dispatch' && inputs.macos_15_intel || github.event_name != 'workflow_dispatch' }}
           MACOS_14: ${{ github.event_name == 'workflow_dispatch' && inputs.macos_14 || github.event_name != 'workflow_dispatch' }}
-          MACOS_13: ${{ github.event_name == 'workflow_dispatch' && inputs.macos_13 || github.event_name != 'workflow_dispatch' }}
-          MACOS_12: ${{ github.event_name == 'workflow_dispatch' && inputs.macos_12 || github.event_name != 'workflow_dispatch' }}
           MACOS_26_LARGE: ${{ github.event_name == 'workflow_dispatch' && inputs.macos_26_large || github.event_name != 'workflow_dispatch' }}
           MACOS_26_XLARGE: ${{ github.event_name == 'workflow_dispatch' && inputs.macos_26_xlarge || github.event_name != 'workflow_dispatch' }}
           MACOS_15_LARGE: ${{ github.event_name == 'workflow_dispatch' && inputs.macos_15_large || github.event_name != 'workflow_dispatch' }}
@@ -115,8 +103,6 @@ jobs:
             enabled('MACOS_15', 'macos-15', 'arm64'),
             enabled('MACOS_15_INTEL', 'macos-15-intel', 'x86_64'),
             enabled('MACOS_14', 'macos-14', 'arm64'),
-            enabled('MACOS_13', 'macos-13', 'x86_64'),
-            enabled('MACOS_12', 'macos-12', 'x86_64'),
             enabled('MACOS_26_LARGE', 'macos-26-large', 'x86_64'),
             enabled('MACOS_26_XLARGE', 'macos-26-xlarge', 'arm64'),
             enabled('MACOS_15_LARGE', 'macos-15-large', 'x86_64'),
