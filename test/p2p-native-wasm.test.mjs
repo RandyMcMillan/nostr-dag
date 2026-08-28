@@ -155,7 +155,7 @@ function createStaticServer(bareRepoBundleBytes = null) {
 <html>
   <head>
     <meta charset="utf-8">
-    <link rel="icon" href="/site/favicon.ico">
+    <link rel="icon" href="/favicon.ico">
     <title>waiting</title>
   </head>
   <body>
@@ -239,12 +239,12 @@ function createStaticServer(bareRepoBundleBytes = null) {
 
         if (url.pathname === '/p2p-bare-repo-test.html') {
           const nativeWs = url.searchParams.get('nativeWs') || '';
-          const bundleUrl = url.searchParams.get('bundleUrl') || '/p2p-bare-repo.bundle';
+          const bundleB64 = url.searchParams.get('bundleB64') || '';
           const html = `<!doctype html>
 <html>
   <head>
     <meta charset="utf-8">
-    <link rel="icon" href="/site/favicon.ico">
+    <link rel="icon" href="/favicon.ico">
     <title>waiting</title>
   </head>
   <body>
@@ -257,7 +257,7 @@ function createStaticServer(bareRepoBundleBytes = null) {
 
       const status = document.getElementById('status');
       const nativeWs = new URL(location.href).searchParams.get('nativeWs') || '';
-      const bundleUrl = new URL(location.href).searchParams.get('bundleUrl') || '/p2p-bare-repo.bundle';
+      const bundleB64 = new URL(location.href).searchParams.get('bundleB64') || '';
       window.__p2pReady = false;
       window.__p2pConnected = false;
       window.__p2pPeerSeen = false;
@@ -348,11 +348,11 @@ function createStaticServer(bareRepoBundleBytes = null) {
           tick();
         });
 
-        const response = await fetch(bundleUrl);
-        if (!response.ok) {
-          throw new Error('failed to fetch bare repo bundle: ' + response.status);
+        if (!bundleB64) {
+          throw new Error('missing bare repo bundle payload');
         }
-        const bundleBytes = new Uint8Array(await response.arrayBuffer());
+        const binary = atob(bundleB64);
+        const bundleBytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
         const rootId = 'live-bare-repo';
         const sliceSize = 256;
         const slices = packetize(rootId, bundleBytes, sliceSize);
@@ -642,7 +642,7 @@ async function runChromiumNativeWasmExchange(browserBaseUrl, nativeDialAddr) {
   }
 }
 
-async function runChromiumBareRepoExchange(browserBaseUrl, nativeDialAddr, bundleUrl) {
+async function runChromiumBareRepoExchange(browserBaseUrl, nativeDialAddr, bundleB64) {
   console.log(`[native-wasm:test] launching Chromium bare-repo page at ${browserBaseUrl}`);
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
@@ -650,7 +650,7 @@ async function runChromiumBareRepoExchange(browserBaseUrl, nativeDialAddr, bundl
     console.log(`[native-wasm:bare-browser:${message.type()}] ${message.text()}`);
   });
   try {
-    const pageUrl = `${browserBaseUrl}/p2p-bare-repo-test.html?nativeWs=${encodeURIComponent(nativeDialAddr)}&bundleUrl=${encodeURIComponent(bundleUrl)}`;
+    const pageUrl = `${browserBaseUrl}/p2p-bare-repo-test.html?nativeWs=${encodeURIComponent(nativeDialAddr)}&bundleB64=${encodeURIComponent(bundleB64)}`;
     console.log(`[native-wasm:test] navigating bare-repo browser to ${pageUrl}`);
     await page.goto(pageUrl, { waitUntil: 'domcontentloaded' });
 
@@ -831,6 +831,7 @@ test('native peer and wasm peer exchange a real bare-repo nip-pip blob in Chromi
   await ensureChromiumBrowser();
 
   const bareRepo = createBareRepoBundle();
+  const bareRepoBundleB64 = Buffer.from(bareRepo.bundleBytes).toString('base64');
   const [{ server, port: serverPort }, native] = await Promise.all([
     createStaticServer(bareRepo.bundleBytes),
     startNativePeer(),
@@ -842,7 +843,7 @@ test('native peer and wasm peer exchange a real bare-repo nip-pip blob in Chromi
   const { browser, page } = await runChromiumBareRepoExchange(
     browserBaseUrl,
     nativeDialAddr,
-    '/p2p-bare-repo.bundle',
+    bareRepoBundleB64,
   );
 
   try {
