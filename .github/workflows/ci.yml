@@ -4,6 +4,7 @@ on:
   push:
     branches: ["**"]
   pull_request:
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -40,7 +41,11 @@ jobs:
 
   js:
     name: Test (JS / GUI)
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ github.event_name == 'workflow_dispatch' && fromJSON('["ubuntu-latest","macos-latest"]') || fromJSON('["ubuntu-latest"]') }}
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -53,8 +58,15 @@ jobs:
           rustup default stable
           rustup target add wasm32-unknown-unknown
 
-      - name: Install clang for wasm C dependencies
+      - name: Install clang for wasm C dependencies (Linux)
+        if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y clang lld
+
+      - name: Install clang for wasm C dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install llvm
+          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
 
       - name: Install wasm-pack
         run: cargo install wasm-pack --locked
