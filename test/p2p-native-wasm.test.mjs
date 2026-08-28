@@ -734,6 +734,7 @@ function createStaticServer(bareRepoBundleBytes = null, bareRepoRelayUrls = []) 
         const totalEvents = (sliceEvents.length + 1) * totalRelays;
         let publishAttempts = 0;
         let lastProgressPct = -1;
+        let reportPrinted = false;
         const skippedRelays = new Set();
         window.__bareRepoPublishTotal = totalEvents;
 
@@ -753,7 +754,33 @@ function createStaticServer(bareRepoBundleBytes = null, bareRepoRelayUrls = []) 
           window.__bareRepoPublishProgressLabel = label;
           if (progressPct !== lastProgressPct) {
             lastProgressPct = progressPct;
-            console.log('[native-wasm:bare:trace] publish progress ' + progressPct + '% (' + publishAttempts + '/' + totalEvents + ') ' + label);
+            const banner = '='.repeat(72);
+            console.log([
+              '',
+              '[native-wasm:bare:trace] ' + banner,
+              '[native-wasm:bare:trace] PUBLISH PROGRESS ' + progressPct + '%',
+              '[native-wasm:bare:trace] attempts ' + publishAttempts + '/' + totalEvents,
+              '[native-wasm:bare:trace] relay ' + label,
+              '[native-wasm:bare:trace] ' + banner,
+              '',
+            ].join('\n'));
+          }
+          if (progressPct === 100 && !reportPrinted) {
+            reportPrinted = true;
+            const reportBanner = '#'.repeat(72);
+            console.log([
+              '',
+              '[native-wasm:bare:trace] ' + reportBanner,
+              '[native-wasm:bare:trace] PUBLISH COMPLETE',
+              '[native-wasm:bare:trace] slices ' + sliceEvents.length,
+              '[native-wasm:bare:trace] relays ' + DEFAULT_RELAYS.length,
+              '[native-wasm:bare:trace] attempts ' + publishAttempts + '/' + totalEvents,
+              '[native-wasm:bare:trace] skipped relays ' + skippedRelays.size,
+              '[native-wasm:bare:trace] reconstructed ' + window.__bareRepoReconstructed,
+              '[native-wasm:bare:trace] waiting for reconstruction and relay cleanup',
+              '[native-wasm:bare:trace] ' + reportBanner,
+              '',
+            ].join('\n'));
           }
         };
 
