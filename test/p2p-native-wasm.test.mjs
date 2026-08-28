@@ -1016,14 +1016,15 @@ function createStaticServer(bareRepoBundleBytes = null, bareRepoRelayUrls = []) 
   });
 }
 
-function startNativePeer() {
+function startNativePeer({ bootstrapPeers = ',', nativeSeedHex = '' } = {}) {
   return new Promise((resolve, reject) => {
     console.log('[native-wasm:test] starting native peer');
     const child = spawn('cargo', ['run', '--features', 'p2p', '--bin', 'p2p-node'], {
       cwd: REPO_ROOT,
       env: {
         ...process.env,
-        P2P_BOOTSTRAP: ',',
+        P2P_BOOTSTRAP: bootstrapPeers,
+        ...(nativeSeedHex ? { NOSTR_DAG_NATIVE_LIBP2P_SEED_HEX: nativeSeedHex } : {}),
       },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -1081,6 +1082,18 @@ function startNativePeer() {
       }
     });
   });
+}
+
+async function startBootstrapPeer() {
+  const nativeSeedHex = '11'.repeat(32);
+  const bootstrap = await startNativePeer({
+    bootstrapPeers: ',',
+    nativeSeedHex,
+  });
+  console.log(
+    `[native-wasm:test] bootstrap peer ready peerId=${bootstrap.peerId} ws=${bootstrap.wsListenAddr}`,
+  );
+  return bootstrap;
 }
 
 async function createSafariSession(webdriverPort) {
