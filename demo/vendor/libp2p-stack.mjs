@@ -54612,6 +54612,34 @@ var emitLog = (onLog, level, text, state = "checking") => {
     onLog?.("debug", `[${level}] ${text}`, state);
   }
 };
+var ensureSeedBytes = async (seed) => {
+  if (seed instanceof Uint8Array) return seed;
+  if (typeof seed === "string") {
+    const encoded = new TextEncoder().encode(seed);
+    const digest = await globalThis.crypto.subtle.digest("SHA-256", encoded);
+    return new Uint8Array(digest);
+  }
+  throw new TypeError("deterministic libp2p seed must be a string or Uint8Array");
+};
+var createDeterministicPrivateKey = async (seed) => {
+  const privateKeyRaw = await ensureSeedBytes(seed);
+  if (privateKeyRaw.length !== 32) {
+    throw new TypeError(`deterministic libp2p seed must be 32 bytes, got ${privateKeyRaw.length}`);
+  }
+  const publicKeyRaw = ed25519.getPublicKey(privateKeyRaw);
+  const privateKey = new Uint8Array(64);
+  privateKey.set(privateKeyRaw, 0);
+  privateKey.set(publicKeyRaw, 32);
+  return {
+    type: "Ed25519",
+    raw: privateKey,
+    publicKey: {
+      type: "Ed25519",
+      raw: publicKeyRaw
+    },
+    sign: async (message) => ed25519.sign(message instanceof Uint8Array ? message : new Uint8Array(message), privateKeyRaw)
+  };
+};
 var passthroughFilter = (multiaddrs) => (Array.isArray(multiaddrs) ? multiaddrs.filter(Boolean) : []).filter(Boolean);
 var ensureTransportFilters = (transport, label, onLog) => {
   if (typeof transport.listenFilter !== "function") {
@@ -54673,6 +54701,7 @@ async function createSharedLibp2pStack({
   onLog,
   onPeer,
   onStatus,
+  deterministicKeySeed = null,
   // When the WASM P2pNode is available (loaded via pkg/nostr_dag.js) and
   // `useWasmP2p` is true (default), use it instead of the JS libp2p stack.
   // Set to false to force the pure-JS fallback.
@@ -54780,6 +54809,7 @@ async function createSharedLibp2pStack({
   for (const config of configs) {
     try {
       emitLog(onLog, "trace", `constructing libp2p node (${config.name})`, "checking");
+      const privateKey = deterministicKeySeed ? await createDeterministicPrivateKey(deterministicKeySeed) : undefined;
       node = await createLibp2p({
         transports: config.transports,
         addresses: config.addresses,
@@ -54794,6 +54824,7 @@ async function createSharedLibp2pStack({
             emitSelf: true
           })
         },
+        ...(privateKey ? { privateKey } : {}),
         peerDiscovery: peers.length ? [
           bootstrap({
             list: peers,
