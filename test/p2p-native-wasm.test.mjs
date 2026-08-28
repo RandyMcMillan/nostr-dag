@@ -335,7 +335,7 @@ function createStaticServer(bareRepoBundleBytes = null, bareRepoRelayUrls = []) 
 
         const stack = await createSharedLibp2pStack({
           bootstrapPeers: nativeWs ? [nativeWs] : [],
-          useWasmP2p: true,
+          useWasmP2p: false,
           onLog(level, text, state) {
             console.log('[native-wasm:browser:' + state + ':' + level + '] ' + text);
           },
@@ -633,7 +633,7 @@ function createStaticServer(bareRepoBundleBytes = null, bareRepoRelayUrls = []) 
 
         const stack = await createSharedLibp2pStack({
           bootstrapPeers: nativeWs ? [nativeWs] : [],
-          useWasmP2p: true,
+          useWasmP2p: false,
           onLog(level, text, state) {
             console.log('[native-wasm:bare:' + state + ':' + level + '] ' + text);
           },
@@ -1084,16 +1084,24 @@ function startNativePeer({ bootstrapPeers = ',', nativeSeedHex = '' } = {}) {
   });
 }
 
-async function startBootstrapPeer() {
-  const nativeSeedHex = '11'.repeat(32);
+async function startBootstrapPeer({ bootstrapPeers = ',', nativeSeedHex = '11'.repeat(32) } = {}) {
   const bootstrap = await startNativePeer({
-    bootstrapPeers: ',',
+    bootstrapPeers,
     nativeSeedHex,
   });
   console.log(
     `[native-wasm:test] bootstrap peer ready peerId=${bootstrap.peerId} ws=${bootstrap.wsListenAddr}`,
   );
   return bootstrap;
+}
+
+async function startBootstrapMesh() {
+  const primary = await startBootstrapPeer();
+  const relayTarget = await startBootstrapPeer({
+    bootstrapPeers: buildWsDialAddress(primary.wsListenAddr, primary.peerId),
+    nativeSeedHex: '22'.repeat(32),
+  });
+  return { primary, relayTarget };
 }
 
 async function createSafariSession(webdriverPort) {
@@ -1374,11 +1382,12 @@ test('native peer and wasm peer exchange a real nip-pip blob in Chromium', { tim
   await ensureP2pWasmBuild();
   await ensureChromiumBrowser();
 
-  const bootstrap = await startBootstrapPeer();
+  const { primary: bootstrap, relayTarget } = await startBootstrapMesh();
   const bootstrapDialAddr = buildWsDialAddress(bootstrap.wsListenAddr, bootstrap.peerId);
+  const relayDialAddr = buildWsDialAddress(relayTarget.wsListenAddr, relayTarget.peerId);
   const [{ server, port: serverPort }, native] = await Promise.all([
     createStaticServer(),
-    startNativePeer({ bootstrapPeers: bootstrapDialAddr }),
+    startNativePeer({ bootstrapPeers: [bootstrapDialAddr, relayDialAddr].join(',') }),
   ]);
 
   const browserBaseUrl = `http://127.0.0.1:${serverPort}`;
@@ -1420,6 +1429,7 @@ test('native peer and wasm peer exchange a real nip-pip blob in Chromium', { tim
     await page.close().catch(() => {});
     await browser.close().catch(() => {});
     native.child.kill('SIGTERM');
+    relayTarget.child.kill('SIGTERM');
     bootstrap.child.kill('SIGTERM');
     server.close();
   }
@@ -1434,9 +1444,12 @@ test('native peer and wasm peer exchange a real bare-repo nip-pip blob in Chromi
   const bareRepoBundleB64 = Buffer.from(bareRepo.bundleBytes).toString('base64');
   const bareRepoRelayUrls = await discoverHealthyRelays();
   const relayUrls = bareRepoRelayUrls.length ? bareRepoRelayUrls : ['wss://nos.lol'];
+  const { primary: bootstrap, relayTarget } = await startBootstrapMesh();
+  const bootstrapDialAddr = buildWsDialAddress(bootstrap.wsListenAddr, bootstrap.peerId);
+  const relayDialAddr = buildWsDialAddress(relayTarget.wsListenAddr, relayTarget.peerId);
   const [{ server, port: serverPort }, native] = await Promise.all([
     createStaticServer(bareRepo.bundleBytes, relayUrls),
-    startNativePeer(),
+    startNativePeer({ bootstrapPeers: [bootstrapDialAddr, relayDialAddr].join(',') }),
   ]);
 
   const browserBaseUrl = `http://127.0.0.1:${serverPort}`;
@@ -1506,6 +1519,8 @@ test('native peer and wasm peer exchange a real bare-repo nip-pip blob in Chromi
     await page.close().catch(() => {});
     await browser.close().catch(() => {});
     native.child.kill('SIGTERM');
+    relayTarget.child.kill('SIGTERM');
+    bootstrap.child.kill('SIGTERM');
     server.close();
     rmSync(bareRepo.work, { recursive: true, force: true });
   }
