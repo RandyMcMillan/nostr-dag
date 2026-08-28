@@ -642,6 +642,31 @@ async function runChromiumNativeWasmExchange(browserBaseUrl, nativeDialAddr) {
   }
 }
 
+async function runChromiumBareRepoExchange(browserBaseUrl, nativeDialAddr, bundleUrl) {
+  console.log(`[native-wasm:test] launching Chromium bare-repo page at ${browserBaseUrl}`);
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  page.on('console', (message) => {
+    console.log(`[native-wasm:bare-browser:${message.type()}] ${message.text()}`);
+  });
+  try {
+    const pageUrl = `${browserBaseUrl}/p2p-bare-repo-test.html?nativeWs=${encodeURIComponent(nativeDialAddr)}&bundleUrl=${encodeURIComponent(bundleUrl)}`;
+    console.log(`[native-wasm:test] navigating bare-repo browser to ${pageUrl}`);
+    await page.goto(pageUrl, { waitUntil: 'domcontentloaded' });
+
+    await page.waitForFunction(() => window.__p2pReady === true, null, { timeout: 120_000 });
+    await page.waitForFunction(() => window.__p2pConnected === true, null, { timeout: 120_000 });
+    await page.waitForFunction(() => window.__bareRepoPublished === true, null, { timeout: 120_000 });
+    console.log('[native-wasm:test] bare-repo browser reported published');
+
+    return { browser, page };
+  } catch (error) {
+    await page.close().catch(() => {});
+    await browser.close().catch(() => {});
+    throw error;
+  }
+}
+
 test('native peer and wasm peer exchange a real nip-pip blob', { timeout: 300_000 }, async () => {
   if (!hasSafariDriver()) {
     console.log('[native-wasm:test] Safari remote automation unavailable: non-macOS host');
