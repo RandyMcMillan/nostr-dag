@@ -5,7 +5,8 @@
     "build:vendor": "node scripts/build-vendor.mjs"
   },
   "devDependencies": {
-    "esbuild": "0.28.2"
+    "esbuild": "0.28.2",
+    "playwright": "^1.62.1"
   },
   "dependencies": {
     "@chainsafe/libp2p-noise": "17.0.0",
@@ -17,8 +18,8 @@
     "@libp2p/dcutr": "3.0.27",
     "@libp2p/gossipsub": "17.0.1",
     "@libp2p/identify": "4.1.13",
-    "@libp2p/websockets": "10.1.20",
     "@libp2p/webrtc": "6.0.30",
+    "@libp2p/websockets": "10.1.20",
     "isomorphic-git": "1.41.9",
     "libp2p": "3.3.9",
     "nostr-tools": "2.25.0"
