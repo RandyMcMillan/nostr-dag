@@ -925,9 +925,29 @@ function createStaticServer(bareRepoBundleBytes = null, bareRepoRelayUrls = []) 
         console.log('[native-wasm:bare:trace] bare repo publish complete');
         console.log('[native-wasm:bare:trace] waiting for reconstruction and relay cleanup');
         const reconstructed = await transferCollector.done;
-        console.log('[native-wasm:bare:trace] reconstruction finished, waiting for relay cleanup');
+        console.log([
+          '',
+          '[native-wasm:bare:trace] ' + '='.repeat(72),
+          '[native-wasm:bare:trace] RECONSTRUCTION COMPLETE',
+          '[native-wasm:bare:trace] source ' + (reconstructed?.source || window.__bareRepoReconstructionSource || 'unknown'),
+          '[native-wasm:bare:trace] sha256 ' + (reconstructed?.sha256 || window.__bareRepoReconstructedSha256 || 'unknown'),
+          '[native-wasm:bare:trace] bytes ' + (reconstructed?.bytes?.length || window.__bareRepoReconstructedBytes || 0),
+          '[native-wasm:bare:trace] waiting for relay cleanup',
+          '[native-wasm:bare:trace] ' + '='.repeat(72),
+          '',
+        ].join('\n'));
         stopRelayQuery();
         await relayQueryPromise.catch(() => false);
+        console.log([
+          '',
+          '[native-wasm:bare:trace] ' + '#'.repeat(72),
+          '[native-wasm:bare:trace] RELAY CLEANUP COMPLETE',
+          '[native-wasm:bare:trace] skipped relays ' + skippedRelays.size,
+          '[native-wasm:bare:trace] relay query stopped ' + relayQueryStop,
+          '[native-wasm:bare:trace] reconstructed ' + window.__bareRepoReconstructed,
+          '[native-wasm:bare:trace] ' + '#'.repeat(72),
+          '',
+        ].join('\n'));
         if (reconstructed?.bytes) {
           window.__bareRepoReconstructed = true;
           window.__bareRepoReconstructionSource = reconstructed.source;
