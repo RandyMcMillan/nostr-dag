@@ -1268,7 +1268,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
           for (const relay of relaysToQuery) {
             window.__sharedFooter?.log('bridge', `query known relay ${relay}`, 'trace', 'checking');
           }
-          pool.subscribeMany(relaysToQuery, [{ limit: 200 }], {
+          pool.subscribeMany(relaysToQuery, { limit: 200 }, {
             onevent(event) {
               logRawNostrEvent('discovery event raw', event);
               recordRelayInfo(event);
@@ -1834,7 +1834,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
 
         const relaysSnapshot = prioritizeRelayUrls([...DEFAULT_RELAYS, ...currentRelayUrls()]);
         window.__sharedFooter?.log('bridge', `subscribing Nostr relays: ${relaysSnapshot.join(', ')}`, 'trace', 'checking');
-        pool.subscribeMany(relaysSnapshot, [{ limit: 500 }], {
+        pool.subscribeMany(relaysSnapshot, { limit: 500 }, {
           onevent(event) {
             logRawNostrEvent('relay event raw', event);
             // sourceRelay is unavailable from SimplePool's onevent callback;

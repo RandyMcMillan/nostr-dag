@@ -610,6 +610,9 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                         relay_peers.insert(relay_peer_id);
                         safe_println!("RELAY reserved peer={relay_peer_id}");
                     }
+                    SwarmEvent::Behaviour(BehaviourEvent::Relay(event)) => {
+                        safe_println!("RELAY event {:?}", event);
+                    }
                     SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(
                         gossipsub::Event::Message { propagation_source, message, .. },
                     )) => {
