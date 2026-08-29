@@ -1356,6 +1356,7 @@
         setRepoHealth(route.repo.name, available?.ok ? 'available' : 'unavailable');
         renderApp(data);
         setStatus('ready', 'available');
+        footer.log('git', `ready ${route.repo.name}`, 'info', 'available');
         footer.log('git', `refreshDetail complete ${route.repo.name} available=${available?.ok} ping=${probeMs ?? 'n/a'} ms`, 'debug');
       } catch (e) {
         setRepoHealth(route.repo.name, 'unavailable');
