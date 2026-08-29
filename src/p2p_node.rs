@@ -682,7 +682,7 @@ use crate::{
     create_ack_event,
     event::DAG_EVENT_KIND,
     p2p::{
-        encode_bridge_message, encode_payload_as_transfer_events, parse_transfer_event,
+        encode_bridge_message, encode_payload_as_transfer_events_chained, parse_transfer_event,
         TransferEventPayload,
     },
     Dag, InsertResult, PIP_ATTEST_KIND, PIP_JOIN_KIND, PIP_SEAL_KIND,
@@ -818,7 +818,7 @@ pub fn build_nip_pip_publication(
     path: Option<&str>,
 ) -> Result<NipPipPublication, NipPipPublishError> {
     let (manifest_event, slice_events) =
-        encode_payload_as_transfer_events(keys, root_id, payload, threshold, path)?;
+        encode_payload_as_transfer_events_chained(keys, root_id, payload, threshold, None, path)?;
     let manifest_message =
         encode_bridge_message(&manifest_event, "nostr->libp2p", relay_hints)?;
 
