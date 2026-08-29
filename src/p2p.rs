@@ -1321,6 +1321,57 @@ mod git_bare_pip_tests {
                     .and_then(|t| t.as_slice().get(1)).unwrap_or(&"?".to_string()));
         }
     }
+
+    /// WASM<->Rust parity: Rust reconstruct_payload must handle slices built by
+    /// the JS `packetizePayload` / `buildSliceEnvelope` format (root_id, seq,
+    /// total_slices, data array) by deserialising them into ProtocolSlice.
+    #[test]
+    fn reconstruct_from_js_format_slices() {
+        let payload = b"wasm rust parity test payload";
+        let root_id = "parity-root-js";
+        let threshold = 8;
+
+        // Simulate JS packetization: simple linear chunking.
+        let chunk_size = threshold.max(1);
+        let total_slices = (payload.len() + chunk_size - 1) / chunk_size;
+        let mut js_slices = Vec::new();
+        for seq in 0..total_slices {
+            let start = seq * chunk_size;
+            let end = (start + chunk_size).min(payload.len());
+            let data = payload[start..end].to_vec();
+            js_slices.push(serde_json::json!({
+                "protocol": "nostr-dag-transfer",
+                "version": 1,
+                "type": "slice",
+                "root_id": root_id,
+                "seq": seq,
+                "total_slices": total_slices,
+                "data": data,
+            }));
+        }
+
+        // Convert JS-format slices to ProtocolSlice (id = root_id for flat slices).
+        let protocol_slices: Vec<ProtocolSlice> = js_slices.iter().map(|js| {
+            let seq: u64 = js["seq"].as_u64().unwrap();
+            let total: u64 = js["total_slices"].as_u64().unwrap();
+            let data: Vec<u8> = serde_json::from_value(js["data"].clone()).unwrap();
+            ProtocolSlice {
+                id: root_id.to_string(),
+                header: PacketHeader { seq_num: seq, total_packets: total },
+                data,
+                is_parity: false,
+            }
+        }).collect();
+
+        let reconstructed = reconstruct_payload(&protocol_slices).unwrap();
+        assert_eq!(reconstructed.as_slice(), payload.as_slice());
+
+        println!("=== WASM<->Rust parity (Rust reconstruct from JS format) ===");
+        println!("  root_id      {root_id}");
+        println!("  payload      {} bytes", payload.len());
+        println!("  slices       {}", protocol_slices.len());
+        println!("  reconstructed {} bytes", reconstructed.len());
+    }
 }
 
 // ---------------------------------------------------------------------------
