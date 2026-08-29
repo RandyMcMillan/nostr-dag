@@ -1,8 +1,17 @@
+function formatBytes(n) {
+  if (n === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(n) / Math.log(k));
+  return `${parseFloat((n / k ** i).toFixed(1))} ${sizes[i]}`;
+}
+
 export function createPeersListController({
   peerListEl,
   peerCountEl,
   localPeers,
   remotePeers,
+  peerIO,
   loadPanelState,
   persistPanelState,
   scheduleBridgeCachePersist,
@@ -81,6 +90,10 @@ export function createPeersListController({
       const subtitle = pubkey || addr
         ? `<div class="bridge-peer-subtitle mono">${pubkey ? `<span class="bridge-peer-pubkey" title="${pubkey}">${pubkey}</span>` : ''}${addr ? `<span class="bridge-peer-addr" title="${addr}">${addr}</span>` : ''}</div>`
         : '';
+      const io = peerIO?.get(String(peer.peer_id));
+      const ioHtml = io
+        ? `<div class="bridge-peer-io mono"><span class="bridge-peer-io-label">↓</span> ${formatBytes(io.bytesIn)} <span class="muted">(${io.msgsIn} msgs)</span>  <span class="bridge-peer-io-label">↑</span> ${formatBytes(io.bytesOut)} <span class="muted">(${io.msgsOut} msgs)</span></div>`
+        : '';
       return `
       <details class="bridge-card bridge-peer" data-peer-key="${String(peerKey(peer)).replaceAll('"', '&quot;')}">
         <summary class="bridge-card-summary">
@@ -97,6 +110,7 @@ export function createPeersListController({
             </div>
           </div>
         </summary>
+        ${ioHtml}
         <pre class="bridge-peer-detail mono">${peer.detail ? String(formatPeerDetail(peer.detail)).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;') : 'no detail'}</pre>
       </details>
     `}).join('');

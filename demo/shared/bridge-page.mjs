@@ -300,6 +300,24 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     let peerPollTimer = null;
     const localPeers = new Map();
     const remotePeers = new Map();
+    /** @type {Map<string, {bytesIn:number,msgsIn:number,bytesOut:number,msgsOut:number}>} */
+    const peerIO = new Map();
+    function recordPeerIn(peerId, bytes) {
+      const id = String(peerId);
+      const rec = peerIO.get(id) || { bytesIn: 0, msgsIn: 0, bytesOut: 0, msgsOut: 0 };
+      rec.bytesIn += bytes;
+      rec.msgsIn += 1;
+      peerIO.set(id, rec);
+    }
+    function recordPeerOut(bytes) {
+      // Gossipsub broadcasts to all mesh peers; we track total outbound
+      // and attribute it to every known peer for a rough estimate.
+      for (const [id, rec] of peerIO) {
+        rec.bytesOut += bytes;
+        rec.msgsOut += 1;
+        peerIO.set(id, rec);
+      }
+    }
     const bridgeVerificationQueue = [];
     const bridgeVerificationSeen = new Map();
     const bridgeVerificationBackoff = new Map();
@@ -1396,6 +1414,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       peerCountEl,
       localPeers,
       remotePeers,
+      peerIO,
       loadPanelState,
       persistPanelState,
       scheduleBridgeCachePersist,
@@ -1495,7 +1514,9 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         return;
       }
       const payload = buildBridgeEnvelope(event, direction, currentRelayUrls(), { ...meta, topic });
-      await node.services.pubsub.publish(topic, encoder.encode(JSON.stringify(payload)));
+      const encoded = encoder.encode(JSON.stringify(payload));
+      await node.services.pubsub.publish(topic, encoded);
+      recordPeerOut(encoded.length || encoded.byteLength || 0);
       metrics.nostrToLibp2p += direction === 'nostr->libp2p' ? 1 : 0;
       refreshMetrics();
       scheduleBridgeCachePersist();
@@ -1735,6 +1756,11 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         window.__sharedFooter?.log('bridge', `subscribed libp2p pubsub ${topic}`, 'trace', 'available');
         node.services.pubsub.addEventListener('message', (evt) => {
           const payload = evt.detail?.data;
+          const fromPeer = evt.detail?.from?.toString?.() || evt.detail?.from || '';
+          if (fromPeer && payload) {
+            const byteLength = payload.length || payload.byteLength || 0;
+            recordPeerIn(fromPeer, byteLength);
+          }
           try {
             const message = JSON.parse(decoder.decode(payload));
             void handleLibp2pMessage(message);
