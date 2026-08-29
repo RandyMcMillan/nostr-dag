@@ -12,6 +12,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     import { createPeersListController } from './peers-list.mjs';
     import { extractBridgeRoundTripStartMs } from './bridge-roundtrip.mjs';
     import { createRelaysListController } from './relays-list.mjs';
+    import { neventEncode } from '../vendor/nostr-tools.mjs';
     import { getRecentItems } from './bridge-recent-query.mjs';
     import { persistBridgeCacheState, restoreBridgeCacheState } from './bridge-cache.mjs';
     import {
@@ -335,8 +336,8 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
 
     function setStatus(text, state = 'checking') {
       bridgeStatusEl.className = `status status-${state}`;
-      bridgeStatusEl.innerHTML = `<span class="status-dot"></span><span></span>`;
-      bridgeStatusEl.querySelector('span:last-child').textContent = text;
+      bridgeStatusEl.innerHTML = `<span class="status-dot"></span>`;
+      bridgeStatusEl.title = text;
       window.__sharedFooter?.log('bridge', text, state === 'available' ? 'info' : state, state);
     }
 
@@ -423,6 +424,14 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       return escapeHtml(JSON.stringify(value, null, 2));
     }
 
+    function eventDetailUrl(eventId) {
+      try {
+        return `https://njump.me/${neventEncode({ id: eventId })}`;
+      } catch {
+        return '';
+      }
+    }
+
     function scheduleRecentListsRender() {
       if (recentListsRenderScheduled) return;
       recentListsRenderScheduled = true;
@@ -460,6 +469,13 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         const createdAtText = Number.isFinite(createdAt) ? String(Math.trunc(createdAt)) : '';
         const bookmarkedSnapshot = getBookmarkedSnapshot(item?.id);
         const event = item?.event || bookmarkedSnapshot?.event || {};
+        const eventUrl = eventDetailUrl(event?.id || item?.id || '');
+        const eventLink = eventUrl
+          ? `<a class="bridge-recent-event-link" href="${escapeHtml(eventUrl)}" target="_blank" rel="noreferrer noopener" title="Open event on njump">↗</a>`
+          : '';
+        const eventIdLink = eventUrl
+          ? `<a class="bridge-event-id-link" href="${escapeHtml(eventUrl)}" target="_blank" rel="noreferrer noopener">${escapeHtml(event?.id || 'n/a')}</a>`
+          : escapeHtml(event?.id || 'n/a');
         return `
           <details class="bridge-recent-event"${item?.id && openItems.has(item.id) ? ' open' : ''}>
             <summary class="bridge-recent-summary">
@@ -470,6 +486,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
                 </span>
                 <span class="bridge-recent-summary-bottom mono">${escapeHtml(createdAtText)}</span>
               </span>
+              ${eventLink}
               <button
                 type="button"
                 class="bridge-recent-bookmark${isRecentBookmarked(item?.id) ? ' is-bookmarked' : ''}"
@@ -480,7 +497,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
             </summary>
             <div class="bridge-event-detail bridge-recent-detail">
               <div class="small muted" style="margin-bottom:8px;">${escapeHtml(event?.kind != null ? `kind ${event.kind}` : 'Nostr event')}</div>
-              <div class="mono" style="margin-bottom:8px;">${escapeHtml(event?.id || 'n/a')}</div>
+              <div class="mono" style="margin-bottom:8px;">${eventIdLink}</div>
               <div class="small" style="margin-bottom:8px;">${escapeHtml(event?.pubkey || 'n/a')}</div>
               <div class="small muted" style="margin-bottom:8px;">${escapeHtml(createdAtText)}</div>
               <pre class="mono" style="margin:0;">${escapeJson(event || {})}</pre>
@@ -501,6 +518,13 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
           const item = visibleItems.find((entry) => entry?.id === id) || null;
           toggleRecentBookmark(id, item);
         });
+      });
+      container.querySelectorAll('.bridge-recent-event-link').forEach((link) => {
+        const stop = (event) => {
+          event.stopPropagation();
+        };
+        link.addEventListener('pointerdown', stop);
+        link.addEventListener('mousedown', stop);
       });
       container.querySelectorAll('details.bridge-recent-event').forEach((details, index) => {
         details.addEventListener('toggle', () => {
@@ -1310,6 +1334,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       window.__sharedFooter?.log('bridge', `accumulate ${urls.size} relays from kind ${event.kind} ${event.pubkey}`, 'trace', 'checking');
       relayCatalog.set(event.pubkey, {
         owner: event.pubkey,
+        event_id: event.id || '',
         kind: event.kind,
         relays: [...urls],
         updated_at: Date.now(),

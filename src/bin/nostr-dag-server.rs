@@ -328,12 +328,12 @@ async fn handle_connection(
     http_client: Arc<reqwest::Client>,
     mut shutdown_rx: watch::Receiver<()>,
 ) -> io::Result<()> {
-    let request = read_http_request(&mut stream, &mut shutdown_rx).await?;
-    if request.is_empty() {
+    let request_bytes = read_http_request(&mut stream, &mut shutdown_rx).await?;
+    if request_bytes.is_empty() {
         return Ok(());
     }
 
-    let request = String::from_utf8_lossy(&request);
+    let request = String::from_utf8_lossy(&request_bytes);
     let mut lines = request.lines();
     let request_line = lines.next().unwrap_or_default();
     let mut parts = request_line.split_whitespace();
@@ -342,6 +342,7 @@ async fn handle_connection(
     let path = strip_query(request_target);
     debug!(%method, %path, "request received");
     let body = request_body(&request);
+    let body_bytes = request_body_bytes(&request_bytes);
 
     let head_only = method == "HEAD";
     let directory_redirect = if (method == "GET" || method == "HEAD")
@@ -513,6 +514,13 @@ async fn handle_connection(
                 )
             }
         }
+    } else if path.starts_with("/proxy/") {
+        tokio::select! {
+            result = handle_proxy(request_target, method, &body_bytes, &http_client, head_only) => result,
+            _ = shutdown_rx.changed() => {
+                return Err(io::Error::new(io::ErrorKind::Interrupted, "shutdown requested"));
+            }
+        }
     } else {
         match route_path(site_dir, path).await {
             Ok((body, content_type)) => {
@@ -547,6 +555,88 @@ async fn handle_connection(
     stream.write_all(&response).await?;
     stream.shutdown().await?;
     Ok(())
+}
+
+async fn handle_proxy(
+    request_target: &str,
+    method: &str,
+    body: &[u8],
+    http_client: &reqwest::Client,
+    head_only: bool,
+) -> Vec<u8> {
+    if method == "OPTIONS" {
+        let response = format!(
+            "HTTP/1.1 204 No Content\r\n\
+             Access-Control-Allow-Origin: *\r\n\
+             Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n\
+             Access-Control-Allow-Headers: *\r\n\
+             Access-Control-Max-Age: 86400\r\n\
+             Content-Length: 0\r\n\
+             Connection: close\r\n\r\n"
+        );
+        return response.into_bytes();
+    }
+
+    let target = request_target.strip_prefix("/proxy/").unwrap_or(request_target);
+    let target = if target.starts_with("http://") || target.starts_with("https://") {
+        target.to_string()
+    } else {
+        format!("https://{target}")
+    };
+
+    let request_builder = if method == "POST" {
+        http_client.post(&target).body(body.to_vec())
+    } else {
+        http_client.get(&target)
+    };
+
+    match request_builder.send().await {
+        Ok(resp) => {
+            let status = resp.status().as_u16();
+            let reason = resp.status().canonical_reason().unwrap_or("OK");
+            let content_type = resp
+                .headers()
+                .get("content-type")
+                .and_then(|ct| ct.to_str().ok())
+                .map(|s| s.to_string());
+            let resp_bytes = resp.bytes().await.unwrap_or_default().to_vec();
+
+            let mut headers = format!(
+                "HTTP/1.1 {status} {reason}\r\n\
+                 Access-Control-Allow-Origin: *\r\n\
+                 Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n\
+                 Access-Control-Allow-Headers: *\r\n\
+                 Content-Length: {}\r\n\
+                 Connection: close\r\n",
+                if head_only { 0 } else { resp_bytes.len() }
+            );
+
+            if let Some(ct) = content_type {
+                headers.push_str(&format!("Content-Type: {ct}\r\n"));
+            }
+
+            headers.push_str("\r\n");
+            let mut response = headers.into_bytes();
+            if !head_only {
+                response.extend_from_slice(&resp_bytes);
+            }
+            response
+        }
+        Err(err) => {
+            trace!(?err, target, "proxy request failed");
+            let body_text = format!("Proxy error: {err}");
+            let response = format!(
+                "HTTP/1.1 502 Bad Gateway\r\n\
+                 Access-Control-Allow-Origin: *\r\n\
+                 Content-Type: text/plain; charset=utf-8\r\n\
+                 Content-Length: {}\r\n\
+                 Connection: close\r\n\r\n\
+                 {body_text}",
+                body_text.len()
+            );
+            response.into_bytes()
+        }
+    }
 }
 
 async fn read_http_request(
@@ -602,6 +692,14 @@ fn request_body(request: &str) -> &str {
         .split_once("\r\n\r\n")
         .map(|(_, body)| body)
         .unwrap_or("")
+}
+
+fn request_body_bytes(request: &[u8]) -> &[u8] {
+    request
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .map(|pos| &request[pos + 4..])
+        .unwrap_or(&[])
 }
 
 fn handle_logger_post(body: &str, logger_store: &Arc<LoggerStore>) -> Result<(), RouteError> {

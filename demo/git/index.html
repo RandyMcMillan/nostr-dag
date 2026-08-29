@@ -76,6 +76,7 @@
     const faviconCache = new Map();
 
     const CORS_PROXIES = [
+      'http://127.0.0.1:3000/proxy/',
       'https://cors.isomorphic-git.org',
       'https://corsproxy.io/?',
     ];
@@ -529,6 +530,31 @@
       return gitProgressReporters.get(key);
     }
 
+    async function wipeRepo(repo) {
+      footer.log('git', `${repo.name} wiping cached clone`, 'info');
+      repoHealth.delete(repo.name);
+      repoPing.delete(repo.name);
+      repoSource.delete(repo.name);
+      const dir = repo.dir;
+      async function rmrf(path) {
+        try {
+          const stat = await fs.promises.stat(path);
+          if (stat.isDirectory()) {
+            const items = await fs.promises.readdir(path);
+            for (const item of items) {
+              await rmrf(`${path}/${item}`);
+            }
+            await fs.promises.rmdir(path);
+          } else {
+            await fs.promises.unlink(path);
+          }
+        } catch (e) {
+          // ignore missing paths
+        }
+      }
+      await rmrf(dir);
+    }
+
     async function ensureRepo(repo, route = null) {
       const url = repo.url;
       const dir = repo.dir;
@@ -677,9 +703,12 @@
         footer.log('git', `${repo.name} listTags failed: ${e.message}`, 'warn');
         return [];
       });
+      const cache = loadRepoCache();
+      const cachedTags = cache[repo.name]?.tags || [];
       const tags = [...new Set([
         ...localTags,
         ...remoteTagNames(serverRefs),
+        ...cachedTags,
       ])];
       tags.sort((a, b) => a.localeCompare(b));
       const ref = resolveRefSelection(branches, tags, route || {});
@@ -722,6 +751,7 @@
         const retryTags = [...new Set([
           ...retryLocalTags,
           ...remoteTagNames(retryServerRefs),
+          ...cachedTags,
         ])];
         retryTags.sort((a, b) => a.localeCompare(b));
         for (const candidate of refCandidatesForRoute(route, branches, retryTags)) {
@@ -1137,7 +1167,7 @@
 
       reposEl.querySelectorAll('[data-refresh-repo]').forEach((button) => {
         button.addEventListener('click', () => {
-          void refreshOneRepo(button.getAttribute('data-refresh-repo'));
+          void refreshOneRepo(button.getAttribute('data-refresh-repo'), { force: true });
         });
       });
       reposEl.querySelectorAll('[data-view-repo]').forEach((button) => {
@@ -1197,15 +1227,18 @@
       });
     }
 
-    async function refreshOneRepo(repoName) {
+    async function refreshOneRepo(repoName, { force = false } = {}) {
       const repo = repos.find((entry) => entry.name === repoName);
       if (!repo) return;
       const route = getRouteContext(repos).repo?.name === repo.name ? getRouteContext(repos) : null;
-      footer.log('git', `refreshOneRepo start ${repo.name} route=${route ? 'yes' : 'no'}`, 'debug');
+      footer.log('git', `refreshOneRepo start ${repo.name} force=${force} route=${route ? 'yes' : 'no'}`, 'debug');
       try {
         setRepoStatus(repo.name, 'refreshing...');
         if (route) setRepoHealth(repo.name, 'checking');
         setRepoPing(repo.name, null);
+        if (force) {
+          await wipeRepo(repo);
+        }
         const probeStart = performance.now();
         const probe = route ? probeRemoteHost(repo).catch(() => ({ ok: false, durationMs: null })) : null;
         await ensureRepo(repo, route);
@@ -1235,10 +1268,10 @@
       }
     }
 
-    async function refreshList() {
+    async function refreshList({ force = false } = {}) {
       try {
         setStatus('loading repos...', 'checking');
-        footer.log('git', `refreshing ${repos.length} repos`, 'debug');
+        footer.log('git', `refreshing ${repos.length} repos force=${force}`, 'debug');
         repos.forEach((repo) => {
           setRepoStatus(repo.name, 'refreshing...');
           setRepoHealth(repo.name, 'checking');
@@ -1258,6 +1291,9 @@
           try {
             footer.log('git', `probing ${repo.name}`, 'trace');
             setRepoPing(repo.name, null);
+            if (force) {
+              await wipeRepo(repo);
+            }
             const probeStart = performance.now();
             const probe = probeRemoteHost(repo).catch(() => false);
             footer.log('git', `ensuring ${repo.name}`, 'debug');
@@ -1341,7 +1377,7 @@
       }
     }
 
-    refreshBtn.addEventListener('click', () => { void refreshList(); });
+    refreshBtn.addEventListener('click', () => { void refreshList({ force: true }); });
     renderApp();
     void refresh();
   </script>

@@ -5,6 +5,7 @@ import {
   normalizeRelayUrl,
   sourceForRelay,
 } from './bridge-relay-data.mjs';
+import { neventEncode } from '../vendor/nostr-tools.mjs';
 
 const detailEl = document.getElementById('relayDetail');
 const relayParam = new URL(window.location.href).searchParams.get('relay');
@@ -16,6 +17,14 @@ function escapeHtml(value) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;');
+}
+
+function eventDetailUrl(eventId) {
+  try {
+    return `https://njump.me/${neventEncode({ id: eventId })}`;
+  } catch {
+    return '';
+  }
 }
 
 function supportsNip34GitKinds(info) {
@@ -100,7 +109,11 @@ function renderRelayDetail(relay, info, source, loading) {
         ${countries ? detailSectionHtml('Relay countries', `<div class="bridge-relay-grid">${countries}</div>`) : ''}
         ${detailSectionHtml('Raw NIP-11', `<pre class="bridge-relay-pre">${rawJson}</pre>`)}
       ` : loading ? `<div class="small muted">Loading NIP-11 metadata…</div>` : `<div class="small muted">NIP-11 metadata not loaded yet.</div>`}
-      ${source && source !== 'default' ? `<div class="bridge-relay-learned small muted">Learned from ${escapeHtml(source)}</div>` : ''}
+      ${source && source !== 'default' ? (() => {
+        const url = eventDetailUrl(source);
+        const link = url ? `<a class="bridge-relay-source" href="${escapeHtml(url)}" target="_blank" rel="noreferrer noopener">${escapeHtml(source)}</a>` : escapeHtml(source);
+        return `<div class="bridge-relay-learned small muted">Learned from ${link}</div>`;
+      })() : ''}
     </div>
   `;
 }

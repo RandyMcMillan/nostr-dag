@@ -1,3 +1,5 @@
+import { neventEncode } from '../vendor/nostr-tools.mjs';
+
 function escapeHtml(value) {
   return String(value)
     .replaceAll('&', '&amp;')
@@ -5,6 +7,14 @@ function escapeHtml(value) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;');
+}
+
+function eventDetailUrl(eventId) {
+  try {
+    return `https://njump.me/${neventEncode({ id: eventId })}`;
+  } catch {
+    return '';
+  }
 }
 
 export function createRelaysListController({
@@ -44,7 +54,11 @@ export function createRelaysListController({
       Number.isFinite(Number(info.ping_ms)) ? `${Math.round(Number(info.ping_ms))} ms` : '',
     ].filter(Boolean) : [];
     const learnedFrom = source && source !== 'default'
-      ? `<div class="bridge-relay-learned small muted">Learned from ${escapeHtml(source)}</div>`
+      ? (() => {
+          const url = eventDetailUrl(source);
+          const link = url ? `<a class="bridge-relay-source" href="${escapeHtml(url)}" target="_blank" rel="noreferrer noopener">${escapeHtml(source)}</a>` : escapeHtml(source);
+          return `<div class="bridge-relay-learned small muted">Learned from ${link}</div>`;
+        })()
       : '';
     return `
       <a class="bridge-card bridge-relay-card bridge-relay-link" href="${escapeHtml(`./relay.html?relay=${encodeURIComponent(relay)}`)}">
@@ -156,6 +170,7 @@ export function createRelaysListController({
     log?.('bridge', `accumulate ${urls.size} relays from kind ${event.kind} ${event.pubkey}`, 'trace', 'checking');
     relayCatalog.set(event.pubkey, {
       owner: event.pubkey,
+      event_id: event.id || '',
       kind: event.kind,
       relays: [...urls],
       updated_at: Date.now(),

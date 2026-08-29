@@ -54,6 +54,7 @@ export function loadBridgeCache() {
         if (!entry?.owner || !Array.isArray(entry.relays)) continue;
         relayCatalog.set(entry.owner, {
           owner: entry.owner,
+          event_id: entry.event_id || '',
           kind: entry.kind ?? 0,
           relays: [...new Set(entry.relays.map((relay) => normalizeRelayUrl(relay)).filter(Boolean))],
           updated_at: entry.updated_at || Date.now(),
@@ -77,7 +78,7 @@ export function loadBridgeCache() {
 
 export function sourceForRelay(relay, relayCatalog) {
   for (const entry of relayCatalog.values()) {
-    if ((entry.relays || []).includes(relay)) return entry.owner || 'unknown';
+    if ((entry.relays || []).includes(relay)) return entry.event_id || entry.owner || 'unknown';
   }
   return '';
 }

@@ -13,7 +13,7 @@ function normalizeState(text, fallback = 'idle') {
     value.includes('writing') ||
     value.includes('committing')
   ) return 'checking';
-  if (value.includes('ready') || value.includes('done') || value.includes('available') || value.includes('restored')) return 'available';
+  if (value.includes('ready') || value.includes('done') || value.includes('complete') || value.includes('success') || value.includes('ok') || value.includes('finished') || value.includes('available') || value.includes('restored')) return 'available';
   return fallback;
 }
 
@@ -897,19 +897,23 @@ export function createLoggerFooter(root, options = {}) {
   function commitBatch(entries) {
     if (!entries.length) return;
 
-    let lastState = null;
-    let lastTitle = null;
+    const statePriority = { available: 3, checking: 2, idle: 1, unavailable: 0 };
+    let bestState = null;
+    let bestTitle = null;
 
     for (const entry of entries) {
       appendAcceptedLog(entry);
       mirrorLogEntry(entry);
-      lastState = entry.state;
-      lastTitle = entry.label ? `${entry.label}: ${entry.text}` : String(entry.text);
+      const p = statePriority[entry.state] ?? 0;
+      if (!bestState || p > (statePriority[bestState] ?? 0)) {
+        bestState = entry.state;
+        bestTitle = entry.label ? `${entry.label}: ${entry.text}` : String(entry.text);
+      }
     }
 
     metrics.flushedEntries += entries.length;
-    if (lastState !== null) {
-      setState(lastState, lastTitle);
+    if (bestState !== null) {
+      setState(bestState, bestTitle);
     }
 
     appendEntriesToVisibleLog(entries);

@@ -39,6 +39,10 @@ export function saveRepoCache(cache, storageKey = DEFAULT_REPO_CACHE_KEY) {
 
 export function cacheRepoData(repoName, data, storageKey = DEFAULT_REPO_CACHE_KEY) {
   const cache = loadRepoCache(storageKey);
+  const existing = cache[repoName];
+  if (existing?.tags?.length && (!data.tags || !data.tags.length)) {
+    data = { ...data, tags: existing.tags };
+  }
   cache[repoName] = data;
   saveRepoCache(cache, storageKey);
 }
