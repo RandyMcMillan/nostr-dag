@@ -515,8 +515,13 @@ async fn handle_connection(
             }
         }
     } else if path.starts_with("/proxy/") {
+        let proxy_headers = vec![
+            header_from_request(&request_bytes, "content-type"),
+            header_from_request(&request_bytes, "accept"),
+            header_from_request(&request_bytes, "git-protocol"),
+        ];
         tokio::select! {
-            result = handle_proxy(request_target, method, &body_bytes, &http_client, head_only) => result,
+            result = handle_proxy(request_target, method, &body_bytes, &http_client, head_only, proxy_headers) => result,
             _ = shutdown_rx.changed() => {
                 return Err(io::Error::new(io::ErrorKind::Interrupted, "shutdown requested"));
             }
@@ -563,6 +568,7 @@ async fn handle_proxy(
     body: &[u8],
     http_client: &reqwest::Client,
     head_only: bool,
+    proxy_headers: Vec<Option<String>>,
 ) -> Vec<u8> {
     if method == "OPTIONS" {
         let response = format!(
@@ -584,11 +590,20 @@ async fn handle_proxy(
         format!("https://{target}")
     };
 
-    let request_builder = if method == "POST" {
+    let mut request_builder = if method == "POST" {
         http_client.post(&target).body(body.to_vec())
     } else {
         http_client.get(&target)
     };
+    if let Some(Some(ct)) = proxy_headers.get(0) {
+        request_builder = request_builder.header(reqwest::header::CONTENT_TYPE, ct);
+    }
+    if let Some(Some(acc)) = proxy_headers.get(1) {
+        request_builder = request_builder.header(reqwest::header::ACCEPT, acc);
+    }
+    if let Some(Some(gp)) = proxy_headers.get(2) {
+        request_builder = request_builder.header("Git-Protocol", gp);
+    }
 
     match request_builder.send().await {
         Ok(resp) => {
@@ -700,6 +715,23 @@ fn request_body_bytes(request: &[u8]) -> &[u8] {
         .position(|w| w == b"\r\n\r\n")
         .map(|pos| &request[pos + 4..])
         .unwrap_or(&[])
+}
+
+fn header_from_request(request_bytes: &[u8], name: &str) -> Option<String> {
+    let header_end = request_bytes.windows(4).position(|w| w == b"\r\n\r\n")? + 4;
+    let headers = std::str::from_utf8(&request_bytes[..header_end]).ok()?;
+    let name_lower = name.to_lowercase();
+    for line in headers.lines() {
+        if line.is_empty() {
+            break;
+        }
+        if let Some((key, value)) = line.split_once(':') {
+            if key.trim().eq_ignore_ascii_case(&name_lower) {
+                return Some(value.trim().to_string());
+            }
+        }
+    }
+    None
 }
 
 fn handle_logger_post(body: &str, logger_store: &Arc<LoggerStore>) -> Result<(), RouteError> {
