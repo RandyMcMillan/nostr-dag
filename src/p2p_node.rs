@@ -471,6 +471,28 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                                     .join(" | ")
                             );
                         }
+                        // Detect relay support and try to obtain a reservation.
+                        let hop_str = relay::HOP_PROTOCOL_NAME.to_string();
+                        let protocols: Vec<String> = info.protocols.iter().map(|p| p.to_string()).collect();
+                        let supports_relay = protocols.iter().any(|p| p == &hop_str);
+                        if protocols.iter().any(|p| p.contains("circuit") || p.contains("relay")) {
+                            println!("RELAY protocols peer={} protocols={}", peer_id, protocols.join(", "));
+                        }
+                        if supports_relay && !relay_peers.contains(&peer_id) {
+                            for addr in &info.listen_addrs {
+                                let mut base = addr.clone();
+                                if !base.iter().any(|p| matches!(p, Protocol::P2p(_))) {
+                                    base.push(Protocol::P2p(peer_id));
+                                }
+                                let circuit = base.with(Protocol::P2pCircuit);
+                                println!("RELAY try reservation via peer={} circuit={circuit}", peer_id);
+                                if let Err(err) = swarm.listen_on(circuit) {
+                                    println!("RELAY reservation request failed peer={} err={err:?}", peer_id);
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
                     }
                     SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(gossipsub::Event::Subscribed {
                         peer_id,
