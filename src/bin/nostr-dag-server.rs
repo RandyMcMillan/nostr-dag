@@ -177,12 +177,45 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             match cmd.spawn()
             {
                 Ok(mut child) => {
+                    let peer_store_for_child = Arc::clone(&peer_store);
                     if let Some(stdout) = child.stdout.take() {
                         tokio::spawn(async move {
                             let reader = BufReader::new(stdout);
                             let mut lines = reader.lines();
+                            let mut peer_id = String::new();
+                            let mut peer_addrs: Vec<String> = Vec::new();
                             while let Ok(Some(line)) = lines.next_line().await {
                                 let trimmed = line.trim();
+                                if let Some(id) = trimmed.strip_prefix("READY peer_id=") {
+                                    peer_id = id.split_whitespace().next().unwrap_or(id).to_string();
+                                    let entry = PeerEntry {
+                                        peer_id: peer_id.clone(),
+                                        kind: "native".to_string(),
+                                        path: "/".to_string(),
+                                        detail: Some(trimmed.to_string()),
+                                        source: Some("localhost".to_string()),
+                                        updated_at: now_ms(),
+                                    };
+                                    peer_store_for_child.upsert(entry);
+                                }
+                                if trimmed.starts_with("LISTENING ") {
+                                    if let Some(addr) = trimmed.strip_prefix("LISTENING ") {
+                                        if !peer_addrs.iter().any(|a| a == addr) {
+                                            peer_addrs.push(addr.to_string());
+                                        }
+                                    }
+                                    if !peer_id.is_empty() {
+                                        let entry = PeerEntry {
+                                            peer_id: peer_id.clone(),
+                                            kind: "native".to_string(),
+                                            path: "/".to_string(),
+                                            detail: Some(format!("addrs={}", peer_addrs.join(", "))),
+                                            source: Some("localhost".to_string()),
+                                            updated_at: now_ms(),
+                                        };
+                                        peer_store_for_child.upsert(entry);
+                                    }
+                                }
                                 if trimmed.starts_with("READY ")
                                     || trimmed.starts_with("LISTENING ")
                                     || trimmed.starts_with("DIAL ")
