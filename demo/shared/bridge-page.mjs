@@ -1156,8 +1156,12 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         const peers = await response.json();
         // Build a set of keys currently reported by the local server.
         const reportedKeys = new Set();
+        const currentPeerId = node?.peerId?.toString?.() || globalThis.__currentLibp2pPeerId || '';
         for (const peer of Array.isArray(peers) ? peers : []) {
-          upsertPeer('localhost', peer);
+          // Skip the browser's own peer so it doesn't appear twice (localPeers already has it).
+          if (peer.peer_id === currentPeerId) continue;
+          // Force source to 'localhost' so pollPeers can prune stale entries correctly.
+          upsertPeer('localhost', { ...peer, source: 'localhost' });
           reportedKeys.add(`${peer.peer_id}:${peer.path || '/'}:${peer.kind || 'unknown'}`);
         }
         // Remove localhost/http peers that have disappeared from the report.

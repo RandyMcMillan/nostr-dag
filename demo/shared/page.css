@@ -547,6 +547,29 @@ button:hover, a.button:hover { background:var(--button-hover); }
   overflow-wrap:anywhere;
 }
 
+.bridge-peer-title-wrap {
+  flex:1 1 auto;
+  min-width:0;
+}
+
+.bridge-peer-subtitle {
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px 12px;
+  margin-top:4px;
+  font-size:11px;
+  color:var(--muted);
+  line-height:1.35;
+}
+
+.bridge-peer-pubkey,
+.bridge-peer-addr {
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  max-width:100%;
+}
+
 .bridge-peer-meta {
   display:flex;
   flex-wrap:wrap;
@@ -832,6 +855,12 @@ button:hover, a.button:hover { background:var(--button-hover); }
     white-space:nowrap;
   }
   .footer-log { max-height:28vh; }
+  .bridge-peer { padding:10px; }
+  .bridge-peer-head { flex-direction:column; align-items:flex-start; gap:8px; }
+  .bridge-peer-meta { justify-content:flex-start; width:100%; }
+  .bridge-peer-title { font-size:12px; }
+  .bridge-peer-subtitle { gap:4px 8px; }
+  .bridge-peer-pubkey, .bridge-peer-addr { max-width:100%; }
 }
 
 
