@@ -4,21 +4,33 @@ import { createSharedHeader } from './page-header.mjs';
 import { initSharedNetworkTime } from './network-time.mjs';
 
 function createFooterProxy(buffer) {
+  const pendingLevel = { value: null };
+  const pendingState = { value: null, text: null };
   return {
     log(...args) {
-      buffer.push(args);
+      buffer.push({ type: 'log', args });
     },
-    setState() {},
-    setLevel() {},
+    setState(state, text) {
+      pendingState.value = state;
+      pendingState.text = text;
+    },
+    setLevel(level) {
+      pendingLevel.value = level;
+    },
     close() {},
     open() {},
+    __pendingLevel: pendingLevel,
+    __pendingState: pendingState,
   };
 }
 
 function flushFooterBuffer(footer, buffer) {
   if (!footer || !buffer?.length) return;
   while (buffer.length) {
-    footer.log(...buffer.shift());
+    const entry = buffer.shift();
+    if (entry?.type === 'log') {
+      footer.log(...entry.args);
+    }
   }
 }
 
@@ -53,11 +65,18 @@ export function bootstrapDemoPageChrome({
   const initFooter = () => {
     if (!footerRoot) return globalThis[footerApiName];
     if (globalThis[footerApiName]?.__demoFooterReady === true) return globalThis[footerApiName];
+    const proxy = globalThis[footerApiName];
     const footer = createLoggerFooter(footerRoot, footerOptions);
     footer.__demoFooterReady = true;
     footer.__demoFooterInitScheduled = true;
     globalThis[footerApiName] = footer;
     flushFooterBuffer(footer, buffer);
+    if (proxy?.__pendingLevel?.value !== null) {
+      footer.setLevel(proxy.__pendingLevel.value);
+    }
+    if (proxy?.__pendingState?.value !== null) {
+      footer.setState(proxy.__pendingState.value, proxy.__pendingState.text);
+    }
     if (closeFooter) footer.close();
     return footer;
   };
