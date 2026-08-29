@@ -1,6 +1,6 @@
 [package]
 name = "nostr-dag"
-version = "0.18.0"
+version = "0.18.1"
 edition = "2021"
 repository = "https://github.com/RandyMcMillan/nostr-dag"
 license = "MIT"
@@ -67,7 +67,7 @@ wasm = [
     "dep:serde-wasm-bindgen",
     "dep:serde_json",
 ]
-p2p = ["native", "dep:libp2p"]
+p2p = ["native", "dep:libp2p", "dep:rcgen"]
 p2p-wasm = ["wasm", "dep:libp2p", "dep:futures", "dep:js-sys"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
@@ -111,6 +111,7 @@ git2 = { version = "0.20", optional = true }
 js-sys = { version = "0.3", optional = true }
 nostr-relay-pool = { version = "0.44.3", optional = true }
 rand = "0.8"
+rcgen = { version = "0.11", optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
 rusqlite = { version = "0.40.2", features = ["bundled"], optional = true }
 serde = { version = "1", features = ["derive"], optional = true }

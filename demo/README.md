@@ -94,11 +94,11 @@ See `pollPeers()` in `bridge-page.mjs` for the implementation.
 
 Browsers block **active mixed content**: an HTTPS page cannot open
 unencrypted `ws://` WebSocket connections. The bridge page runs on
-`https://*.github.io`, so any libp2p multiaddr containing `/ws` (unencrypted
-WebSocket) is filtered out before dialing.  The `secureWsDialFilter` in
-`shared/libp2p-stack.mjs` strips `/ws` addrs when
-`location.protocol === 'https:'`, leaving only `/wss` (secure WebSocket),
-WebRTC, and circuit-relay paths.
+`https://*.github.io`, so any libp2p multiaddr containing plain `/ws`
+(unencrypted WebSocket) is filtered out before dialing.  The
+`secureWsDialFilter` in `shared/libp2p-stack.mjs` strips `/ws` addrs when
+`location.protocol === 'https:'`, leaving `/tls/ws`, `/wss`, WebRTC, and
+circuit-relay paths.
 
 This prevents Chrome from showing console warnings or marking the page as
 "Not Secure" due to blocked `ws://` dials to localhost peers.
@@ -114,10 +114,10 @@ Browsers cannot open raw TCP sockets.  The native peer listens on both
 | Feature | Local (`127.0.0.1:3000`) | GitHub Pages |
 |---------|--------------------------|--------------|
 | `/peers` endpoint | Available (local server reports peer state) | 404 — peers are discovered purely via libp2p |
-| Native peer visibility | Direct WebSocket + relay circuit | Only via relay circuit through bootstrap mesh |
+| Native peer visibility | Direct WS/WSS + relay circuit | Direct WSS (after cert acceptance) + relay circuit |
 | CORS proxy fallback | Works if proxy is up | Same — still subject to proxy availability |
 | Bootstrap peers | DNS + IP + WSS | WSS only (browser cannot dial raw TCP) |
-| Mixed-content filter | No (`http://` page) | Yes — `ws://` dials are blocked |
+| Mixed-content filter | No (`http://` page) | Yes — plain `ws://` dials are blocked; `/tls/ws` and `/wss` allowed |
 
 Because GH Pages cannot dial local TCP or unencrypted WS addresses, the only
 path for a GH Pages browser to reach a developer's laptop is:
@@ -131,6 +131,30 @@ Browser receives circuit addr → dials circuit
 This path works but can take 30–120 s for gossipsub mesh formation and
 presence propagation. The peer list is kept intentionally persistent so that
 once a peer is discovered it remains visible.
+
+### Direct WSS from GH Pages to localhost
+
+Since v0.18.1 the native peer also listens on `/tls/ws` (WSS) using a
+self-signed TLS certificate generated via `rcgen` on startup.  When the
+bridge page receives a presence broadcast it now explicitly dials direct
+`/tls/ws` and `/wss` addresses in addition to circuit addresses.
+
+**Self-signed certificate acceptance:** Browsers refuse WebSocket
+connections to a self-signed cert until the user explicitly trusts it.
+Before opening the GH Pages bridge, visit the local WSS listener directly
+once, e.g.:
+
+```
+https://127.0.0.1:64105/
+```
+
+(The actual port is logged as `LISTENING /ip4/127.0.0.1/tcp/XXXXX/tls/ws`.)
+Click "Advanced → Proceed" (Chrome) or "Accept the Risk" (Firefox).  After
+that, the GH Pages bridge can dial `wss://127.0.0.1:XXXXX/` without mixed-content
+errors.
+
+You can disable WSS with `WSS_DISABLE=1` if you only need plaintext WS for
+local `http://` development.
 
 ## Vendored Dependencies
 

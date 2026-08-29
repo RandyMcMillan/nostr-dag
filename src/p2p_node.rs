@@ -4,11 +4,13 @@ use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 #[cfg(feature = "p2p")]
 use libp2p::{
-    autonat, dcutr, futures::StreamExt, gossipsub::{self, IdentTopic, MessageAuthenticity},
+    autonat, dcutr, dns, futures::StreamExt, gossipsub::{self, IdentTopic, MessageAuthenticity},
     identify, mdns, multiaddr::Protocol, noise, relay,
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, yamux, Multiaddr, PeerId,
 };
+#[cfg(feature = "p2p")]
+use libp2p::core::{muxing::StreamMuxerBox, upgrade::Version, Transport};
 #[cfg(feature = "p2p")]
 use tokio::io::{AsyncBufReadExt, BufReader};
 #[cfg(feature = "p2p")]
@@ -31,6 +33,23 @@ struct Behaviour {
     identify: identify::Behaviour,
     dcutr: dcutr::Behaviour,
     autonat: autonat::Behaviour,
+}
+
+#[cfg(feature = "p2p")]
+/// Load or generate a self-signed TLS certificate for WSS.
+fn load_or_generate_wss_cert() -> Result<(libp2p::websocket::tls::PrivateKey, libp2p::websocket::tls::Certificate), Box<dyn std::error::Error + Send + Sync>> {
+    if let (Ok(cert_path), Ok(key_path)) = (std::env::var("WSS_CERT_DER_PATH"), std::env::var("WSS_KEY_DER_PATH")) {
+        let cert_der = std::fs::read(&cert_path)?;
+        let key_der = std::fs::read(&key_path)?;
+        return Ok((
+            libp2p::websocket::tls::PrivateKey::new(key_der),
+            libp2p::websocket::tls::Certificate::new(cert_der),
+        ));
+    }
+    let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string(), "127.0.0.1".to_string()])?;
+    let priv_key = libp2p::websocket::tls::PrivateKey::new(cert.serialize_private_key_der());
+    let cert_der = libp2p::websocket::tls::Certificate::new(cert.serialize_der()?);
+    Ok((priv_key, cert_der))
 }
 
 #[cfg(feature = "p2p")]
@@ -75,29 +94,71 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
     let dcutr = dcutr::Behaviour::new(local_peer_id);
     let autonat = autonat::Behaviour::new(local_peer_id, autonat::Config::default());
 
-    let mut swarm = libp2p::SwarmBuilder::with_existing_identity(local_key)
-        .with_tokio()
-        .with_tcp(
-            tcp::Config::default(),
-            noise::Config::new,
-            yamux::Config::default,
-        )?
-        .with_websocket(noise::Config::new, yamux::Config::default)
-        .await?
-        .with_relay_client(noise::Config::new, yamux::Config::default)?
-        .with_behaviour(|_, relay| Behaviour {
+    // Build TCP transport manually (no SwarmBuilder so we can inject WSS TLS).
+    let tcp_transport = tcp::tokio::Transport::new(tcp::Config::default())
+        .upgrade(Version::V1Lazy)
+        .authenticate(noise::Config::new(&local_key)?)
+        .multiplex(yamux::Config::default())
+        .map(|(p, c), _| (p, StreamMuxerBox::new(c)));
+
+    let dns_tcp = dns::tokio::Transport::system(tcp::tokio::Transport::new(tcp::Config::default()))?;
+    let mut ws_config = libp2p::websocket::WsConfig::new(dns_tcp);
+
+    if std::env::var("WSS_DISABLE").is_err() {
+        match load_or_generate_wss_cert() {
+            Ok((priv_key, cert)) => {
+                match libp2p::websocket::tls::Config::new(priv_key, vec![cert]) {
+                    Ok(tls_cfg) => {
+                        ws_config.set_tls_config(tls_cfg);
+                        info!("WSS TLS config applied");
+                    }
+                    Err(e) => warn!("WSS TLS config failed: {e}"),
+                }
+            }
+            Err(e) => warn!("WSS cert generation failed: {e}"),
+        }
+    }
+
+    let ws_transport = ws_config
+        .upgrade(Version::V1Lazy)
+        .authenticate(noise::Config::new(&local_key)?)
+        .multiplex(yamux::Config::default())
+        .map(|(p, c), _| (p, StreamMuxerBox::new(c)));
+
+    let tcp_ws = ws_transport
+        .or_transport(tcp_transport)
+        .map(|either, _| either.into_inner());
+
+    let (relay_transport, relay_behaviour) = libp2p::relay::client::new(local_peer_id);
+    let relay_transport = relay_transport
+        .upgrade(Version::V1Lazy)
+        .authenticate(noise::Config::new(&local_key)?)
+        .multiplex(yamux::Config::default())
+        .map(|(p, c), _| (p, StreamMuxerBox::new(c)));
+    let transport = relay_transport
+        .or_transport(tcp_ws)
+        .map(|either, _| either.into_inner());
+
+    let mut swarm = libp2p::swarm::Swarm::new(
+        transport.boxed(),
+        Behaviour {
             gossipsub,
             mdns,
-            relay,
+            relay: relay_behaviour,
             identify,
             dcutr,
             autonat,
-        })?
-        .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(Duration::from_secs(60)))
-        .build();
+        },
+        local_peer_id,
+        libp2p::swarm::Config::with_tokio_executor()
+            .with_idle_connection_timeout(Duration::from_secs(60)),
+    );
 
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse::<Multiaddr>()?)?;
     swarm.listen_on("/ip4/127.0.0.1/tcp/0/ws".parse::<Multiaddr>()?)?;
+    if std::env::var("WSS_DISABLE").is_err() {
+        swarm.listen_on("/ip4/0.0.0.0/tcp/0/tls/ws".parse::<Multiaddr>()?)?;
+    }
     for addr in &bootstrap_peers {
         if let Err(err) = swarm.dial(addr.clone()) {
             warn!(%addr, ?err, "bootstrap dial failed");

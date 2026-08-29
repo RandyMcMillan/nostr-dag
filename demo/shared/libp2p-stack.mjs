@@ -138,10 +138,11 @@ const secureWsDialFilter = (multiaddrs) => {
   if (globalThis.location?.protocol !== 'https:') return addrs;
   return addrs.filter((addr) => {
     const parts = String(addr).split('/').filter(Boolean);
-    // /wss is secure; /ws (without /wss) is not.
+    // /wss and /tls/ws are secure; plain /ws is not.
     const hasWs = parts.includes('ws');
     const hasWss = parts.includes('wss');
-    if (hasWs && !hasWss) return false;
+    const hasTls = parts.includes('tls');
+    if (hasWs && !hasWss && !hasTls) return false;
     return true;
   });
 };

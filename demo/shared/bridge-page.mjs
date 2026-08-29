@@ -1637,6 +1637,20 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
           window.__sharedFooter?.log('bridge', `circuit dial failed ${addr}: ${dialErr?.message || dialErr}`, 'trace', 'checking');
         }
       }
+      // Also try direct WSS addresses so localhost peers are reachable from HTTPS pages.
+      const directWssAddrs = addrs.filter((a) => {
+        const s = String(a);
+        return (s.includes('/tls/ws') || s.includes('/wss')) && !s.includes('/p2p-circuit/');
+      });
+      for (const addr of directWssAddrs) {
+        try {
+          window.__sharedFooter?.log('bridge', `dialing wss ${addr}`, 'trace', 'checking');
+          await node.dial(addr);
+          window.__sharedFooter?.log('bridge', `dialed wss ${addr}`, 'info', 'available');
+        } catch (dialErr) {
+          window.__sharedFooter?.log('bridge', `wss dial failed ${addr}: ${dialErr?.message || dialErr}`, 'trace', 'checking');
+        }
+      }
       schedulePeerRender();
       return true;
     }

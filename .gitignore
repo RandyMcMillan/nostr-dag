@@ -12,3 +12,4 @@ demo/shared/app-version.generated.mjs
 .nostr-dag-mirrors/
 
 node_modules
+*.pem
