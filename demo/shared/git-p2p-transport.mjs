@@ -137,6 +137,21 @@ export class GitP2PTransport {
         manifest: null,
       });
       this.onLog('debug', `git-p2p requesting repo=${repoUrl} timeout=${timeoutMs}ms`);
+
+      // Publish a request so native peers can re-broadcast the bundle.
+      try {
+        const req = JSON.stringify({
+          protocol: 'nostr-dag-bridge',
+          version: 1,
+          direction: 'request',
+          path: repoUrl,
+        });
+        const data = new TextEncoder().encode(req);
+        this.node.services.pubsub.publish(TOPIC, data);
+        this.onLog('debug', `git-p2p request published repo=${repoUrl}`);
+      } catch (e) {
+        this.onLog('trace', `git-p2p request publish failed: ${e.message}`);
+      }
     });
   }
 

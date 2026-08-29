@@ -302,6 +302,7 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
     let mut subscribed_topic_peers = HashSet::<PeerId>::new();
     let mut external_addrs = Vec::<String>::new();
     let mut listen_addrs: Vec<String> = Vec::new();
+    let mut bundle_cache: HashMap<String, Vec<u8>> = HashMap::new();
 
     // Index bootstrap peers by PeerId so we can auto-listen on relay circuits.
     let mut bootstrap_peer_addrs = HashMap::<PeerId, Multiaddr>::new();
@@ -418,6 +419,9 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                         publish_pip_payload(&runtime_keys, message.as_bytes(), &subscribed_topic_peers, &mut swarm, None).await;
                     }
                     Some(NodeCommand::PublishPipPayload(bytes, path)) => {
+                        if let Some(ref p) = path {
+                            bundle_cache.insert(p.clone(), bytes.clone());
+                        }
                         publish_pip_payload(&runtime_keys, &bytes, &subscribed_topic_peers, &mut swarm, path.as_deref()).await;
                     }
                     Some(NodeCommand::MirrorRepo(url)) => {
@@ -613,6 +617,17 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                                     IdentTopic::new(NOSTR_DAG_TOPIC),
                                     response.as_bytes(),
                                 );
+                            }
+
+                            // Handle on-demand bundle requests from browsers.
+                            if let Some(req_url) = parse_bundle_request(&text) {
+                                if let Some(bytes) = bundle_cache.get(&req_url) {
+                                    safe_println!("BUNDLE_REQUEST url={} cached_bytes={}", req_url, bytes.len());
+                                    let _ = cmd_tx.try_send(NodeCommand::PublishPipPayload(bytes.clone(), Some(req_url)));
+                                } else {
+                                    safe_println!("BUNDLE_REQUEST url={} not cached", req_url);
+                                }
+                                continue;
                             }
 
                             let reaction = runtime.process_inbound_message(&text);
@@ -1249,6 +1264,22 @@ fn decode_event_message(message: &str) -> Option<Event> {
     }
 
     serde_json::from_str::<Event>(message).ok()
+}
+
+#[cfg(feature = "p2p")]
+fn parse_bundle_request(message: &str) -> Option<String> {
+    let parsed: serde_json::Value = serde_json::from_str(message).ok()?;
+    if parsed.get("protocol")?.as_str()? != "nostr-dag-bridge" {
+        return None;
+    }
+    if parsed.get("direction")?.as_str()? != "request" {
+        return None;
+    }
+    let path = parsed.get("path")?.as_str()?;
+    if path.is_empty() {
+        return None;
+    }
+    Some(path.to_string())
 }
 
 #[cfg(feature = "p2p")]
