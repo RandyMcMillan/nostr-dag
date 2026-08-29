@@ -517,6 +517,25 @@ button:hover, a.button:hover { background:var(--button-hover); }
   display:none;
 }
 
+/* Show expand chevron only on peer cards (details/summary) */
+.bridge-peer .bridge-card-summary {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+}
+
+.bridge-peer .bridge-card-summary::after {
+  content:'▸';
+  color:var(--muted);
+  flex:0 0 auto;
+  margin-left:8px;
+}
+
+.bridge-peer[open] .bridge-card-summary::after {
+  content:'▾';
+  color:var(--accent);
+}
+
 .bridge-card[open] .bridge-card-summary {
   border-bottom:1px solid rgba(148,163,184,.18);
 }
