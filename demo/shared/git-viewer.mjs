@@ -40,9 +40,14 @@ export function saveRepoCache(cache, storageKey = DEFAULT_REPO_CACHE_KEY) {
 export function cacheRepoData(repoName, data, storageKey = DEFAULT_REPO_CACHE_KEY) {
   const cache = loadRepoCache(storageKey);
   const existing = cache[repoName];
-  if (existing?.tags?.length && (!data.tags || !data.tags.length)) {
-    data = { ...data, tags: existing.tags };
-  }
+  // Merge tags so newly discovered tags accumulate and survive refresh.
+  // Shallow clones may not fetch every tag on each update, so we preserve
+  // any tags already known rather than letting them be overwritten.
+  const mergedTags = [...new Set([
+    ...(data.tags || []),
+    ...(existing?.tags || []),
+  ])].sort((a, b) => a.localeCompare(b));
+  data = { ...data, tags: mergedTags };
   cache[repoName] = data;
   saveRepoCache(cache, storageKey);
 }
