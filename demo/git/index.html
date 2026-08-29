@@ -120,7 +120,7 @@
       headerRoot: document.getElementById('sharedHeader'),
       footerRoot: document.getElementById('pageFooter'),
     });
-    footer.setLevel('none');
+    footer.setLevel('info');
     const refreshBtn = document.getElementById('refreshBtn');
 
     async function initGitP2P() {
@@ -1326,6 +1326,12 @@
         const values = repos.map((repo) => dataByRepo.get(repo.name) || cache[repo.name] || emptyRepoData());
         renderApp(values);
         const readyCount = dataByRepo.size;
+        const statusSummary = repos.map((repo) => {
+          const health = getRepoHealth(repo.name);
+          const ping = getRepoPing(repo.name);
+          return `${repo.name}:${health}${ping ? `(${ping}ms)` : ''}`;
+        }).join(', ');
+        footer.log('git', `status: ${statusSummary}`, 'info', readyCount === repos.length ? 'available' : 'checking');
         setStatus(readyCount === repos.length ? 'ready' : `partial: ${readyCount}/${repos.length} repos ready`, readyCount === repos.length ? 'available' : 'checking');
       } catch (e) {
         setStatus(`unavailable: ${e.message}`, 'unavailable');

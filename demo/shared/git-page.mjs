@@ -43,6 +43,11 @@ export const GIT_REPOS = [
     url: 'https://github.com/isomorphic-git/lightning-fs',
     dir: '/repos/lightning-fs',
   },
+  {
+    name: 'entropylab',
+    url: 'https://github.com/w-s-bitcoin/entropylab',
+    dir: '/repos/entropylab',
+  },
 ];
 
 export function isSafariMobile() {
