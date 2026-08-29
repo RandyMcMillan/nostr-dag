@@ -107,6 +107,7 @@ site: wasm
 	mkdir -p site/git
 	cp demo/git/index.html site/git/index.html
 	cp demo/git/blame.html site/git/blame.html
+	cp demo/nip-pip-example.html site/nip-pip-example.html
 	mkdir -p site/dag
 	cp demo/dag/index.html site/dag/index.html
 	# Keep this in sync with .justfile so /dag/ keeps its action module after site rebuilds.

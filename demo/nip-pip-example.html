@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NIP-PIP Round-Trip Example</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 960px; margin: 2rem auto; padding: 0 1rem; background: #0b0c0f; color: #e0e0e0; }
+    h1 { font-size: 1.25rem; color: #4ade80; }
+    h2 { font-size: 1rem; color: #60a5fa; margin-top: 1.5rem; }
+    pre { background: #111318; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.85rem; line-height: 1.5; }
+    .ok { color: #4ade80; }
+    .detail { color: #94a3b8; }
+  </style>
+</head>
+<body>
+  <h1>NIP-PIP RTT Round-Trip Example (WASM/JS)</h1>
+  <p class="detail">Packetizes a small payload, stamps every event with a <code>bridge-rtt</code> tag, links slices in a deterministic parent chain, then reconstructs and verifies.</p>
+  <h2>Manifest</h2>
+  <pre id="manifest"></pre>
+  <h2>Slices</h2>
+  <pre id="slices"></pre>
+  <h2>Result</h2>
+  <pre id="result"></pre>
+
+  <script type="module">
+    import { packetizePayload } from './shared/nip34-quorum.mjs';
+    import { sha256Hex } from './shared/nip34-quorum.mjs';
+    import { reconstructPayload } from './shared/nip34-quorum.mjs';
+    import { stampBridgeRoundTripTag, extractBridgeRoundTripStartMs } from './shared/bridge-roundtrip.mjs';
+
+    const PIP_PROTOCOL = 'nostr-dag-transfer';
+    const PIP_VERSION = 1;
+    const MANIFEST_KIND = 39078;
+    const SLICE_KIND = 39079;
+
+    async function runExample() {
+      const payload = new TextEncoder().encode('hello nip-pip rtt wasm');
+      const rootId = 'nip-pip-example-wasm';
+      const maxSliceBytes = 8;
+      const rttStart = Date.now();
+
+      const slices = packetizePayload(rootId, payload, maxSliceBytes);
+      const sha256 = await sha256Hex(payload);
+
+      // Build manifest
+      const manifest = {
+        kind: MANIFEST_KIND,
+        id: `manifest-${rootId}`,
+        pubkey: 'pubkey-example',
+        sig: 'sig-example',
+        created_at: Math.floor(Date.now() / 1000),
+        content: JSON.stringify({
+          protocol: PIP_PROTOCOL,
+          version: PIP_VERSION,
+          type: 'manifest',
+          root: rootId,
+          sha256,
+          size: payload.length,
+          packets: slices.length,
+          depth: 0,
+          mtu: maxSliceBytes,
+          encoding: 'json',
+          path: '',
+        }),
+        tags: stampBridgeRoundTripTag([], rttStart),
+      };
+
+      // Build slice events with parent chain
+      const sliceEvents = [];
+      let previousId = manifest.id;
+      for (let seq = 0; seq < slices.length; seq++) {
+        const s = slices[seq];
+        const ev = {
+          kind: SLICE_KIND,
+          id: `slice-${rootId}-${seq}`,
+          pubkey: 'pubkey-example',
+          sig: 'sig-example',
+          created_at: Math.floor(Date.now() / 1000),
+          content: JSON.stringify({
+            protocol: PIP_PROTOCOL,
+            version: PIP_VERSION,
+            type: 'slice',
+            root_id: rootId,
+            seq,
+            total_slices: slices.length,
+            data: s.data,
+          }),
+          tags: stampBridgeRoundTripTag([['e', previousId]], rttStart),
+        };
+        sliceEvents.push(ev);
+        previousId = ev.id;
+      }
+
+      // Display manifest
+      const manifestRtt = extractBridgeRoundTripStartMs(manifest);
+      document.getElementById('manifest').textContent = [
+        `id:      ${manifest.id}`,
+        `rtt:     ${manifestRtt}`,
+        `size:    ${payload.length} bytes`,
+        `slices:  ${slices.length}`,
+        JSON.stringify(JSON.parse(manifest.content), null, 2),
+      ].join('\n');
+
+      // Display slices
+      document.getElementById('slices').textContent = sliceEvents.map((ev, seq) => {
+        const rtt = extractBridgeRoundTripStartMs(ev);
+        const parent = ev.tags.find(t => Array.isArray(t) && t[0] === 'e')?.[1] ?? '?';
+        return `slice[${seq}]  ${ev.id}  rtt=${rtt}  parent=${parent}`;
+      }).join('\n');
+
+      // Reconstruct
+      const reconstructed = reconstructPayload(manifest, sliceEvents);
+      const ok = reconstructed && reconstructed.length === payload.length && reconstructed.every((b, i) => b === payload[i]);
+      document.getElementById('result').textContent = [
+        `payload length:     ${payload.length}`,
+        `reconstructed:      ${reconstructed ? reconstructed.length : 'null'}`,
+        `bit-for-bit match:  ${ok ? 'OK' : 'FAIL'}`,
+      ].join('\n');
+      document.getElementById('result').classList.add(ok ? 'ok' : '');
+    }
+
+    runExample().catch((e) => {
+      document.getElementById('result').textContent = 'Error: ' + e.message;
+    });
+  </script>
+</body>
+</html>
