@@ -13,7 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use tokio::fs;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::process::{Child, Command};
 use tokio::sync::{watch, Semaphore};
@@ -167,29 +167,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .env_remove("P2P_ENABLE")
                 .env_remove("HOST")
                 .env_remove("PORT")
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit())
                 .spawn()
             {
-                Ok(mut child) => {
-                    if let Some(stdout) = child.stdout.take() {
-                        tokio::spawn(async move {
-                            let reader = BufReader::new(stdout);
-                            let mut lines = reader.lines();
-                            while let Ok(Some(line)) = lines.next_line().await {
-                                info!(target: "p2p-node", "{line}");
-                            }
-                        });
-                    }
-                    if let Some(stderr) = child.stderr.take() {
-                        tokio::spawn(async move {
-                            let reader = BufReader::new(stderr);
-                            let mut lines = reader.lines();
-                            while let Ok(Some(line)) = lines.next_line().await {
-                                info!(target: "p2p-node", "{line}");
-                            }
-                        });
-                    }
+                Ok(child) => {
                     p2p_child = Some(child);
                 }
                 Err(e) => {
