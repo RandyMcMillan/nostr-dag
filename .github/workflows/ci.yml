@@ -101,7 +101,7 @@ jobs:
         run: cargo install wasm-pack --locked
 
       - name: Build wasm package
-        run: wasm-pack build --target web --no-default-features --features wasm --out-dir site/pkg
+        run: wasm-pack build --target web --out-dir site/pkg --no-default-features --features wasm
 
       - name: Test wasm JS contracts
         run: node --test test/git-wasm.test.mjs test/p2p-wasm.test.mjs
