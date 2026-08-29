@@ -84,6 +84,8 @@
       'http://127.0.0.1:3000/proxy/',
     ];
 
+    let activeProxy = null;
+
     async function tryWithCorsProxies(operation, baseOptions, contextLabel) {
       let lastError;
       for (let i = 0; i < CORS_PROXIES.length; i++) {
@@ -91,6 +93,7 @@
         try {
           footer.log('git', `${contextLabel} trying proxy[${i}] ${proxy}`, 'trace');
           const result = await operation({ ...baseOptions, corsProxy: proxy });
+          activeProxy = proxy;
           footer.log('git', `${contextLabel} proxy[${i}] ${proxy} succeeded`, i === 0 ? 'debug' : 'info');
           return result;
         } catch (e) {
@@ -98,6 +101,7 @@
           footer.log('git', `${contextLabel} proxy[${i}] ${proxy} failed: ${e.message}`, 'trace');
         }
       }
+      activeProxy = null;
       footer.log('git', `${contextLabel} all proxies exhausted`, 'warn');
       throw lastError;
     }
@@ -209,6 +213,7 @@
         ping: getRepoPing(repo.name),
         p2pAvailable,
         source: repoSource.get(repo.name) || null,
+        proxy: activeProxy,
         ref: data.ref || 'n/a',
         latest: data.latest || 'n/a',
         latestHtml: renderLatestSummary(data.latest || 'n/a'),
@@ -248,7 +253,7 @@
               <a href="${card.repo.url}" target="_blank" rel="noreferrer noopener">${card.repo.url}</a>
             </div>
           </div>
-          <div class="small" style="margin-top:8px;"><span class="muted">Status:</span> <span class="health-badge ${repoCardStatusClass(card.status)}" title="${escapeHtml(card.status)}"><span class="health-dot"></span></span>${card.ping !== null ? ` <span class="muted">ping:</span> <span class="mono">${card.ping} ms</span>` : ''}${card.p2pAvailable ? ' <span class="health-badge health-available" title="libp2p"><span class="health-dot"></span></span><span class="muted">p2p</span>' : ''}${card.source ? ` <span class="pill pill-source-${card.source}">${card.source}</span>` : ''}</div>
+          <div class="small" style="margin-top:8px;"><span class="muted">Status:</span> <span class="health-badge ${repoCardStatusClass(card.status)}" title="${escapeHtml(card.status)}"><span class="health-dot"></span></span>${card.ping !== null ? ` <span class="muted">ping:</span> <span class="mono">${card.ping} ms</span>` : ''}${card.p2pAvailable ? ' <span class="health-badge health-available" title="libp2p"><span class="health-dot"></span></span><span class="muted">p2p</span>' : ''}${card.source ? ` <span class="pill pill-source-${card.source}">${card.source}${card.proxy && card.source === 'proxy' ? ` • ${card.proxy}` : ''}</span>` : ''}</div>
           <div class="small" style="margin-top:8px;"><span class="muted">Ref:</span> <span class="mono">${card.ref}</span></div>
           <div class="small" style="margin-top:4px;"><span class="muted">Selected:</span> <span class="mono">${escapeHtml(card.selectedRef)}</span></div>
           <div class="small" style="margin-top:8px;">${card.latestHtml}</div>
@@ -1239,10 +1244,14 @@
         setRepoStatus(repo.name, 'refreshing...');
         if (route) setRepoHealth(repo.name, 'checking');
         setRepoPing(repo.name, null);
+        if (force) {
+          footer.log('git', `${repo.name} force=true → wiping local clone`, 'info');
+          await wipeRepo(repo);
+        }
         const probeStart = performance.now();
         const probe = route ? probeRemoteHost(repo).catch(() => ({ ok: false, durationMs: null })) : null;
         await ensureRepo(repo, route);
-        footer.log('git', `refreshOneRepo ensure done ${repo.name}`, 'debug');
+        footer.log('git', `refreshOneRepo ensure done ${repo.name} proxy=${activeProxy || 'none'}`, 'debug');
         const data = await readRepo(repo, route);
         cacheRepoData(repo.name, data);
         footer.log('git', `refreshOneRepo read done ${repo.name}`, 'debug');
@@ -1289,12 +1298,17 @@
           }
           const repoRoute = route.repo && repo.name === route.repo.name ? route : null;
           try {
+            if (force) {
+              footer.log('git', `${repo.name} force=true → wiping local clone`, 'info');
+              await wipeRepo(repo);
+            }
             footer.log('git', `probing ${repo.name}`, 'trace');
             setRepoPing(repo.name, null);
             const probeStart = performance.now();
             const probe = probeRemoteHost(repo).catch(() => false);
             footer.log('git', `ensuring ${repo.name}`, 'debug');
             await ensureRepo(repo, repoRoute);
+            footer.log('git', `ensure done ${repo.name} proxy=${activeProxy || 'none'}`, 'debug');
             footer.log('git', `reading ${repo.name}`, 'trace');
             const data = await readRepo(repo, repoRoute);
             cacheRepoData(repo.name, data);
