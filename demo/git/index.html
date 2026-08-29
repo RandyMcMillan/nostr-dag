@@ -1180,7 +1180,7 @@
         if (route) setRepoHealth(repo.name, 'checking');
         setRepoPing(repo.name, null);
         const probeStart = performance.now();
-        const probe = route ? probeRemoteHost(repo).catch(() => false) : null;
+        const probe = route ? probeRemoteHost(repo).catch(() => ({ ok: false, durationMs: null })) : null;
         await ensureRepo(repo, route);
         footer.log('git', `refreshOneRepo ensure done ${repo.name}`, 'debug');
         const data = await readRepo(repo, route);
@@ -1188,10 +1188,10 @@
         footer.log('git', `refreshOneRepo read done ${repo.name}`, 'debug');
         if (route) {
           const probeOk = await probe;
-          const probeMs = probeOk ? Math.round(performance.now() - probeStart) : null;
+          const probeMs = probeOk?.durationMs ?? (probeOk?.ok ? Math.round(performance.now() - probeStart) : null);
           setRepoPing(repo.name, probeMs);
-          setRepoHealth(repo.name, probeOk ? 'available' : 'unavailable');
-          footer.log('git', `probe ${repo.name} ${probeOk ? 'ok' : 'fail'} ping=${probeMs ?? 'n/a'} ms`, 'debug');
+          setRepoHealth(repo.name, probeOk?.ok ? 'available' : 'unavailable');
+          footer.log('git', `probe ${repo.name} ${probeOk?.ok ? 'ok' : 'fail'} ping=${probeMs ?? 'n/a'} ms`, 'debug');
         }
         renderApp(repos.map((entry) => {
           const cache = loadRepoCache();

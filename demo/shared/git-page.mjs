@@ -84,5 +84,5 @@ export function bootstrapGitChrome({
 export { remoteProbeUrl };
 
 export async function probeRemoteHost(repo) {
-  return hostProbe.available(repo, { strategy: 'favicon' });
+  return hostProbe.test(repo, { strategy: 'favicon' });
 }

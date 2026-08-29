@@ -36,6 +36,7 @@ export async function probeFetch(url, options = {}) {
   const timeout = options.timeout ?? DEFAULT_TIMEOUT;
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), timeout);
+  const start = performance.now();
 
   try {
     const response = await fetch(target, {
@@ -44,9 +45,11 @@ export async function probeFetch(url, options = {}) {
       cache: 'no-store',
       signal: options.signal || controller.signal,
     });
-    return { ok: true, status: response.status, type: response.type };
+    const durationMs = Math.round(performance.now() - start);
+    return { ok: true, status: response.status, type: response.type, durationMs };
   } catch (error) {
-    return { ok: false, error: error.name || 'fetch_failed', message: error.message };
+    const durationMs = Math.round(performance.now() - start);
+    return { ok: false, error: error.name || 'fetch_failed', message: error.message, durationMs };
   } finally {
     window.clearTimeout(timeoutId);
   }

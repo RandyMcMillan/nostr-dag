@@ -18,8 +18,6 @@ export const DEFAULT_BOOTSTRAP_PEERS = [
   "/dnsaddr/bootstrap.libp2p.io/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
   "/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
   "/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
-  // Public libp2p relay with WSS so browser peers on HTTPS can reach it
-  "/dns4/libp2p-relay.demonstration.place/tcp/443/wss/p2p/12D3KooWRnFV9z7MRHWsisque39R6qTsz7bR1qBpDLpikkcANx2H",
 ];
 
 const peerLabel = (event) => event?.detail?.peerId?.toString?.() || event?.detail?.remotePeer?.toString?.() || "peer";

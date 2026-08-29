@@ -86,6 +86,7 @@ libp2p = { version = "0.54", optional = true, features = [
     "ping",
     "tokio",
     "macros",
+    "rsa",
 ] }
 nostr = { version = "0.44", default-features = false, features = ["std"] }
 

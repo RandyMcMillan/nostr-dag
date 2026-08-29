@@ -188,35 +188,20 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
         }
     }
 
-    let mut presence_interval = tokio::time::interval(Duration::from_secs(30));
-    presence_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let presence_cmd_tx = cmd_tx.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(30));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            interval.tick().await;
+            if presence_cmd_tx.send(NodeCommand::BroadcastPresence).await.is_err() {
+                break;
+            }
+        }
+    });
 
     loop {
         tokio::select! {
-            _ = presence_interval.tick() => {
-                let addrs_json = listen_addrs
-                    .iter()
-                    .map(|a| format!("\"{a}\""))
-                    .collect::<Vec<_>>()
-                    .join(",");
-                let ext_addrs_json = external_addrs
-                    .iter()
-                    .map(|a| format!("\"{a}\""))
-                    .collect::<Vec<_>>()
-                    .join(",");
-                let presence = format!(
-                    "{{\"type\":\"presence\",\"peer_id\":\"{local_peer_id}\",\"listen_addrs\":[{addrs_json}],\"external_addrs\":[{ext_addrs_json}],\"nostr_pubkey\":\"{}\"}}",
-                    runtime.public_key()
-                );
-                if let Err(err) = swarm.behaviour_mut().gossipsub.publish(
-                    IdentTopic::new(NOSTR_DAG_TOPIC),
-                    presence.into_bytes(),
-                ) {
-                    debug!(?err, "presence broadcast failed");
-                } else {
-                    println!("PRESENCE broadcast peers={} addrs={}", subscribed_topic_peers.len(), listen_addrs.len());
-                }
-            }
             command = cmd_rx.recv() => {
                 match command {
                     Some(NodeCommand::Broadcast(message)) => {
@@ -225,6 +210,30 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                             message.as_bytes(),
                         ) {
                             warn!(?err, "publish failed");
+                        }
+                    }
+                    Some(NodeCommand::BroadcastPresence) => {
+                        let addrs_json = listen_addrs
+                            .iter()
+                            .map(|a| format!("\"{a}\""))
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        let ext_addrs_json = external_addrs
+                            .iter()
+                            .map(|a| format!("\"{a}\""))
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        let presence = format!(
+                            "{{\"type\":\"presence\",\"peer_id\":\"{local_peer_id}\",\"listen_addrs\":[{addrs_json}],\"external_addrs\":[{ext_addrs_json}],\"nostr_pubkey\":\"{}\"}}",
+                            runtime.public_key()
+                        );
+                        if let Err(err) = swarm.behaviour_mut().gossipsub.publish(
+                            IdentTopic::new(NOSTR_DAG_TOPIC),
+                            presence.into_bytes(),
+                        ) {
+                            debug!(?err, "presence broadcast failed");
+                        } else {
+                            println!("PRESENCE broadcast peers={} addrs={}", subscribed_topic_peers.len(), listen_addrs.len());
                         }
                     }
                     Some(NodeCommand::Dial(addr)) => {
@@ -446,6 +455,9 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                             debug!(%text, "gossipsub message received");
                         }
                     }
+                    SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
+                        println!("OUTGOING_CONN_ERROR peer={:?} err={}", peer_id, error);
+                    }
                     _ => {}
                 }
             }
@@ -519,8 +531,6 @@ pub const DEFAULT_BOOTSTRAP_PEERS: &[&str] = &[
     "/dnsaddr/bootstrap.libp2p.io/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
     "/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb",
     "/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt",
-    // Public libp2p relay with WSS so browser peers on HTTPS can reach it
-    "/dns4/libp2p-relay.demonstration.place/tcp/443/wss/p2p/12D3KooWRnFV9z7MRHWsisque39R6qTsz7bR1qBpDLpikkcANx2H",
 ];
 
 #[cfg(feature = "p2p")]
@@ -542,6 +552,7 @@ pub fn parse_bootstrap_peers(raw: Option<&str>) -> Vec<Multiaddr> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NodeCommand {
     Broadcast(String),
+    BroadcastPresence,
     Dial(Multiaddr),
     Help,
     PublishPipBlob(String),
