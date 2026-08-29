@@ -1,6 +1,8 @@
 #[cfg(feature = "p2p")]
 use std::collections::{HashMap, HashSet};
 #[cfg(feature = "p2p")]
+use std::io::Write;
+#[cfg(feature = "p2p")]
 use std::time::Duration;
 #[cfg(feature = "p2p")]
 use libp2p::{
@@ -242,12 +244,15 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
         "READY peer_id={local_peer_id} nostr_pubkey={} topic={NOSTR_DAG_TOPIC}",
         runtime.public_key()
     );
+    let _ = std::io::stdout().flush();
     println!(
         "BOOTSTRAP peers={} wasm_like={}",
         bootstrap_peers.len(),
         bootstrap_wasm_like
     );
+    let _ = std::io::stdout().flush();
     println!("HELP\n{HELP_TEXT}");
+    let _ = std::io::stdout().flush();
 
     // Auto-start git mirrors from GIT_MIRROR_REPOS env var (comma-separated URLs).
     if let Ok(mirror_repos) = std::env::var("GIT_MIRROR_REPOS") {
@@ -362,6 +367,7 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                             debug!(?err, "presence broadcast failed");
                         } else {
                             println!("PRESENCE broadcast peers={} addrs={}", subscribed_topic_peers.len(), listen_addrs.len());
+                            let _ = std::io::stdout().flush();
                         }
                         // Also publish a kind-0 Nostr event so GitHub Pages browsers can discover us.
                         let nostr_content = format!(
@@ -383,6 +389,7 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                                     debug!(?e, "nostr presence publish failed");
                                 } else {
                                     println!("NOSTR presence published id={}", event.id);
+                                    let _ = std::io::stdout().flush();
                                 }
                             });
                         }

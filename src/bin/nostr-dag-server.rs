@@ -244,6 +244,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     || trimmed.starts_with("RELAY ")
                                     || trimmed.starts_with("MIRROR ")
                                     || trimmed.starts_with("PIP ")
+                                    || trimmed.starts_with("PRESENCE ")
+                                    || trimmed.starts_with("NOSTR ")
                                 {
                                     println!("[peer] {trimmed}");
                                 }
