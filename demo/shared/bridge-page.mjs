@@ -784,7 +784,11 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         Number.isFinite(Number(info.ping_ms)) ? `${Math.round(Number(info.ping_ms))} ms` : '',
       ].filter(Boolean) : [];
       const learnedFrom = source && source !== 'default'
-        ? `<div class="bridge-relay-learned small muted">Learned from ${escapeHtml(source)}</div>`
+        ? (() => {
+            const url = eventDetailUrl(source);
+            const link = url ? `<a class="bridge-relay-source" href="${escapeHtml(url)}" target="_blank" rel="noreferrer noopener">${escapeHtml(source)}</a>` : escapeHtml(source);
+            return `<div class="bridge-relay-learned small muted">Learned from ${link}</div>`;
+          })()
         : '';
       const detailHref = resolveHref(`./relay.html?relay=${encodeURIComponent(relay)}`, window.location.href);
       return `
