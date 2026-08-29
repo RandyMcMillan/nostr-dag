@@ -1135,19 +1135,33 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       persistPanelState();
     }
 
-    // Poll the local preview server when available. Pages deployments just render browser peers.
+    /**
+     * Poll the local preview server's /peers endpoint and reconcile the peer list.
+     *
+     * Pruning policy (intentionally conservative):
+     * - ONLY peers whose `source === 'localhost'` or `'http'` are candidates for
+     *   removal. These are injected by the local development server and represent
+     *   ephemeral preview processes.
+     * - libp2p-discovered peers (`source === 'libp2p'`) are NEVER deleted.  Once a
+     *   browser on GitHub Pages learns about a relay-circuit peer, we keep it so
+     *   the user can still see it even if the next presence broadcast takes 30 s
+     *   or the gossipsub mesh is temporarily unstable.
+     * - When running on GH Pages, /peers returns 404; the catch block simply
+     *   re-renders the existing list without touching any entries.
+     */
     async function pollPeers() {
       try {
         const response = await fetch('/peers', { cache: 'no-store' });
         if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
         const peers = await response.json();
-        // Only remove localhost-sourced peers that are no longer reported;
-        // leave libp2p-discovered peers intact so GH Pages can see relay peers.
+        // Build a set of keys currently reported by the local server.
         const reportedKeys = new Set();
         for (const peer of Array.isArray(peers) ? peers : []) {
           upsertPeer('localhost', peer);
           reportedKeys.add(`${peer.peer_id}:${peer.path || '/'}:${peer.kind || 'unknown'}`);
         }
+        // Remove localhost/http peers that have disappeared from the report.
+        // All other sources (libp2p, browser, etc.) are left untouched.
         for (const [key, peer] of remotePeers) {
           if (peer.source === 'localhost' || peer.source === 'http') {
             const peerKey = `${peer.peer_id}:${peer.path || '/'}:${peer.kind || 'unknown'}`;
@@ -1560,6 +1574,21 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       }
     }
 
+    /**
+     * Handle a libp2p presence broadcast from another peer (usually the native
+     * nostr-dag-server).  This is the critical path that lets a GitHub Pages
+     * browser discover and dial a developer's laptop via relay circuit addresses.
+     *
+     * When the native peer obtains a relay reservation it broadcasts its
+     * circuit addresses (e.g. /ip4/…/tcp/4001/p2p/<relay>/p2p-circuit/p2p/<self>).
+     * The browser receives this over gossipsub, stores the peer entry with
+     * source='libp2p', and immediately attempts to dial every circuit address.
+     * Once the circuit dial succeeds the two peers can exchange messages
+     * directly without bootstrap intermediaries.
+     *
+     * Because libp2p peers are never pruned by pollPeers(), the entry persists
+     * even if the next presence broadcast is delayed or dropped.
+     */
     async function handleLibp2pPresence(message) {
       if (!message || message.type !== 'presence' || !message.peer_id) return false;
       const peerId = String(message.peer_id);
