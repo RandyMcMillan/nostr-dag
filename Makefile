@@ -45,7 +45,10 @@ test-native:
 
 test-js:
 	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) cargo check --quiet
-	NODE_OPTIONS=--trace-uncaught node --test test/*.test.mjs
+	@for f in test/*.test.mjs; do \
+		echo "=== running $$f ==="; \
+		NODE_OPTIONS=--trace-uncaught node --test "$$f" || exit 1; \
+	done
 
 test-p2p:
 	NODE_OPTIONS=--trace-uncaught node --test test/p2p-node-integration.test.mjs test/p2p-native-wasm.test.mjs

@@ -21,7 +21,12 @@ test-native:
 
 test-js:
     TARGET_DIR="${CARGO_TARGET_DIR:-$(cargo metadata --format-version 1 --no-deps | grep -o '"target_directory":"[^"]*"' | cut -d'"' -f4)}"; CARGO_TARGET_DIR="$TARGET_DIR" cargo check --quiet
-    NODE_OPTIONS=--trace-uncaught node --test test/*.test.mjs
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for f in test/*.test.mjs; do
+        echo "=== running $f ==="
+        NODE_OPTIONS=--trace-uncaught node --test "$f"
+    done
 
 test-p2p:
     NODE_OPTIONS=--trace-uncaught node --test test/p2p-node-integration.test.mjs test/p2p-native-wasm.test.mjs
