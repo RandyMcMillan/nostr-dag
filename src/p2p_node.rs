@@ -149,6 +149,34 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
     );
     println!("HELP\n{HELP_TEXT}");
 
+    // Auto-start git mirrors from GIT_MIRROR_REPOS env var (comma-separated URLs).
+    if let Ok(mirror_repos) = std::env::var("GIT_MIRROR_REPOS") {
+        for url in mirror_repos.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+            let url = url.to_string();
+            let cmd_tx = cmd_tx.clone();
+            tokio::spawn(async move {
+                // Stagger startup mirrors so we don't overwhelm the event loop.
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                let _ = cmd_tx.send(NodeCommand::MirrorRepo(url)).await;
+            });
+        }
+    }
+
+    // Periodic re-mirror every 5 minutes for repos that change frequently.
+    let mirror_remirror_cmd_tx = cmd_tx.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(300));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            interval.tick().await;
+            if let Ok(mirror_repos) = std::env::var("GIT_MIRROR_REPOS") {
+                for url in mirror_repos.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+                    let _ = mirror_remirror_cmd_tx.send(NodeCommand::MirrorRepo(url.to_string())).await;
+                }
+            }
+        }
+    });
+
     let mut discovered_peers = HashSet::<PeerId>::new();
     let mut peer_topic_roles = HashMap::<PeerId, PeerTopicRole>::new();
     let mut relay_peers = HashSet::<PeerId>::new();
