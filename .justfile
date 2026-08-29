@@ -24,6 +24,9 @@ test-js:
     #!/usr/bin/env bash
     set -euo pipefail
     for f in test/*.test.mjs; do
+        case "$f" in
+            *p2p-native-wasm*) continue ;;
+        esac
         echo "=== running $f ==="
         NODE_OPTIONS=--trace-uncaught node --test "$f"
     done

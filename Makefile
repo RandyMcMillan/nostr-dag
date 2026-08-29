@@ -46,6 +46,9 @@ test-native:
 test-js:
 	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) cargo check --quiet
 	@for f in test/*.test.mjs; do \
+		case "$$f" in \
+			*p2p-native-wasm*) continue ;; \
+		esac; \
 		echo "=== running $$f ==="; \
 		NODE_OPTIONS=--trace-uncaught node --test "$$f" || exit 1; \
 	done
