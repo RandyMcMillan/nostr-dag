@@ -88,6 +88,27 @@ Only `localhost` or `http`-sourced peers (reported by the local
 
 See `pollPeers()` in `bridge-page.mjs` for the implementation.
 
+## Browser Security Constraints
+
+### Mixed Content & WebSocket Dials
+
+Browsers block **active mixed content**: an HTTPS page cannot open
+unencrypted `ws://` WebSocket connections. The bridge page runs on
+`https://*.github.io`, so any libp2p multiaddr containing `/ws` (unencrypted
+WebSocket) is filtered out before dialing.  The `secureWsDialFilter` in
+`shared/libp2p-stack.mjs` strips `/ws` addrs when
+`location.protocol === 'https:'`, leaving only `/wss` (secure WebSocket),
+WebRTC, and circuit-relay paths.
+
+This prevents Chrome from showing console warnings or marking the page as
+"Not Secure" due to blocked `ws://` dials to localhost peers.
+
+### Raw TCP
+
+Browsers cannot open raw TCP sockets.  The native peer listens on both
+`/tcp/…` and `/ws/…` addresses, but GH Pages browsers can only reach the
+`/wss` or `/p2p-circuit` variants.
+
 ## GitHub Pages vs Local Differences
 
 | Feature | Local (`127.0.0.1:3000`) | GitHub Pages |
@@ -96,9 +117,10 @@ See `pollPeers()` in `bridge-page.mjs` for the implementation.
 | Native peer visibility | Direct WebSocket + relay circuit | Only via relay circuit through bootstrap mesh |
 | CORS proxy fallback | Works if proxy is up | Same — still subject to proxy availability |
 | Bootstrap peers | DNS + IP + WSS | WSS only (browser cannot dial raw TCP) |
+| Mixed-content filter | No (`http://` page) | Yes — `ws://` dials are blocked |
 
-Because GH Pages cannot dial local TCP addresses, the only path for a GH
-Pages browser to reach a developer's laptop is:
+Because GH Pages cannot dial local TCP or unencrypted WS addresses, the only
+path for a GH Pages browser to reach a developer's laptop is:
 
 ```
 Browser (WSS) → IPFS bootstrap node → relay reservation →
