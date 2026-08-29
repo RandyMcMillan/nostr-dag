@@ -45,6 +45,9 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       'wss://relay.primal.net',
       'wss://nostr.wine',
       'wss://top.testrelay.top',
+      'wss://relay.pocketnostr.com',
+      'wss://basspistol.org',
+      'wss://relay.ngit.dev',
     ];
 
     const { networkTime } = bootstrapDemoPageChrome({
