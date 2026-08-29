@@ -13,8 +13,18 @@ import { chromium } from 'playwright-core';
 
 const BASE = process.env.BASE_URL || 'http://127.0.0.1:3000';
 
-test('git page renders repo cards in Chromium', { timeout: 60_000 }, async () => {
-  const browser = await chromium.launch({ headless: true });
+test('git page renders repo cards in Chromium', { timeout: 60_000 }, async (t) => {
+  let browser;
+  try {
+    browser = await chromium.launch({ headless: true });
+  } catch (err) {
+    if (err.message && err.message.includes("Executable doesn't exist")) {
+      t.skip('Playwright browsers not installed — skipping headless render test');
+      return;
+    }
+    throw err;
+  }
+
   const page = await browser.newPage();
   const errors = [];
 
