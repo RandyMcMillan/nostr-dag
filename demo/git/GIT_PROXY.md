@@ -164,6 +164,31 @@ Over time we want (2) to replace (3) and (4) entirely.
 - [ ] Range/limit field in manifest for partial bundles
 - [x] Quorum attestation for bundle integrity (kind 39080-39082) — implemented, not yet used for git
 
+### Known Blocker: JS→Rust WebSocket Dial
+
+The browser's JS libp2p node cannot establish a WebSocket connection to the
+Rust `p2p-node` listener, even though both use standard libp2p WebSocket
+transports.  Symptoms:
+
+- JS `node.dial(multiaddr('/ip4/127.0.0.1/tcp/…/ws/p2p/…'))` fails with
+  `Could not connect to ws://127.0.0.1:…`
+- Plain `WebSocket('ws://127.0.0.1:…')` from the browser hangs indefinitely.
+- The Rust peer is listening on the port (confirmed via `lsof`), but never
+  completes the WebSocket handshake.
+
+**Impact:**  The P2P bundle path works in theory (native peer caches bundles,
+browser publishes request envelopes, native re-publishes slices) but the two
+peers cannot form a libp2p connection over WebSocket, so the browser always
+falls back to the CORS proxy.
+
+**Work-arounds being explored:**
+1. Use Nostr relays as the transport backbone (both sides already connect to
+   relays; publish requests as kind-39078+ events and responses via relay).
+2. Load the WASM `P2pNode` in the browser (compiled from the same Rust code)
+   instead of the JS libp2p stack.
+3. Use WebRTC-direct or circuit-relay for discovery instead of direct
+   localhost WebSocket dials.
+
 ## Security Notes
 
 - Bundle SHA-256 in the manifest lets browsers verify integrity before cloning.
