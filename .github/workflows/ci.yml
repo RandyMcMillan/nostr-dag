@@ -5,6 +5,31 @@ on:
     branches: ["**"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      run_native:
+        description: 'Run native Rust tests'
+        type: boolean
+        default: true
+      run_js:
+        description: 'Run JS / GUI tests'
+        type: boolean
+        default: true
+      run_wasm:
+        description: 'Build WASM package'
+        type: boolean
+        default: true
+      run_p2p:
+        description: 'Build and test p2p native'
+        type: boolean
+        default: true
+      run_p2p_wasm:
+        description: 'Build p2p-wasm'
+        type: boolean
+        default: true
+      js_test_file:
+        description: 'Specific JS test file to run (leave empty for all)'
+        type: string
+        default: ''
 
 env:
   CARGO_TERM_COLOR: always
@@ -15,6 +40,7 @@ permissions:
 jobs:
   test:
     name: Test (native)
+    if: github.event_name != 'workflow_dispatch' || inputs.run_native
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -41,6 +67,7 @@ jobs:
 
   js:
     name: Test (JS / GUI)
+    if: github.event_name != 'workflow_dispatch' || inputs.run_js
     needs: wasm
     strategy:
       fail-fast: false
@@ -72,13 +99,19 @@ jobs:
 
       - name: Run JS tests
         run: |
-          for f in test/*.test.mjs; do
-            echo "=== running $f ==="
-            node --test "$f" || exit 1
-          done
+          if [ -n "${{ inputs.js_test_file }}" ]; then
+            echo "=== running ${{ inputs.js_test_file }} ==="
+            node --test "${{ inputs.js_test_file }}"
+          else
+            for f in test/*.test.mjs; do
+              echo "=== running $f ==="
+              node --test "$f" || exit 1
+            done
+          fi
 
   wasm:
     name: Build (wasm)
+    if: github.event_name != 'workflow_dispatch' || inputs.run_wasm
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -123,6 +156,7 @@ jobs:
 
   p2p:
     name: Build (p2p native)
+    if: github.event_name != 'workflow_dispatch' || inputs.run_p2p
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -152,6 +186,7 @@ jobs:
 
   p2p-wasm:
     name: Build (p2p-wasm)
+    if: github.event_name != 'workflow_dispatch' || inputs.run_p2p_wasm
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
