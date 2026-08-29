@@ -7,6 +7,7 @@ export const DAG_RELAYS = [
   'wss://relay.nostr.band',
   'wss://relay.primal.net',
   'wss://nostr.wine',
+  'wss://top.testrelay.top',
 ];
 
 export const DAG_CACHE_KEY = 'nostr-dag-demo-cache-v1';

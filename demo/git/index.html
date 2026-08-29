@@ -68,15 +68,19 @@
 
     async function tryWithCorsProxies(operation, baseOptions, contextLabel) {
       let lastError;
-      for (const proxy of CORS_PROXIES) {
+      for (let i = 0; i < CORS_PROXIES.length; i++) {
+        const proxy = CORS_PROXIES[i];
         try {
-          footer.log('git', `${contextLabel} trying proxy ${proxy}`, 'trace');
-          return await operation({ ...baseOptions, corsProxy: proxy });
+          footer.log('git', `${contextLabel} trying proxy[${i}] ${proxy}`, 'trace');
+          const result = await operation({ ...baseOptions, corsProxy: proxy });
+          footer.log('git', `${contextLabel} proxy[${i}] ${proxy} succeeded`, i === 0 ? 'debug' : 'info');
+          return result;
         } catch (e) {
           lastError = e;
-          footer.log('git', `${contextLabel} proxy ${proxy} failed: ${e.message}`, 'trace');
+          footer.log('git', `${contextLabel} proxy[${i}] ${proxy} failed: ${e.message}`, 'trace');
         }
       }
+      footer.log('git', `${contextLabel} all proxies exhausted`, 'warn');
       throw lastError;
     }
 

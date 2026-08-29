@@ -417,7 +417,25 @@ pub fn encode_payload_as_transfer_events(
     payload: &[u8],
     threshold: usize,
 ) -> Result<(nostr::Event, Vec<nostr::Event>), nostr::event::builder::Error> {
+    encode_payload_as_transfer_events_chained(keys, root_id, payload, threshold, None)
+}
+
+/// Encode a payload into a deterministic chain of PIP manifest + slice events.
+///
+/// Each slice carries an `e` tag referencing its **parent** (the manifest for
+/// slice 0, the previous slice for slice N), producing a verifiable chain.
+/// When `rtt_started_at_ms` is provided, every event is stamped with a
+/// `bridge-rtt` tag so receivers can measure round-trip time.
+pub fn encode_payload_as_transfer_events_chained(
+    keys: &nostr::Keys,
+    root_id: &str,
+    payload: &[u8],
+    threshold: usize,
+    rtt_started_at_ms: Option<i64>,
+) -> Result<(nostr::Event, Vec<nostr::Event>), nostr::event::builder::Error> {
     use sha2::{Digest, Sha256};
+    use crate::bridge_roundtrip::stamp_bridge_round_trip_tag;
+
     let sha256 = format!("{:x}", Sha256::digest(payload));
     let mut seq = 0;
     let mut depth = 0;
@@ -442,11 +460,52 @@ pub fn encode_payload_as_transfer_events(
         encoding: "json".to_string(),
         path: String::new(),
     };
-    let manifest_event = build_transfer_manifest_event(keys, &manifest)?;
-    let slice_events = slices
-        .iter()
-        .map(|slice| build_transfer_slice_event(keys, slice, manifest_event.id))
-        .collect::<Result<Vec<_>, _>>()?;
+
+    // Build manifest with optional RTT tag.
+    let manifest_tags: Vec<nostr::Tag> = if let Some(ts) = rtt_started_at_ms {
+        stamp_bridge_round_trip_tag(&[], ts)
+    } else {
+        vec![]
+    };
+    let manifest_event = nostr::EventBuilder::new(TRANSFER_MANIFEST_KIND, serde_json::json!({
+        "protocol": TRANSFER_PROTOCOL,
+        "version": TRANSFER_VERSION,
+        "type": "manifest",
+        "root": manifest.root,
+        "sha256": manifest.sha256,
+        "size": manifest.size,
+        "packets": manifest.packets,
+        "depth": manifest.depth,
+        "mtu": manifest.mtu,
+        "encoding": manifest.encoding,
+        "path": manifest.path,
+    }).to_string())
+    .tags(manifest_tags)
+    .sign_with_keys(keys)?;
+
+    // Build slices in a chain: slice 0 -> manifest, slice N -> slice N-1.
+    let mut slice_events = Vec::with_capacity(slices.len());
+    let mut parent_id = manifest_event.id;
+    for slice in slices {
+        let mut tags = vec![nostr::Tag::event(parent_id)];
+        if let Some(ts) = rtt_started_at_ms {
+            tags = stamp_bridge_round_trip_tag(&tags, ts);
+        }
+        let slice_event = nostr::EventBuilder::new(TRANSFER_SLICE_KIND, serde_json::json!({
+            "protocol": TRANSFER_PROTOCOL,
+            "version": TRANSFER_VERSION,
+            "type": "slice",
+            "id": slice.id,
+            "header": slice.header,
+            "data": slice.data,
+            "is_parity": slice.is_parity,
+        }).to_string())
+        .tags(tags)
+        .sign_with_keys(keys)?;
+        parent_id = slice_event.id;
+        slice_events.push(slice_event);
+    }
+
     Ok((manifest_event, slice_events))
 }
 
@@ -1183,6 +1242,77 @@ mod git_bare_pip_tests {
         assert_eq!(original_head, restored_head);
         println!("=== bare repo restored ===");
         println!("  head {restored_head}");
+    }
+
+    /// Small-payload NIP-PIP round-trip with RTT tracking and deterministic parent chain.
+    /// Manifest and every slice carry a `bridge-rtt` tag; slices reference their parent
+    /// event (manifest for slice 0, previous slice for slice N) via `e` tags.
+    #[test]
+    fn nip_pip_small_payload_round_trip_with_rtt_chain() {
+        use crate::bridge_roundtrip::extract_bridge_round_trip_start_ms;
+
+        let keys = nostr::Keys::generate();
+        let payload = b"hello nip-pip rtt chain";
+        let root_id = "nip-pip-rtt-chain-native";
+        let rtt_start = 1_700_000_000_000i64;
+
+        let (manifest_event, slice_events) =
+            encode_payload_as_transfer_events_chained(&keys, root_id, payload, 8, Some(rtt_start))
+                .expect("encode chained transfer events");
+
+        // Manifest has RTT tag.
+        assert_eq!(manifest_event.kind, TRANSFER_MANIFEST_KIND);
+        let manifest_rtt = extract_bridge_round_trip_start_ms(&manifest_event);
+        assert_eq!(manifest_rtt, Some(rtt_start), "manifest should carry bridge-rtt tag");
+
+        // Manifest has no parent `e` tag (it's the root).
+        let manifest_parent_tags: Vec<_> = manifest_event.tags.iter()
+            .filter(|t| t.as_slice().first().map(|s| s.as_str()) == Some("e"))
+            .collect();
+        assert!(manifest_parent_tags.is_empty(), "manifest should not have parent e tag");
+
+        assert!(!slice_events.is_empty(), "should produce at least one slice");
+
+        let mut previous_id = manifest_event.id;
+        for (seq, slice_event) in slice_events.iter().enumerate() {
+            assert_eq!(slice_event.kind, TRANSFER_SLICE_KIND);
+
+            // RTT tag present.
+            let slice_rtt = extract_bridge_round_trip_start_ms(slice_event);
+            assert_eq!(slice_rtt, Some(rtt_start), "slice {seq} should carry bridge-rtt tag");
+
+            // Parent chain: slice 0 -> manifest, slice N -> slice N-1.
+            let parent_tags: Vec<_> = slice_event.tags.iter()
+                .filter(|t| t.as_slice().first().map(|s| s.as_str()) == Some("e"))
+                .collect();
+            assert_eq!(parent_tags.len(), 1, "slice {seq} should have exactly one parent e tag");
+            let parent_id_hex = parent_tags[0].as_slice().get(1).expect("e tag value");
+            assert_eq!(parent_id_hex, &previous_id.to_hex(), "slice {seq} parent mismatch");
+
+            previous_id = slice_event.id;
+        }
+
+        // Reconstruct payload from slices.
+        let received_slices: Vec<_> = slice_events.iter().map(|ev| {
+            match parse_transfer_event(ev).unwrap() {
+                TransferEventPayload::Slice(s) => s,
+                other => panic!("expected slice, got {other:?}"),
+            }
+        }).collect();
+        let reconstructed = reconstruct_payload(&received_slices).unwrap();
+        assert_eq!(reconstructed.as_slice(), payload.as_slice());
+
+        println!("=== NIP-PIP RTT chain round-trip (native) ===");
+        println!("  root_id      {root_id}");
+        println!("  payload      {} bytes", payload.len());
+        println!("  slices       {}", slice_events.len());
+        println!("  manifest     {} rtt={}", manifest_event.id, manifest_rtt.unwrap());
+        for (seq, ev) in slice_events.iter().enumerate() {
+            let rtt = extract_bridge_round_trip_start_ms(ev).unwrap();
+            println!("  slice[{seq}]   {} rtt={} parent={}", ev.id, rtt,
+                ev.tags.iter().find(|t| t.as_slice().first().map(|s| s.as_str()) == Some("e"))
+                    .and_then(|t| t.as_slice().get(1)).unwrap_or(&"?".to_string()));
+        }
     }
 }
 
