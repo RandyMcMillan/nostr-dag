@@ -1603,6 +1603,22 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         recordRelayInfo(event);
         scheduleRelayRender();
       }
+      // Extract peer presence from native kind-0 metadata events that carry libp2p addresses.
+      if (event.kind === 0) {
+        try {
+          const content = JSON.parse(event.content);
+          if (content.bridge_peer_id && Array.isArray(content.listen_addrs)) {
+            await handleLibp2pPresence({
+              type: 'presence',
+              peer_id: content.bridge_peer_id,
+              listen_addrs: content.listen_addrs,
+              nostr_pubkey: event.pubkey,
+            });
+          }
+        } catch (parseErr) {
+          // silently ignore malformed kind-0 content
+        }
+      }
       pushRecent('nostrToLibp2p', recentNostrToLibp2p, { id: event.id, source: sourceRelay || 'relay', event });
       window.__sharedFooter?.log('nostr', `${source} kind ${event.kind} ${event.id} by ${event.pubkey}`, 'trace', 'checking');
       // Persist every verified event and its relationships to IndexedDB.
@@ -1674,6 +1690,17 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
           window.__sharedFooter?.log('bridge', `dialed wss ${addr}`, 'info', 'available');
         } catch (dialErr) {
           window.__sharedFooter?.log('bridge', `wss dial failed ${addr}: ${dialErr?.message || dialErr}`, 'trace', 'checking');
+        }
+      }
+      // Dial WebRTC-direct addresses (IPv6 public or LAN) for NAT-bypass connectivity.
+      const webrtcAddrs = addrs.filter((a) => String(a).includes('/webrtc-direct'));
+      for (const addr of webrtcAddrs) {
+        try {
+          window.__sharedFooter?.log('bridge', `dialing webrtc-direct ${addr}`, 'trace', 'checking');
+          await node.dial(addr);
+          window.__sharedFooter?.log('bridge', `dialed webrtc-direct ${addr}`, 'info', 'available');
+        } catch (dialErr) {
+          window.__sharedFooter?.log('bridge', `webrtc-direct dial failed ${addr}: ${dialErr?.message || dialErr}`, 'trace', 'checking');
         }
       }
       schedulePeerRender();

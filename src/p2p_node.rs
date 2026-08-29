@@ -12,6 +12,8 @@ use libp2p::{
 #[cfg(feature = "p2p")]
 use libp2p_webrtc::tokio::{Certificate as WebRtcCertificate, Transport as WebRtcTransport};
 #[cfg(feature = "p2p")]
+use nostr_relay_pool::prelude::*;
+#[cfg(feature = "p2p")]
 use libp2p::core::{muxing::StreamMuxerBox, upgrade::Version, Transport};
 #[cfg(feature = "p2p")]
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -189,6 +191,30 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
         }
     }
 
+    // Connect to default Nostr relays so the browser on GitHub Pages can discover
+    // this peer via kind-0 presence events (fallback when gossipsub mesh is empty).
+    let relay_pool = {
+        let pool = RelayPool::default();
+        let default_relays = [
+            "wss://nos.lol",
+            "wss://relay.nostr.com",
+            "wss://relay.nostr.band",
+            "wss://relay.primal.net",
+            "wss://nostr.wine",
+            "wss://top.testrelay.top",
+            "wss://relay.pocketnostr.com",
+            "wss://basspistol.org",
+            "wss://relay.ngit.dev",
+        ];
+        for url in default_relays {
+            if let Err(e) = pool.add_relay(url, RelayOptions::default()).await {
+                warn!(%url, ?e, "relay add failed");
+            }
+        }
+        pool.connect().await;
+        pool
+    };
+
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<NodeCommand>(64);
     let (stdin_ready_tx, stdin_ready_rx) = tokio::sync::oneshot::channel::<()>();
     let cmd_tx_stdin = cmd_tx.clone();
@@ -336,6 +362,29 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                             debug!(?err, "presence broadcast failed");
                         } else {
                             println!("PRESENCE broadcast peers={} addrs={}", subscribed_topic_peers.len(), listen_addrs.len());
+                        }
+                        // Also publish a kind-0 Nostr event so GitHub Pages browsers can discover us.
+                        let nostr_content = format!(
+                            "{{\"type\":\"presence\",\"peer_id\":\"{local_peer_id}\",\"bridge_peer_id\":\"{local_peer_id}\",\"listen_addrs\":[{addrs_json}],\"external_addrs\":[{ext_addrs_json}],\"nostr_pubkey\":\"{}\",\"bridge_protocol\":\"nostr-dag-bridge\",\"bridge_topic\":\"nostr-dag-bridge\",\"bridge_version\":\"{}\"}}",
+                            runtime.public_key(),
+                            env!("CARGO_PKG_VERSION")
+                        );
+                        let tags = vec![
+                            nostr::Tag::parse(vec!["t", "nostr-dag"]).expect("valid hashtag tag"),
+                            nostr::Tag::parse(vec!["t", "bridge"]).expect("valid hashtag tag"),
+                        ];
+                        if let Ok(event) = nostr::EventBuilder::new(nostr::Kind::Custom(0), nostr_content)
+                            .tags(tags)
+                            .sign_with_keys(&runtime_keys)
+                        {
+                            let pool = relay_pool.clone();
+                            tokio::spawn(async move {
+                                if let Err(e) = pool.send_event(&event).await {
+                                    debug!(?e, "nostr presence publish failed");
+                                } else {
+                                    println!("NOSTR presence published id={}", event.id);
+                                }
+                            });
                         }
                     }
                     Some(NodeCommand::Dial(addr)) => {
