@@ -1,3 +1,14 @@
+<!--
+  nostr-dag Git Viewer
+
+  Clones public git repositories into an in-browser LightningFS filesystem
+  using isomorphic-git.  When a libp2p peer advertises a repo bundle via
+  NIP-PIP (kind 39078 manifest + 39079 slices), the viewer fetches the
+  bundle first and clones from it locally.  If no peer has the repo, it
+  falls back to the isomorphic-git CORS proxy.
+
+  See GIT_PROXY.md for the full decentralised git transport specification.
+-->
 <!DOCTYPE html>
 <html lang="en">
 <head>
