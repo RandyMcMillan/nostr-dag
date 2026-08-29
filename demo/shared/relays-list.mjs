@@ -115,7 +115,7 @@ export function createRelaysListController({
       const sourceLabel = defaultVisible.includes(relay)
         ? 'default'
         : source
-          ? (source.owner || 'unknown')
+          ? (source.event_id || source.owner || 'unknown')
           : 'unknown';
       return relayRowHtml(relay, info, sourceLabel, loading);
     }).join('');

@@ -128,6 +128,13 @@
       footerRoot: document.getElementById('pageFooter'),
     });
     footer.setLevel('info');
+    footer.log('git', 'module loaded', 'debug');
+    window.addEventListener('error', (event) => {
+      footer.log('git', `uncaught error: ${event.message} at ${event.filename}:${event.lineno}`, 'error', 'unavailable');
+    });
+    window.addEventListener('unhandledrejection', (event) => {
+      footer.log('git', `unhandled rejection: ${event.reason?.message || event.reason}`, 'error', 'unavailable');
+    });
     const refreshBtn = document.getElementById('refreshBtn');
 
     async function initGitP2P() {
@@ -567,6 +574,7 @@
       const url = repo.url;
       const dir = repo.dir;
       const ensureStart = performance.now();
+      footer.log('git', `ensureRepo start ${repo.name}`, 'debug');
       try {
         await ensureDir(fs, '/repos');
 
@@ -665,7 +673,7 @@
       }).catch((e) => {
         footer.log('git', `${repo.name} fetch failed: ${e.message}`, 'warn');
       });
-      footer.log('git', `${repo.name} fetch done in ${Math.round(performance.now() - fetchStart)} ms`, 'debug');
+      footer.log('git', `${repo.name} fetch done in ${Math.round(performance.now() - fetchStart)} ms proxy=${activeProxy || 'none'}`, 'debug');
       setRepoStatus(repo.name, 'ready');
       footer.log('git', `${repo.name} ensureRepo complete in ${Math.round(performance.now() - ensureStart)} ms`, 'debug');
     }

@@ -478,7 +478,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
             <summary class="bridge-recent-summary">
               <span class="bridge-recent-summary-main">
                 <span class="bridge-recent-summary-top">
-                  <span class="mono">${escapeHtml(label)}</span>
+                  <span class="mono">${eventIdLink}</span>
                   <span class="muted">${escapeHtml(suffix)}</span>
                 </span>
                 <span class="bridge-recent-summary-bottom mono">${escapeHtml(createdAtText)}</span>
