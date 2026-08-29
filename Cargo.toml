@@ -67,7 +67,7 @@ wasm = [
     "dep:serde-wasm-bindgen",
     "dep:serde_json",
 ]
-p2p = ["native", "dep:libp2p", "dep:rcgen"]
+p2p = ["native", "dep:libp2p", "dep:libp2p-webrtc", "dep:rcgen"]
 p2p-wasm = ["wasm", "dep:libp2p", "dep:futures", "dep:js-sys"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
@@ -88,6 +88,7 @@ libp2p = { version = "0.54", optional = true, features = [
     "macros",
     "rsa",
 ] }
+libp2p-webrtc = { version = "0.8.0-alpha", features = ["tokio", "pem"], optional = true }
 nostr = { version = "0.44", default-features = false, features = ["std"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
