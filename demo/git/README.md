@@ -15,16 +15,19 @@ isomorphic-git cannot talk to GitHub directly from a web page.
 The standard workaround is a **CORS proxy** that forwards the git request and
 injects the missing headers.
 
-## Proxy fallback chain
+## Fetch priority
 
-The viewer tries proxies in this order:
+The viewer tries sources in this order:
 
-1. `http://127.0.0.1:3000/proxy/` — local server (localhost only)
-2. `https://cors.isomorphic-git.org` — public fallback
-3. `https://corsproxy.io/?` — second public fallback
+1. **Local bundle cache** — if the repo was already fetched in this session.
+2. **libp2p PIP bundle** — if a peer has advertised the repo (see `demo/shared/git-p2p-transport.mjs`).
+3. `http://127.0.0.1:3000/proxy/` — local server (localhost only)
+4. `https://cors.isomorphic-git.org` — public fallback
+5. `https://corsproxy.io/?` — second public fallback
 
 On localhost the local proxy is usually enough.  On GitHub Pages the local
-proxy is unreachable, so the viewer falls back to the public proxies.
+proxy is unreachable, so the viewer falls back to the public proxies or a
+libp2p peer if one is online.
 
 ## Local proxy endpoint
 

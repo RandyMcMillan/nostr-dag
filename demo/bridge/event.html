@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="light dark" />
+  <link rel="icon" href="../shared/favicon.ico" />
+  <link rel="stylesheet" href="../shared/page.css" />
+  <title>nostr-dag Event</title>
+</head>
+<body>
+  <header id="sharedHeader"></header>
+  <script type="module">
+    import { bootstrapDemoPageChrome } from '../shared/page-shell.mjs';
+    import { resolveHref } from '../shared/page-path.js';
+
+    if (!window.__bridgeChromeInitialized) {
+      window.__bridgeChromeInitialized = true;
+      bootstrapDemoPageChrome({
+        headerRoot: document.getElementById('sharedHeader'),
+        footerRoot: document.getElementById('sharedFooter'),
+        headerOptions: {
+          title: 'nostr-dag',
+          logoHref: resolveHref('../git/', window.location.href),
+          iconHref: resolveHref('../shared/favicon.ico', window.location.href),
+          subtitleHtml: '',
+          navItems: [
+            { label: 'dag', href: resolveHref('../dag/', window.location.href) },
+            { label: 'Bridge', href: resolveHref('./', window.location.href), current: true },
+          ],
+        },
+        footerOptions: {
+          title: 'Logger',
+          initialState: 'idle',
+          initialTitle: 'event detail loading...',
+          initialLevel: 'none',
+          maxEntries: 5000,
+        },
+        footerMode: 'raf',
+        closeFooter: true,
+      });
+    }
+  </script>
+
+  <main class="page-content">
+    <div id="eventDetail" class="panel bridge-event-detail-page"></div>
+  </main>
+
+  <footer id="sharedFooter"></footer>
+
+  <script type="module">
+    import { getDagDb } from '../shared/dag-db.mjs';
+    import { resolveHref } from '../shared/page-path.js';
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+
+    function escapeJson(value) {
+      return escapeHtml(JSON.stringify(value, null, 2));
+    }
+
+    function formatTimestamp(ts) {
+      const n = Number(ts);
+      if (!Number.isFinite(n)) return '—';
+      try {
+        return new Date(n * 1000).toISOString();
+      } catch {
+        return String(ts);
+      }
+    }
+
+    function tagRowHtml(tag) {
+      if (!Array.isArray(tag) || tag.length === 0) return '';
+      const name = tag[0];
+      const values = tag.slice(1);
+      const valueCells = values.map((v) => `<td class="mono">${escapeHtml(v)}</td>`).join('');
+      return `<tr><td class="mono">${escapeHtml(name)}</td>${valueCells}</tr>`;
+    }
+
+    function renderEvent(event) {
+      const detailEl = document.getElementById('eventDetail');
+      if (!detailEl) return;
+
+      const tags = Array.isArray(event.tags) ? event.tags : [];
+      const tagsTable = tags.length
+        ? `<table class="bridge-event-tags">
+            <thead><tr><th>name</th><th>value</th><th>extra</th></tr></thead>
+            <tbody>${tags.map(tagRowHtml).join('')}</tbody>
+           </table>`
+        : '<div class="small muted">No tags.</div>';
+
+      detailEl.innerHTML = `
+        <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <h1 style="margin:0;">Event</h1>
+          <a class="button" href="${escapeHtml(resolveHref('./', window.location.href))}">Back to Bridge</a>
+        </div>
+        <div class="bridge-event-fields">
+          <div class="bridge-event-field"><span class="bridge-event-key">id</span><span class="bridge-event-value mono">${escapeHtml(event.id)}</span></div>
+          <div class="bridge-event-field"><span class="bridge-event-key">pubkey</span><span class="bridge-event-value mono">${escapeHtml(event.pubkey)}</span></div>
+          <div class="bridge-event-field"><span class="bridge-event-key">kind</span><span class="bridge-event-value">${escapeHtml(String(event.kind))}</span></div>
+          <div class="bridge-event-field"><span class="bridge-event-key">created_at</span><span class="bridge-event-value">${escapeHtml(formatTimestamp(event.created_at))}</span></div>
+          <div class="bridge-event-field"><span class="bridge-event-key">sig</span><span class="bridge-event-value mono small">${escapeHtml(event.sig)}</span></div>
+        </div>
+        <h3 style="margin:16px 0 8px;">Content</h3>
+        <pre class="bridge-event-pre">${escapeHtml(event.content ?? '')}</pre>
+        <h3 style="margin:16px 0 8px;">Tags (${tags.length})</h3>
+        ${tagsTable}
+        <h3 style="margin:16px 0 8px;">Raw JSON</h3>
+        <pre class="bridge-event-pre">${escapeJson(event)}</pre>
+      `;
+    }
+
+    function renderNotFound(eventId) {
+      const detailEl = document.getElementById('eventDetail');
+      if (!detailEl) return;
+      detailEl.innerHTML = `
+        <div class="panel">
+          <h1 style="margin-top:0;">Event not found</h1>
+          <p class="small muted">This event is not stored locally.</p>
+          <p class="mono small muted">${escapeHtml(eventId)}</p>
+          <a class="button" href="${escapeHtml(resolveHref('./', window.location.href))}">Back to Bridge</a>
+        </div>
+      `;
+    }
+
+    async function boot() {
+      const params = new URL(window.location.href).searchParams;
+      const eventId = params.get('id') || '';
+      const detailEl = document.getElementById('eventDetail');
+
+      if (!eventId) {
+        if (detailEl) {
+          detailEl.innerHTML = `
+            <div class="panel">
+              <h1 style="margin-top:0;">Event detail</h1>
+              <p class="small muted">Missing <code>id</code> query parameter.</p>
+              <a class="button" href="${escapeHtml(resolveHref('./', window.location.href))}">Back to Bridge</a>
+            </div>
+          `;
+        }
+        return;
+      }
+
+      try {
+        const db = await getDagDb();
+        const row = await db.getEvent(eventId);
+        if (row && row.raw_json) {
+          renderEvent(JSON.parse(row.raw_json));
+        } else if (row && row.id) {
+          // Fallback: if raw_json is missing, reconstruct from row fields.
+          renderEvent({
+            id: row.id,
+            pubkey: row.pubkey,
+            kind: row.kind,
+            created_at: row.created_at,
+            content: row.content,
+            sig: row.sig,
+            tags: [],
+          });
+        } else {
+          renderNotFound(eventId);
+        }
+      } catch (e) {
+        if (detailEl) {
+          detailEl.innerHTML = `
+            <div class="panel">
+              <h1 style="margin-top:0;">Error loading event</h1>
+              <p class="small muted">${escapeHtml(e.message)}</p>
+              <a class="button" href="${escapeHtml(resolveHref('./', window.location.href))}">Back to Bridge</a>
+            </div>
+          `;
+        }
+      }
+    }
+
+    boot();
+  </script>
+</body>
+</html>

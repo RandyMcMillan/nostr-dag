@@ -80,7 +80,7 @@ demo:
     ./demo/run.sh
 
 server: build-server site
-    TARGET_DIR="${CARGO_TARGET_DIR:-$(cargo metadata --format-version 1 --no-deps | grep -o '"target_directory":"[^"]*"' | cut -d'"' -f4)}"; CARGO_TARGET_DIR="$TARGET_DIR" "$TARGET_DIR/debug/nostr-dag-server"
+    P2P_ENABLE=1 cargo run --bin nostr-dag-server --features p2p,native
 
 clean:
     cargo clean

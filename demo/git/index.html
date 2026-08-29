@@ -1236,9 +1236,6 @@
         setRepoStatus(repo.name, 'refreshing...');
         if (route) setRepoHealth(repo.name, 'checking');
         setRepoPing(repo.name, null);
-        if (force) {
-          await wipeRepo(repo);
-        }
         const probeStart = performance.now();
         const probe = route ? probeRemoteHost(repo).catch(() => ({ ok: false, durationMs: null })) : null;
         await ensureRepo(repo, route);
@@ -1291,9 +1288,6 @@
           try {
             footer.log('git', `probing ${repo.name}`, 'trace');
             setRepoPing(repo.name, null);
-            if (force) {
-              await wipeRepo(repo);
-            }
             const probeStart = performance.now();
             const probe = probeRemoteHost(repo).catch(() => false);
             footer.log('git', `ensuring ${repo.name}`, 'debug');

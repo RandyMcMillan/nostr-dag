@@ -1,5 +1,3 @@
-import { neventEncode } from '../vendor/nostr-tools.mjs';
-
 function escapeHtml(value) {
   return String(value)
     .replaceAll('&', '&amp;')
@@ -10,11 +8,8 @@ function escapeHtml(value) {
 }
 
 function eventDetailUrl(eventId) {
-  try {
-    return `https://njump.me/${neventEncode({ id: eventId })}`;
-  } catch {
-    return '';
-  }
+  if (!eventId) return '';
+  return `./event.html?id=${encodeURIComponent(eventId)}`;
 }
 
 export function createRelaysListController({

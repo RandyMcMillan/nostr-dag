@@ -147,21 +147,22 @@ Over time we want (2) to replace (3) and (4) entirely.
 - [x] `publish_pip_payload` broadcasts manifest + slices over gossipsub
 - [x] Periodic re-mirror every 5 minutes
 
-## Phase 2 (Browser) — Status: Partial
+## Phase 2 (Browser) — Status: Implemented
 
 - [x] `GitP2PTransport` listens for manifest/slice events
 - [x] `createBundleHttpClient` serves bundle bytes to isomorphic-git
-- [ ] Wire `GitP2PTransport` into `demo/git/index.html` as primary fetch path
-- [ ] Show UI indicator when a repo is being fetched from peers vs proxy
+- [x] Wire `GitP2PTransport` into `demo/git/index.html` as primary fetch path
+- [x] Show UI indicator when a repo is being fetched from peers vs proxy
+- [x] Add parent-event `e` tag chaining to slices
+- [x] RTT tracking tags on all PIP events (native example exists)
 - [ ] Handle partial bundles / incremental updates
-- [ ] Add parent-event `e` tag chaining to slices
 
-## Phase 3 (Integration)
+## Phase 3 (Integration) — Status: Partial
 
+- [x] On-demand bundle request/response via gossipsub (browser requests, native re-publishes)
 - [ ] Native peer responds to slice re-requests (ACK/NAK per slice)
 - [ ] Range/limit field in manifest for partial bundles
-- [ ] RTT tracking tags on all PIP events
-- [ ] Quorum attestation for bundle integrity (kind 39080-39082)
+- [x] Quorum attestation for bundle integrity (kind 39080-39082) — implemented, not yet used for git
 
 ## Security Notes
 

@@ -762,6 +762,62 @@ button:hover, a.button:hover { background:var(--button-hover); }
   gap:6px;
 }
 
+.bridge-event-fields {
+  display:grid;
+  gap:10px;
+  margin:12px 0;
+}
+
+.bridge-event-field {
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+}
+
+.bridge-event-key {
+  font-size:12px;
+  font-weight:600;
+  color:var(--muted);
+  text-transform:uppercase;
+  letter-spacing:0.03em;
+}
+
+.bridge-event-value {
+  word-break:break-word;
+}
+
+.bridge-event-pre {
+  margin:0;
+  padding:12px;
+  border:1px solid var(--border);
+  border-radius:10px;
+  background:var(--surface);
+  color:var(--fg);
+  overflow:auto;
+  white-space:pre-wrap;
+  word-break:break-word;
+  font-size:12px;
+}
+
+.bridge-event-tags {
+  width:100%;
+  border-collapse:collapse;
+  font-size:13px;
+}
+
+.bridge-event-tags th,
+.bridge-event-tags td {
+  padding:8px 10px;
+  border:1px solid var(--border);
+  text-align:left;
+  vertical-align:top;
+}
+
+.bridge-event-tags th {
+  background:var(--surface);
+  font-weight:600;
+}
+
 .bridge-pill-relay {
   background:rgba(34,197,94,.12);
   border-color:rgba(34,197,94,.35);

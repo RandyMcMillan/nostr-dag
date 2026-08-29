@@ -98,6 +98,12 @@ pub struct PacketHeader {
     pub total_packets: u64,
 }
 
+/// One packet in a recursive PIP packet tree.
+///
+/// `id` follows the gnostr naming convention (`ROOT`, `ROOT.0`, `ROOT.0.0`, …,
+/// `ROOT.0.P` for parity).  `header.seq_num` is assigned monotonically during
+/// depth-first traversal; `header.total_packets` is filled once the tree is
+/// complete.  `is_parity` marks XOR-recovery slices produced at internal nodes.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ProtocolSlice {
     pub id: String,
@@ -106,6 +112,12 @@ pub struct ProtocolSlice {
     pub is_parity: bool,
 }
 
+/// PIP transfer manifest describing a multi-slice payload.
+///
+/// `root` is an application-defined identifier shared by the manifest and all
+/// its slices.  `sha256` is the lowercase-hex digest of the *full reconstructed*
+/// payload.  `path` is an optional resource identifier (e.g. a git repo URL)
+/// that browsers use to index available bundles.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PacketManifest {
     pub root: String,
@@ -411,6 +423,9 @@ pub fn build_transfer_slice_event(
 /// This is the explicit "bytes -> Nostr events" conversion used by the bare-repo transfer
 /// tests and by any future caller that wants to package a blob for publication.
 /// Computes a SHA-256 digest over the full payload and builds the recursive packet tree.
+///
+/// This convenience wrapper delegates to [`encode_payload_as_transfer_events_chained`]
+/// without RTT tracking and without parent-event chaining beyond the manifest reference.
 pub fn encode_payload_as_transfer_events(
     keys: &nostr::Keys,
     root_id: &str,

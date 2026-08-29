@@ -621,7 +621,9 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                                 );
                             }
 
-                            // Handle on-demand bundle requests from browsers.
+                            // Handle on-demand bundle requests from browsers (PIP.md §15).
+                            // When a browser publishes `{"protocol":"nostr-dag-bridge","direction":"request","path":"<url>"}`
+                            // we look up the bundle in our local cache and re-publish it if found.
                             if let Some(req_url) = parse_bundle_request(&text) {
                                 if let Some(bytes) = bundle_cache.get(&req_url) {
                                     safe_println!("BUNDLE_REQUEST url={} cached_bytes={}", req_url, bytes.len());
@@ -810,6 +812,17 @@ pub struct NipPipPublication {
     pub messages: Vec<String>,
 }
 
+/// Build a complete NIP-PIP publication ready for gossipsub broadcast.
+///
+/// 1. Packetizes `payload` into a recursive tree with the given `threshold`.
+/// 2. Creates a manifest event (kind 39078) and slice events (kind 39079) using
+///    [`encode_payload_as_transfer_events_chained`], so each slice references its
+///    parent event (manifest for slice 0, previous slice for slice N).
+/// 3. Wraps every event in a bridge envelope (`nostr-dag-bridge`) so it can be
+///    published directly on the gossipsub topic.
+///
+/// `path` is stored in the manifest (e.g. the git repo URL) so browsers can
+/// index bundles by origin.
 #[cfg(feature = "p2p")]
 pub fn build_nip_pip_publication(
     keys: &Keys,
@@ -847,6 +860,14 @@ pub fn build_nip_pip_publication(
     })
 }
 
+/// Publish a payload as a NIP-PIP manifest + slices over gossipsub.
+///
+/// Waits up to 20 seconds for at least one subscribed peer before proceeding
+/// (logs a warning if none appear).  Uses [`build_nip_pip_publication`] to
+/// packetize the payload, then publishes each bridge envelope with retry logic
+/// for `InsufficientPeers`.  If `path` is provided the bundle is also stored in
+/// the in-memory `bundle_cache` so that on-demand requests can be satisfied
+/// without re-packetizing.
 #[cfg(feature = "p2p")]
 async fn publish_pip_payload(
     runtime_keys: &Keys,
@@ -1268,6 +1289,11 @@ fn decode_event_message(message: &str) -> Option<Event> {
     serde_json::from_str::<Event>(message).ok()
 }
 
+/// Parse an on-demand bundle request gossipsub message.
+///
+/// Recognises the lightweight request envelope defined in PIP.md §15:
+/// `{"protocol":"nostr-dag-bridge","direction":"request","path":"<repo-url>"}`.
+/// Returns the repo URL when the envelope is valid, otherwise `None`.
 #[cfg(feature = "p2p")]
 fn parse_bundle_request(message: &str) -> Option<String> {
     let parsed: serde_json::Value = serde_json::from_str(message).ok()?;

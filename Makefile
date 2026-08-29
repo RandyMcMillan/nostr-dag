@@ -119,7 +119,7 @@ demo:
 	./demo/run.sh
 
 server: build-server site
-	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) $(CARGO_TARGET_DIR)/debug/nostr-dag-server
+	P2P_ENABLE=1 cargo run --bin nostr-dag-server --features p2p,native
 
 clean:
 	$(CARGO) clean

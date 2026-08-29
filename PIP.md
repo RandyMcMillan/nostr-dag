@@ -125,7 +125,12 @@ Slice events are Nostr events with `kind` `39079`.  Their `content` is a JSON ob
 }
 ```
 
-Each slice event MUST also include an `e` tag referencing the manifest event it belongs to.
+Each slice event MUST include an `e` tag referencing its **parent** event:
+- Slice 0 references the manifest event.
+- Slice N references slice N-1.
+
+This produces a deterministic, tamper-evident chain.  The manifest is the anchor;
+every subsequent slice is only valid if its parent event id resolves.
 
 ### 6.1 Required fields
 
@@ -229,6 +234,10 @@ manifest for a specific payload, or to re-send missing slices.
 - Producers SHOULD include the `request_id` in the manifest `metadata` field so the requester can correlate the
   response.
 - If the producer does not hold the payload, it MUST silently ignore the request.
+
+> **Note:** The kind-39077 request event is reserved for future Nostr-relay-based repair requests.  The live
+> on-demand bundle request path (browser → native peer) currently uses a lightweight gossipsub envelope defined
+> in §15.
 
 ## 10. Transfer ACK / NAK events
 
@@ -387,3 +396,39 @@ The Rust implementation lives in:
 - `src/quorum.rs` — `BlobQuorum` struct
 - `src/event.rs` — `create_attest_event`, `create_seal_event`, `create_join_event`
 - `src/dag.rs` — `Dag::add_participant`
+
+## 15. On-demand bundle request / response (gossipsub)
+
+When a browser needs a bundle that no peer has advertised recently, it MAY publish a
+**request envelope** directly on the `nostr-dag-bridge` gossipsub topic.  Native peers that
+have the bundle in their local cache re-publish the full manifest + slice sequence via
+`PublishPipPayload`.
+
+### 15.1 Request envelope
+
+```json
+{
+  "protocol": "nostr-dag-bridge",
+  "version": 1,
+  "direction": "request",
+  "path": "https://github.com/owner/repo"
+}
+```
+
+- `protocol` — MUST be `nostr-dag-bridge`
+- `direction` — MUST be `"request"`
+- `path` — MUST be the repo URL used as the manifest `path` field
+
+### 15.2 Behaviour
+
+- Requesters SHOULD set a local timeout (default 30 s) and MAY retry.
+- Producers that hold a cached bundle for `path` SHOULD respond by publishing the complete
+  manifest and slices as bridge envelopes on the same topic.
+- Producers MUST silently ignore requests for bundles they do not hold.
+- The response is not addressed to any specific peer; it is broadcast so that every
+  subscriber benefits.
+
+### 15.3 Reference implementation
+
+- Browser side: `demo/shared/git-p2p-transport.mjs` — `GitP2PTransport.requestBundle()`
+- Native side: `src/p2p_node.rs` — `parse_bundle_request()` and the gossipsub message loop

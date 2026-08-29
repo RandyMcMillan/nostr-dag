@@ -5,8 +5,6 @@ import {
   normalizeRelayUrl,
   sourceForRelay,
 } from './bridge-relay-data.mjs';
-import { neventEncode } from '../vendor/nostr-tools.mjs';
-
 const detailEl = document.getElementById('relayDetail');
 const relayParam = new URL(window.location.href).searchParams.get('relay');
 
@@ -20,11 +18,8 @@ function escapeHtml(value) {
 }
 
 function eventDetailUrl(eventId) {
-  try {
-    return `https://njump.me/${neventEncode({ id: eventId })}`;
-  } catch {
-    return '';
-  }
+  if (!eventId) return '';
+  return `./event.html?id=${encodeURIComponent(eventId)}`;
 }
 
 function supportsNip34GitKinds(info) {

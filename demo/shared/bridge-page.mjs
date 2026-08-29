@@ -425,11 +425,8 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     }
 
     function eventDetailUrl(eventId) {
-      try {
-        return `https://njump.me/${neventEncode({ id: eventId })}`;
-      } catch {
-        return '';
-      }
+      if (!eventId) return '';
+      return `./event.html?id=${encodeURIComponent(eventId)}`;
     }
 
     function scheduleRecentListsRender() {
@@ -471,7 +468,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         const event = item?.event || bookmarkedSnapshot?.event || {};
         const eventUrl = eventDetailUrl(event?.id || item?.id || '');
         const eventLink = eventUrl
-          ? `<a class="bridge-recent-event-link" href="${escapeHtml(eventUrl)}" target="_blank" rel="noreferrer noopener" title="Open event on njump">↗</a>`
+          ? `<a class="bridge-recent-event-link" href="${escapeHtml(eventUrl)}" target="_blank" rel="noreferrer noopener" title="Open event detail">↗</a>`
           : '';
         const eventIdLink = eventUrl
           ? `<a class="bridge-event-id-link" href="${escapeHtml(eventUrl)}" target="_blank" rel="noreferrer noopener">${escapeHtml(event?.id || 'n/a')}</a>`

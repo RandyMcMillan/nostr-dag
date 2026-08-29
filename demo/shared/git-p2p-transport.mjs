@@ -109,6 +109,23 @@ export class GitP2PTransport {
     return this.manifests.has(repoUrl);
   }
 
+  /**
+   * Request a git bundle for `repoUrl` from libp2p peers.
+   *
+   * If the bundle is already cached locally, resolves immediately.  Otherwise
+   * publishes a PIP on-demand request envelope on the gossipsub topic:
+   *
+   * ```json
+   * {"protocol":"nostr-dag-bridge","version":1,"direction":"request","path":"<repoUrl>"}
+   * ```
+   *
+   * Native peers that hold the bundle in their cache respond by re-publishing
+   * the manifest + slices, which this transport listens for and reconstructs.
+   *
+   * @param {string} repoUrl
+   * @param {number} timeoutMs — default 30000
+   * @returns {Promise<Uint8Array>}
+   */
   requestBundle(repoUrl, timeoutMs = 30000) {
     return new Promise((resolve, reject) => {
       const manifest = this.manifests.get(repoUrl);
@@ -138,7 +155,8 @@ export class GitP2PTransport {
       });
       this.onLog('debug', `git-p2p requesting repo=${repoUrl} timeout=${timeoutMs}ms`);
 
-      // Publish a request so native peers can re-broadcast the bundle.
+      // Publish a PIP on-demand request envelope (PIP.md §15) so native peers
+      // can re-broadcast the bundle if they have it cached.
       try {
         const req = JSON.stringify({
           protocol: 'nostr-dag-bridge',

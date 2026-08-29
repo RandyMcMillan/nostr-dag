@@ -593,6 +593,9 @@ async fn handle_proxy(
              Access-Control-Allow-Headers: *\r\n\
              Access-Control-Max-Age: 86400\r\n\
              Content-Length: 0\r\n\
+             X-Frame-Options: DENY\r\n\
+             X-Content-Type-Options: nosniff\r\n\
+             Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src *; img-src 'self' data: https:; font-src 'self'; frame-ancestors 'none';\r\n\
              Connection: close\r\n\r\n"
         );
         return response.into_bytes();
@@ -637,6 +640,9 @@ async fn handle_proxy(
                  Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n\
                  Access-Control-Allow-Headers: *\r\n\
                  Content-Length: {}\r\n\
+                 X-Frame-Options: DENY\r\n\
+                 X-Content-Type-Options: nosniff\r\n\
+                 Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src *; img-src 'self' data: https:; font-src 'self'; frame-ancestors 'none';\r\n\
                  Connection: close\r\n",
                 if head_only { 0 } else { resp_bytes.len() }
             );
@@ -660,6 +666,9 @@ async fn handle_proxy(
                  Access-Control-Allow-Origin: *\r\n\
                  Content-Type: text/plain; charset=utf-8\r\n\
                  Content-Length: {}\r\n\
+                 X-Frame-Options: DENY\r\n\
+                 X-Content-Type-Options: nosniff\r\n\
+                 Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src *; img-src 'self' data: https:; font-src 'self'; frame-ancestors 'none';\r\n\
                  Connection: close\r\n\r\n\
                  {body_text}",
                 body_text.len()
@@ -1174,7 +1183,13 @@ fn response_text(status: u16, reason: &str, body: &str, content_type: &'static s
 
 fn response_redirect(location: &str) -> Vec<u8> {
     format!(
-        "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        "HTTP/1.1 302 Found\r\n\
+         Location: {location}\r\n\
+         Content-Length: 0\r\n\
+         X-Frame-Options: DENY\r\n\
+         X-Content-Type-Options: nosniff\r\n\
+         Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src *; img-src 'self' data: https:; font-src 'self'; frame-ancestors 'none';\r\n\
+         Connection: close\r\n\r\n"
     )
     .into_bytes()
 }
@@ -1189,7 +1204,13 @@ fn response_bytes(
     let body_len = if head_only { 0 } else { body.len() };
     let body = if head_only { Vec::new() } else { body };
     let mut response = format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {body_len}\r\nConnection: close\r\n\r\n"
+        "HTTP/1.1 {status} {reason}\r\n\
+         Content-Type: {content_type}\r\n\
+         Content-Length: {body_len}\r\n\
+         X-Frame-Options: DENY\r\n\
+         X-Content-Type-Options: nosniff\r\n\
+         Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src *; img-src 'self' data: https:; font-src 'self'; frame-ancestors 'none';\r\n\
+         Connection: close\r\n\r\n"
     )
     .into_bytes();
     response.extend_from_slice(&body);
