@@ -210,7 +210,9 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
     // Connect to default Nostr relays so the browser on GitHub Pages can discover
     // this peer via kind-0 presence events (fallback when gossipsub mesh is empty).
     let relay_pool = {
-        let pool = RelayPool::default();
+        let pool = RelayPool::builder()
+            .opts(RelayPoolOptions::new().automatic_authentication(false))
+            .build();
         let default_relays = [
             "wss://nos.lol",
             "wss://relay.nostr.com",
