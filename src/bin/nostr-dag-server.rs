@@ -66,6 +66,9 @@ struct PeerStore {
     entries: Mutex<std::collections::BTreeMap<String, PeerEntry>>,
 }
 
+/// Peers that haven't reported in this long are evicted from the store.
+const PEER_TTL_MS: u64 = 300_000; // 5 minutes
+
 static NIP11_SEMAPHORE: OnceLock<Semaphore> = OnceLock::new();
 
 fn nip11_semaphore() -> &'static Semaphore {
@@ -117,12 +120,15 @@ impl PeerStore {
     }
 
     fn all(&self) -> Vec<PeerEntry> {
-        self.entries
-            .lock()
-            .expect("peer store poisoned")
-            .values()
-            .cloned()
-            .collect()
+        let mut entries = self.entries.lock().expect("peer store poisoned");
+        let now = now_ms();
+        let before = entries.len();
+        entries.retain(|_, entry| now.saturating_sub(entry.updated_at) < PEER_TTL_MS);
+        let pruned = before.saturating_sub(entries.len());
+        if pruned > 0 {
+            tracing::debug!("pruned {} stale peer(s)", pruned);
+        }
+        entries.values().cloned().collect()
     }
 }
 
