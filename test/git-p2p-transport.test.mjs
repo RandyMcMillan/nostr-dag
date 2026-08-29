@@ -214,3 +214,26 @@ test('GitP2PTransport requestBundle times out when slices missing', async () => 
     /timeout/
   );
 });
+
+test('GitP2PTransport requestBundle publishes request when manifest not cached', async () => {
+  const published = [];
+  const node = createMockNode();
+  node.services.pubsub.publish = (_topic, data) => {
+    published.push(new TextDecoder().decode(data));
+  };
+  const transport = new GitP2PTransport({ node });
+  transport.start();
+
+  const repoUrl = 'https://github.com/test/repo4';
+  try {
+    await transport.requestBundle(repoUrl, 50);
+  } catch {
+    // expected timeout
+  }
+
+  assert.equal(published.length, 1, 'should publish exactly one request');
+  const req = JSON.parse(published[0]);
+  assert.equal(req.protocol, 'nostr-dag-bridge');
+  assert.equal(req.direction, 'request');
+  assert.equal(req.path, repoUrl);
+});
