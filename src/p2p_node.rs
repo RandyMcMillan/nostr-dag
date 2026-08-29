@@ -156,6 +156,16 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
     let mut external_addrs = Vec::<String>::new();
     let mut listen_addrs: Vec<String> = Vec::new();
 
+    // Index bootstrap peers by PeerId so we can auto-listen on relay circuits.
+    let mut bootstrap_peer_addrs = HashMap::<PeerId, Multiaddr>::new();
+    for addr in &bootstrap_peers {
+        if let Some(pid) = addr.iter().find_map(|p| if let Protocol::P2p(hash) = p {
+            PeerId::from_multihash(hash.into()).ok()
+        } else { None }) {
+            bootstrap_peer_addrs.insert(pid, addr.clone());
+        }
+    }
+
     if let Ok(addr) = std::env::var("P2P_DIAL") {
         let addr = addr.trim();
         if !addr.is_empty() {
@@ -318,7 +328,7 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                         } else {
                             println!("DETECTED native-topic peer peer={} addr={}", peer_id, remote_addr);
                         }
-                        // If this is our relay peer, start listening via the relay.
+                        // If this is our explicit relay peer, start listening via the relay.
                         if relay_peer_id == Some(peer_id) {
                             if let Some(ref addr) = relay_addr {
                                 let circuit = addr.clone().with(Protocol::P2pCircuit);
@@ -326,6 +336,14 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                                 if let Err(err) = swarm.listen_on(circuit) {
                                     warn!(?err, "relay listen failed");
                                 }
+                            }
+                        }
+                        // Also try to listen on a circuit through any bootstrap peer that supports relay.
+                        if let Some(addr) = bootstrap_peer_addrs.get(&peer_id) {
+                            let circuit = addr.clone().with(Protocol::P2pCircuit);
+                            println!("BOOTSTRAP_RELAY listening on {circuit}");
+                            if let Err(err) = swarm.listen_on(circuit) {
+                                debug!(?err, "bootstrap relay listen failed (peer may not be a relay)");
                             }
                         }
                     }
