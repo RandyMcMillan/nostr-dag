@@ -523,7 +523,7 @@ async function fetchLocalNativePeerAddrs() {
       if (peer.kind !== "native" || peer.source !== "localhost") continue;
       const peerAddrs = parsePeerAddrs(peer.detail);
       for (const addr of peerAddrs) {
-        if (addr.includes("/ws") || addr.includes("/wss")) {
+        if (addr.includes("/ws") || addr.includes("/wss") || addr.includes("/webrtc")) {
           // Append peer id so libp2p bootstrap can validate the dial.
           const suffix = `/p2p/${peer.peer_id}`;
           addrs.push(addr.endsWith(suffix) ? addr : `${addr}${suffix}`);
