@@ -163,13 +163,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if env::var("P2P_ENABLE").map(|v| v == "1").unwrap_or(false) {
         if let Some(bin_path) = find_p2p_node_binary() {
             info!(?bin_path, "spawning full-stack p2p-node peer");
-            match Command::new(&bin_path)
-                .env_remove("P2P_ENABLE")
+            let mut cmd = Command::new(&bin_path);
+            cmd.env_remove("P2P_ENABLE")
                 .env_remove("HOST")
                 .env_remove("PORT")
                 .stdout(Stdio::piped())
-                .stderr(Stdio::inherit())
-                .spawn()
+                .stderr(Stdio::inherit());
+            if let Ok(relay) = env::var("P2P_RELAY") {
+                if !relay.trim().is_empty() {
+                    cmd.env("P2P_RELAY", relay);
+                }
+            }
+            match cmd.spawn()
             {
                 Ok(mut child) => {
                     if let Some(stdout) = child.stdout.take() {
@@ -180,6 +185,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 let trimmed = line.trim();
                                 if trimmed.starts_with("READY ")
                                     || trimmed.starts_with("LISTENING ")
+                                    || trimmed.starts_with("DIAL ")
                                     || trimmed.starts_with("STATUS ")
                                     || trimmed.starts_with("BOOTSTRAP ")
                                     || trimmed.starts_with("DETECTED ")

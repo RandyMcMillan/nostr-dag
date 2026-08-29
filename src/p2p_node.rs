@@ -165,6 +165,19 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
         }
     }
 
+    let relay_addr = std::env::var("P2P_RELAY").ok().and_then(|addr| addr.trim().parse::<Multiaddr>().ok());
+    let relay_peer_id = relay_addr.as_ref().and_then(|addr| {
+        addr.iter().find_map(|p| if let Protocol::P2p(hash) = p {
+            Some(PeerId::from_multihash(hash.into()).ok()?)
+        } else { None })
+    });
+    if let Some(ref addr) = relay_addr {
+        println!("RELAY dial {addr}");
+        if let Err(err) = swarm.dial(addr.clone()) {
+            warn!(%addr, ?err, "relay dial failed");
+        }
+    }
+
     loop {
         tokio::select! {
             command = cmd_rx.recv() => {
@@ -235,6 +248,8 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                             listen_addrs.push(address.clone());
                         }
                         println!("LISTENING {address}");
+                        let dial_addr = format!("{address}/p2p/{local_peer_id}");
+                        println!("DIAL {dial_addr}");
                     }
                     SwarmEvent::ExternalAddrConfirmed { address } => {
                         let address = address.to_string();
@@ -275,6 +290,16 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                             println!("DETECTED wasm-topic peer peer={} addr={}", peer_id, remote_addr);
                         } else {
                             println!("DETECTED native-topic peer peer={} addr={}", peer_id, remote_addr);
+                        }
+                        // If this is our relay peer, start listening via the relay.
+                        if relay_peer_id == Some(peer_id) {
+                            if let Some(ref addr) = relay_addr {
+                                let circuit = addr.clone().with(Protocol::P2pCircuit);
+                                println!("RELAY listening on {circuit}");
+                                if let Err(err) = swarm.listen_on(circuit) {
+                                    warn!(?err, "relay listen failed");
+                                }
+                            }
                         }
                     }
                     SwarmEvent::ConnectionClosed { peer_id, .. } => {
