@@ -570,10 +570,10 @@
       try {
         await ensureDir(fs, '/repos');
 
-        // Try libp2p bundle fetch first
+        // Try libp2p bundle fetch first (always request; transport handles cache hits)
         let bundlePath = null;
         const transport = window.__gitViewerP2pTransport;
-        if (transport && transport.hasRepo(url)) {
+        if (transport) {
           try {
             setRepoStatus(repo.name, 'fetching p2p bundle...');
             footer.log('git', `${repo.name} requesting bundle via libp2p`, 'info');
