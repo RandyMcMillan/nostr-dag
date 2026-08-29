@@ -623,10 +623,22 @@
 
     async function fetchRepoRefs(repo, route = null, onProgress = null) {
       const selection = fetchSelectionOptions(route);
+      // isomorphic-git can skip tag fetching when a specific ref is combined with
+      // all: true.  We do a targeted fetch for the ref first, then a second
+      // fetch without ref constraints so tags are always refreshed.
+      if (selection.ref) {
+        await tryWithCorsProxies(
+          (opts) => git.fetch({ fs, http, dir: repo.dir, url: repo.url, force: true, depth: route ? GIT_HISTORY_DEPTH : undefined, onProgress, ...selection, ...opts }),
+          {},
+          `${repo.name} fetch-ref`,
+        ).catch((e) => {
+          footer.log('git', `${repo.name} fetch-ref ${selection.ref} failed: ${e.message}`, 'warn');
+        });
+      }
       await tryWithCorsProxies(
-        (opts) => git.fetch({ fs, http, dir: repo.dir, url: repo.url, all: true, tags: true, force: true, prune: true, depth: route ? GIT_HISTORY_DEPTH : undefined, onProgress, ...selection, ...opts }),
+        (opts) => git.fetch({ fs, http, dir: repo.dir, url: repo.url, all: true, tags: true, force: true, prune: true, depth: route ? GIT_HISTORY_DEPTH : undefined, onProgress, ...opts }),
         {},
-        `${repo.name} fetch`,
+        `${repo.name} fetch-all`,
       );
     }
 
