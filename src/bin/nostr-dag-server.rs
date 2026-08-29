@@ -146,6 +146,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .and_then(|value| value.parse().ok())
         .unwrap_or(DEFAULT_PORT);
     let site_dir = env::var("SITE_DIR").unwrap_or_else(|_| DEFAULT_SITE_DIR.to_string());
+    let site_dir = if std::path::Path::new(&site_dir).is_dir() {
+        site_dir
+    } else {
+        println!("WARN site_dir '{site_dir}' not found, falling back to 'demo/'");
+        "demo".to_string()
+    };
     let db_path = env::var("DB_PATH").unwrap_or_else(|_| DEFAULT_DB_PATH.to_string());
     let logger_store = Arc::new(LoggerStore::default());
     let peer_store = Arc::new(PeerStore::default());
