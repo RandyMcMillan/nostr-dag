@@ -1141,12 +1141,22 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         const response = await fetch('/peers', { cache: 'no-store' });
         if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
         const peers = await response.json();
-        remotePeers.clear();
+        // Only remove localhost-sourced peers that are no longer reported;
+        // leave libp2p-discovered peers intact so GH Pages can see relay peers.
+        const reportedKeys = new Set();
         for (const peer of Array.isArray(peers) ? peers : []) {
           upsertPeer('localhost', peer);
+          reportedKeys.add(`${peer.peer_id}:${peer.path || '/'}:${peer.kind || 'unknown'}`);
+        }
+        for (const [key, peer] of remotePeers) {
+          if (peer.source === 'localhost' || peer.source === 'http') {
+            const peerKey = `${peer.peer_id}:${peer.path || '/'}:${peer.kind || 'unknown'}`;
+            if (!reportedKeys.has(peerKey)) remotePeers.delete(key);
+          }
         }
         schedulePeerRender();
       } catch (e) {
+        // On GH Pages /peers is unavailable; do not clear libp2p-discovered peers.
         schedulePeerRender();
       }
     }
@@ -1550,7 +1560,35 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       }
     }
 
+    async function handleLibp2pPresence(message) {
+      if (!message || message.type !== 'presence' || !message.peer_id) return false;
+      const peerId = String(message.peer_id);
+      const addrs = Array.isArray(message.listen_addrs) ? message.listen_addrs.filter(Boolean) : [];
+      const detail = JSON.stringify({ addrs, nostr_pubkey: message.nostr_pubkey || '' });
+      upsertPeer('libp2p', {
+        peer_id: peerId,
+        kind: 'presence',
+        path: '/',
+        detail,
+        updated_at: Date.now(),
+      });
+      window.__sharedFooter?.log('bridge', `presence peer=${peerId} addrs=${addrs.length}`, 'debug', 'checking');
+      const circuitAddrs = addrs.filter((a) => a.includes('/p2p-circuit/'));
+      for (const addr of circuitAddrs) {
+        try {
+          window.__sharedFooter?.log('bridge', `dialing circuit ${addr}`, 'trace', 'checking');
+          await node.dial(addr);
+          window.__sharedFooter?.log('bridge', `dialed circuit ${addr}`, 'info', 'available');
+        } catch (dialErr) {
+          window.__sharedFooter?.log('bridge', `circuit dial failed ${addr}: ${dialErr?.message || dialErr}`, 'trace', 'checking');
+        }
+      }
+      schedulePeerRender();
+      return true;
+    }
+
     async function handleLibp2pMessage(message) {
+      if (await handleLibp2pPresence(message)) return;
       const envelope = decodeBridgeMessage(message);
       if (!envelope) {
         window.__sharedFooter?.log('bridge', 'rejected libp2p payload with unsupported protocol', 'warn', 'unavailable');
