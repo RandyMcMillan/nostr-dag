@@ -10,6 +10,8 @@ use libp2p::{
     tcp, yamux, Multiaddr, PeerId,
 };
 #[cfg(feature = "p2p")]
+use libp2p_webrtc::tokio::{Certificate as WebRtcCertificate, Transport as WebRtcTransport};
+#[cfg(feature = "p2p")]
 use libp2p::core::{muxing::StreamMuxerBox, upgrade::Version, Transport};
 #[cfg(feature = "p2p")]
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -135,8 +137,17 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
         .authenticate(noise::Config::new(&local_key)?)
         .multiplex(yamux::Config::default())
         .map(|(p, c), _| (p, StreamMuxerBox::new(c)));
-    let transport = relay_transport
+    let relay_tcp_ws = relay_transport
         .or_transport(tcp_ws)
+        .map(|either, _| either.into_inner());
+
+    let webrtc_cert = WebRtcCertificate::generate(&mut rand::thread_rng())
+        .map_err(|e| format!("webrtc cert: {e}"))?;
+    let webrtc_transport = WebRtcTransport::new(local_key.clone(), webrtc_cert)
+        .map(|(p, c), _| (p, StreamMuxerBox::new(c)));
+
+    let transport = webrtc_transport
+        .or_transport(relay_tcp_ws)
         .map(|either, _| either.into_inner());
 
     let mut swarm = libp2p::swarm::Swarm::new(
@@ -159,6 +170,8 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
     if std::env::var("WSS_DISABLE").is_err() {
         swarm.listen_on("/ip4/0.0.0.0/tcp/0/tls/ws".parse::<Multiaddr>()?)?;
     }
+    swarm.listen_on("/ip4/0.0.0.0/udp/0/webrtc-direct".parse::<Multiaddr>()?)?;
+    swarm.listen_on("/ip6/::/udp/0/webrtc-direct".parse::<Multiaddr>()?)?;
     for addr in &bootstrap_peers {
         if let Err(err) = swarm.dial(addr.clone()) {
             warn!(%addr, ?err, "bootstrap dial failed");
