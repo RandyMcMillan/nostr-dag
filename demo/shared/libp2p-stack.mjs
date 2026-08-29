@@ -108,6 +108,23 @@ const peerDetailSummary = (detail) => {
 
 const passthroughFilter = (multiaddrs) => (Array.isArray(multiaddrs) ? multiaddrs.filter(Boolean) : []).filter(Boolean);
 
+/**
+ * Strip unencrypted /ws multiaddrs when running on HTTPS to avoid mixed
+ * content warnings (and blocked dials) in the browser.
+ */
+const secureWsDialFilter = (multiaddrs) => {
+  const addrs = passthroughFilter(multiaddrs);
+  if (globalThis.location?.protocol !== 'https:') return addrs;
+  return addrs.filter((addr) => {
+    const parts = String(addr).split('/').filter(Boolean);
+    // /wss is secure; /ws (without /wss) is not.
+    const hasWs = parts.includes('ws');
+    const hasWss = parts.includes('wss');
+    if (hasWs && !hasWss) return false;
+    return true;
+  });
+};
+
 const ensureSeedBytes = async (seed) => {
   if (seed instanceof Uint8Array) return seed;
   if (typeof seed === "string") {
@@ -300,20 +317,24 @@ export async function createSharedLibp2pStack({
   emitLog(onLog, "trace", "shared libp2p stack configuring transports and services", "checking");
   emitLog(onLog, "trace", "transports: webSockets, webRTC, webRTCDirect, circuitRelayTransport", "checking");
   emitLog(onLog, "trace", "services: identify, autoNAT, dcutr, pubsub", "checking");
-  const buildTransportConfig = ({ webRTC: useWebRTC, webRTCDirect: useWebRTCDirect, circuitRelay: useCircuitRelay }) => ({
-    transports: [
-      ensureTransportFilters(webSockets(), "webSockets", onLog),
-      ...(useWebRTC ? [ensureTransportFilters(webRTC(), "webRTC", onLog)] : []),
-      ...(useWebRTCDirect ? [ensureTransportFilters(webRTCDirect(), "webRTCDirect", onLog)] : []),
-      ...(useCircuitRelay ? [ensureTransportFilters(circuitRelayTransport(), "circuitRelayTransport", onLog)] : []),
-    ],
+  const buildTransportConfig = ({ webRTC: useWebRTC, webRTCDirect: useWebRTCDirect, circuitRelay: useCircuitRelay }) => {
+    const wsTransport = ensureTransportFilters(webSockets(), "webSockets", onLog);
+    wsTransport.dialFilter = secureWsDialFilter;
+    return {
+      transports: [
+        wsTransport,
+        ...(useWebRTC ? [ensureTransportFilters(webRTC(), "webRTC", onLog)] : []),
+        ...(useWebRTCDirect ? [ensureTransportFilters(webRTCDirect(), "webRTCDirect", onLog)] : []),
+        ...(useCircuitRelay ? [ensureTransportFilters(circuitRelayTransport(), "circuitRelayTransport", onLog)] : []),
+      ],
     addresses: {
       listen: [
         ...(useCircuitRelay ? ["/p2p-circuit"] : []),
         ...((useWebRTC || useWebRTCDirect) ? ["/webrtc"] : []),
       ],
     },
-  });
+  };
+};
 
   const configs = preferWebSocketsOnly ? [
     {
