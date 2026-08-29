@@ -684,8 +684,10 @@
           footer.log('git', `${repo.name} fetch-ref ${selection.ref} failed: ${e.message}`, 'warn');
         });
       }
+      // Fetch all refs and tags without depth limit so older tags (e.g. v0.13.0)
+      // are not silently omitted by a shallow fetch.
       await tryWithCorsProxies(
-        (opts) => git.fetch({ fs, http, dir: repo.dir, url: repo.url, all: true, tags: true, force: true, prune: true, depth: route ? GIT_HISTORY_DEPTH : undefined, onProgress, ...opts }),
+        (opts) => git.fetch({ fs, http, dir: repo.dir, url: repo.url, all: true, tags: true, force: true, prune: true, onProgress, ...opts }),
         {},
         `${repo.name} fetch-all`,
       );
