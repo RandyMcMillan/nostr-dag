@@ -52,10 +52,12 @@ test-p2p:
 
 test-p2p-native-wasm:
 	NODE_OPTIONS=--trace-uncaught node --test test/p2p-native-wasm.test.mjs
+	NODE_OPTIONS=--trace-uncaught node --test test/p2p-native-wasm-chromium.mjs
 
 test-pip-bare-repo:
 	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) RUST_BACKTRACE=full RUST_TEST_THREADS=1 CARGO_TERM_VERBOSE=true $(CARGO) test --features p2p git_bare_pip_transfer_verbose_trace -- --nocapture
 	NODE_OPTIONS=--trace-uncaught node --test --test-name-pattern "bare-repo" test/p2p-native-wasm.test.mjs
+	NODE_OPTIONS=--trace-uncaught node --test --test-name-pattern "bare-repo" test/p2p-native-wasm-chromium.mjs
 
 build-relay:
 	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) $(CARGO) build --release --bin relay --bin federation --features relay
