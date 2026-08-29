@@ -32,6 +32,7 @@ import { generateKeyPairFromSeed } from "https://esm.sh/@libp2p/crypto/keys";
 import { noise } from "https://esm.sh/@chainsafe/libp2p-noise";
 import { yamux } from "https://esm.sh/@chainsafe/libp2p-yamux";
 import { peerIdFromPrivateKey } from "https://esm.sh/@libp2p/peer-id";
+import { multiaddr } from "https://esm.sh/@multiformats/multiaddr";
 
 export const DEFAULT_BOOTSTRAP_PEERS = [
   "/ip4/104.131.131.82/tcp/4001/p2p/QmaCpDMGvV2BGHeYERUEnRQAwe3N8SzbUtfsmvsqQLuvuJ",
@@ -255,7 +256,21 @@ export async function createSharedLibp2pStack({
   wasmModule = null,
 } = {}) {
   // Resolve the bootstrap peer list early so both WASM and JS paths can use it.
-  const peers = [...new Set(bootstrapPeers.filter(Boolean))];
+  let peers = [...new Set(bootstrapPeers.filter(Boolean))];
+
+  // Augment bootstrap list with local native peers from the preview server.
+  // This lets the browser node discover the localhost server peer without
+  // relying on public bootstrap nodes or Nostr relay gossip.
+  try {
+    const localAddrs = await fetchLocalNativePeerAddrs();
+    if (localAddrs.length) {
+      peers = [...localAddrs, ...peers];
+      emitLog(onLog, "debug", `added ${localAddrs.length} local peer address(es) to bootstrap`, "checking");
+    }
+  } catch {
+    // best effort only
+  }
+
   if (preferWebSocketsOnly) {
     emitLog(onLog, "info", "starting with websocket-only libp2p fallback", "checking");
   }
@@ -487,4 +502,43 @@ export async function createSharedLibp2pStack({
     node,
     bootstrapPeers: peers,
   };
+}
+
+/**
+ * Fetch the local preview server's `/peers` endpoint and return dialable
+ * WebSocket multiaddrs for native peers.  These are prepended to the
+ * bootstrap list so the browser libp2p node can reach the localhost server
+ * peer without relying on public bootstrap nodes.
+ *
+ * On GH Pages `/peers` returns 404 and this returns an empty array.
+ */
+async function fetchLocalNativePeerAddrs() {
+  try {
+    const res = await fetch("/peers", { cache: "no-store" });
+    if (!res.ok) return [];
+    const peers = await res.json();
+    if (!Array.isArray(peers)) return [];
+    const addrs = [];
+    for (const peer of peers) {
+      if (peer.kind !== "native" || peer.source !== "localhost") continue;
+      const peerAddrs = parsePeerAddrs(peer.detail);
+      for (const addr of peerAddrs) {
+        if (addr.includes("/ws") || addr.includes("/wss")) {
+          // Append peer id so libp2p bootstrap can validate the dial.
+          const suffix = `/p2p/${peer.peer_id}`;
+          addrs.push(addr.endsWith(suffix) ? addr : `${addr}${suffix}`);
+        }
+      }
+    }
+    return addrs;
+  } catch {
+    return [];
+  }
+}
+
+function parsePeerAddrs(detail) {
+  if (!detail || typeof detail !== "string") return [];
+  const m = detail.match(/addrs=([^\n]+)/);
+  if (!m) return [];
+  return m[1].split(",").map((s) => s.trim()).filter(Boolean);
 }

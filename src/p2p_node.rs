@@ -875,23 +875,14 @@ pub fn build_nip_pip_publication(
 async fn publish_pip_payload(
     runtime_keys: &Keys,
     payload: &[u8],
-    subscribed_topic_peers: &HashSet<PeerId>,
+    _subscribed_topic_peers: &HashSet<PeerId>,
     swarm: &mut libp2p::Swarm<Behaviour>,
     path: Option<&str>,
 ) {
-    let mut waited = 0u64;
-    while subscribed_topic_peers.is_empty() && waited < 20 {
-        tokio::time::sleep(Duration::from_secs(1)).await;
-        waited += 1;
-    }
-    if subscribed_topic_peers.is_empty() {
-        warn!("PIP publish proceeding without subscribed peers");
-    } else {
-        info!(
-            subscribed_peers = subscribed_topic_peers.len(),
-            "PIP publish has subscribed peers"
-        );
-    }
+    // Note: we no longer wait for explicit SUBSCRIBE events.
+    // Gossipsub mesh/fanout peers can receive publishes even before
+    // the local Subscribed event fires, so we publish immediately
+    // and rely on the InsufficientPeers retry loop below.
     let root_id = format!(
         "nip-pip-{}-{}",
         runtime_keys.public_key(),
