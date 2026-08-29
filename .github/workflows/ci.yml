@@ -104,6 +104,10 @@ jobs:
             node --test "${{ inputs.js_test_file }}"
           else
             for f in test/*.test.mjs; do
+              if [ "$f" = "test/p2p-node-integration.test.mjs" ] && [ ! -x "./target/debug/p2p-node" ]; then
+                echo "=== skipping $f (native p2p-node binary not available) ==="
+                continue
+              fi
               echo "=== running $f ==="
               node --test "$f" || exit 1
             done
