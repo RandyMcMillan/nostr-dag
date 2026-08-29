@@ -7,22 +7,21 @@
 use std::env;
 use std::io;
 use std::path::{Component, Path, PathBuf};
+use std::process::Stdio;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use tokio::fs;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::process::{Child, Command};
 use tokio::sync::{watch, Semaphore};
 use tokio::task::JoinSet;
 use tracing::{debug, error, info, trace};
 
 use nostr_dag::store::EventStore;
 use nostr_dag::FAVICON_ICO;
-
-#[cfg(feature = "p2p")]
-use nostr_dag::p2p::native::SwarmHandle;
 
 const DEFAULT_HOST: &str = "127.0.0.1";
 const DEFAULT_PORT: u16 = 3000;
@@ -155,68 +154,51 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     let (shutdown_tx, shutdown_rx) = watch::channel(());
 
-    // Optionally start a native libp2p node and forward received messages into
-    // the event store.  Enable with P2P_ENABLE=1.
+    // Optionally start a full-stack native libp2p peer (p2p-node binary) so
+    // there is always another peer on the network with full protocol support.
+    // Enable with P2P_ENABLE=1.
+    #[cfg(feature = "p2p")]
+    let mut p2p_child: Option<Child> = None;
     #[cfg(feature = "p2p")]
     if env::var("P2P_ENABLE").map(|v| v == "1").unwrap_or(false) {
-        let es = Arc::clone(&event_store);
-        tokio::spawn(async move {
-            match SwarmHandle::start().await {
-                Ok((_handle, mut rx)) => {
-                    info!("p2p node started");
-                    while let Some(msg) = rx.recv().await {
-                        // Attempt to parse as a Nostr event and store it.
-                        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&msg) {
-                            if let (Some(id), Some(pubkey), Some(kind), Some(created)) = (
-                                v["id"].as_str(),
-                                v["pubkey"].as_str(),
-                                v["kind"].as_i64(),
-                                v["created_at"].as_i64(),
-                            ) {
-                                let content = v["content"].as_str().unwrap_or("");
-                                let sig = v["sig"].as_str().unwrap_or("");
-                                let tags: Vec<Vec<String>> = v["tags"]
-                                    .as_array()
-                                    .unwrap_or(&vec![])
-                                    .iter()
-                                    .map(|tag| {
-                                        tag.as_array()
-                                            .unwrap_or(&vec![])
-                                            .iter()
-                                            .map(|f| f.as_str().unwrap_or("").to_string())
-                                            .collect()
-                                    })
-                                    .collect();
-                                let now = now_ms() as i64;
-                                let es_for_store = Arc::clone(&es);
-                                let id = id.to_string();
-                                let pubkey = pubkey.to_string();
-                                let content = content.to_string();
-                                let sig = sig.to_string();
-                                let raw = msg.clone();
-                                let store_result = tokio::task::spawn_blocking(move || {
-                                    let store =
-                                        es_for_store.inner.lock().expect("event store poisoned");
-                                    store.upsert_event(
-                                        &id, &pubkey, kind, created, &content, &sig, &raw, &tags,
-                                        None, now,
-                                    )
-                                })
-                                .await;
-                                match store_result {
-                                    Ok(Ok(())) => {}
-                                    Ok(Err(e)) => tracing::warn!(?e, "p2p: failed to store event"),
-                                    Err(e) => tracing::warn!(?e, "p2p: storage task failed"),
-                                }
+        if let Some(bin_path) = find_p2p_node_binary() {
+            info!(?bin_path, "spawning full-stack p2p-node peer");
+            match Command::new(&bin_path)
+                .env_remove("P2P_ENABLE")
+                .env_remove("HOST")
+                .env_remove("PORT")
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+            {
+                Ok(mut child) => {
+                    if let Some(stdout) = child.stdout.take() {
+                        tokio::spawn(async move {
+                            let reader = BufReader::new(stdout);
+                            let mut lines = reader.lines();
+                            while let Ok(Some(line)) = lines.next_line().await {
+                                info!(target: "p2p-node", "{line}");
                             }
-                        }
+                        });
                     }
+                    if let Some(stderr) = child.stderr.take() {
+                        tokio::spawn(async move {
+                            let reader = BufReader::new(stderr);
+                            let mut lines = reader.lines();
+                            while let Ok(Some(line)) = lines.next_line().await {
+                                info!(target: "p2p-node", "{line}");
+                            }
+                        });
+                    }
+                    p2p_child = Some(child);
                 }
                 Err(e) => {
-                    tracing::warn!(?e, "p2p node failed to start");
+                    tracing::warn!(?e, ?bin_path, "failed to spawn p2p-node binary");
                 }
             }
-        });
+        } else {
+            tracing::warn!("p2p-node binary not found; set P2P_ENABLE=1 after building the p2p-node target");
+        }
     }
 
     let addr = format!("{host}:{port}");
@@ -260,6 +242,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             error!(?err, "request task failed during shutdown");
         }
     }
+
+    #[cfg(feature = "p2p")]
+    if let Some(mut child) = p2p_child {
+        info!("terminating p2p-node peer");
+        let _ = child.start_kill();
+        let _ = child.wait().await;
+    }
+
     info!("shutdown complete");
 
     Ok(())
@@ -834,6 +824,23 @@ fn is_disconnect_error(err: &io::Error) -> bool {
         err.kind(),
         io::ErrorKind::BrokenPipe | io::ErrorKind::ConnectionReset | io::ErrorKind::UnexpectedEof
     )
+}
+
+/// Locate the `p2p-node` binary in the same directory as the current executable
+/// (e.g. `target/debug/` or `target/release/`).
+fn find_p2p_node_binary() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    let candidate = dir.join(if cfg!(windows) { "p2p-node.exe" } else { "p2p-node" });
+    if candidate.is_file() {
+        return Some(candidate);
+    }
+    // Fallback: check one level up (debug/release sibling)
+    let sibling = dir.parent()?.join(if dir.file_name()? == "debug" { "release" } else { "debug" }).join(if cfg!(windows) { "p2p-node.exe" } else { "p2p-node" });
+    if sibling.is_file() {
+        return Some(sibling);
+    }
+    None
 }
 
 async fn route_path(site_dir: &str, path: &str) -> Result<(Vec<u8>, &'static str), RouteError> {

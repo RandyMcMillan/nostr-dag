@@ -55,6 +55,7 @@
     import git from 'https://cdn.jsdelivr.net/npm/isomorphic-git@1.25.0/+esm';
     import http from 'https://cdn.jsdelivr.net/npm/isomorphic-git@1.25.0/http/web/+esm';
     import LightningFS from 'https://cdn.jsdelivr.net/npm/@isomorphic-git/lightning-fs@4.6.0/+esm';
+    import { createGitP2PTransport } from '../shared/git-p2p-transport.mjs';
 
     const fs = new LightningFS('git-viewer');
     const repoHealth = new Map();
@@ -126,6 +127,13 @@
         });
         window.__gitViewerP2pNode = node;
         networkTime.attachNode(node);
+        const p2pTransport = createGitP2PTransport({
+          node,
+          onLog(level, text) {
+            footer.log('git-p2p', text, level);
+          },
+        });
+        window.__gitViewerP2pTransport = p2pTransport;
         footer.log('libp2p', `node ready: ${node.peerId.toString()}`, 'info', 'available');
       } catch (e) {
         footer.log('libp2p', `bootstrap failed: ${e.message}`, 'error', 'unavailable');
@@ -175,12 +183,14 @@
       const iconUrl = `${new URL(repo.url).origin}/favicon.ico`;
       const selectedBranch = data.branches.includes(data.selectedRef) ? data.selectedRef : (data.branches[0] || '');
       const selectedTag = data.tags.includes(data.selectedRef) ? data.selectedRef : '';
+      const p2pAvailable = window.__gitViewerP2pTransport?.hasRepo(repo.url) || false;
 
       return {
         repo,
         iconUrl,
         status: repoState.get(repo.name) || 'idle',
         ping: getRepoPing(repo.name),
+        p2pAvailable,
         ref: data.ref || 'n/a',
         latest: data.latest || 'n/a',
         latestHtml: renderLatestSummary(data.latest || 'n/a'),
@@ -220,7 +230,7 @@
               <a href="${card.repo.url}" target="_blank" rel="noreferrer noopener">${card.repo.url}</a>
             </div>
           </div>
-          <div class="small" style="margin-top:8px;"><span class="muted">Status:</span> <span class="health-badge ${repoCardStatusClass(card.status)}" title="${escapeHtml(card.status)}"><span class="health-dot"></span></span>${card.ping !== null ? ` <span class="muted">ping:</span> <span class="mono">${card.ping} ms</span>` : ''}</div>
+          <div class="small" style="margin-top:8px;"><span class="muted">Status:</span> <span class="health-badge ${repoCardStatusClass(card.status)}" title="${escapeHtml(card.status)}"><span class="health-dot"></span></span>${card.ping !== null ? ` <span class="muted">ping:</span> <span class="mono">${card.ping} ms</span>` : ''}${card.p2pAvailable ? ' <span class="health-badge health-available" title="libp2p"><span class="health-dot"></span></span><span class="muted">p2p</span>' : ''}</div>
           <div class="small" style="margin-top:8px;"><span class="muted">Ref:</span> <span class="mono">${card.ref}</span></div>
           <div class="small" style="margin-top:4px;"><span class="muted">Selected:</span> <span class="mono">${escapeHtml(card.selectedRef)}</span></div>
           <div class="small" style="margin-top:8px;">${card.latestHtml}</div>
@@ -511,6 +521,24 @@
       const ensureStart = performance.now();
       try {
         await ensureDir(fs, '/repos');
+
+        // Try libp2p bundle fetch first
+        const transport = window.__gitViewerP2pTransport;
+        if (transport && transport.hasRepo(url)) {
+          try {
+            setRepoStatus(repo.name, 'fetching p2p bundle...');
+            footer.log('git', `${repo.name} requesting bundle via libp2p`, 'info');
+            const bundle = await transport.requestBundle(url, 15000);
+            const bundlePath = `/bundles/${repo.name}.bundle`;
+            await ensureDir(fs, '/bundles');
+            await fs.writeFile(bundlePath, bundle);
+            footer.log('git', `${repo.name} p2p bundle received bytes=${bundle.length}`, 'info', 'available');
+            setRepoHealth(repo.name, 'available');
+          } catch (p2pErr) {
+            footer.log('git', `${repo.name} p2p bundle failed: ${p2pErr.message}`, 'warn');
+          }
+        }
+
         const exists = await pathExists(fs, dir);
         if (!exists) {
           setRepoStatus(repo.name, 'cloning...');
@@ -557,7 +585,9 @@
         if (message) {
           footer.log('git', message, 'trace');
         }
-      }).catch(() => {});
+      }).catch((e) => {
+        footer.log('git', `${repo.name} fetch failed: ${e.message}`, 'warn');
+      });
       footer.log('git', `${repo.name} fetch done in ${Math.round(performance.now() - fetchStart)} ms`, 'debug');
       setRepoStatus(repo.name, 'ready');
       footer.log('git', `${repo.name} ensureRepo complete in ${Math.round(performance.now() - ensureStart)} ms`, 'debug');
@@ -583,10 +613,17 @@
         (opts) => git.listServerRefs({ fs, http, url: repo.url, ...opts }),
         {},
         `${repo.name} listServerRefs`,
-      ).catch(() => []);
-      footer.log('git', `${repo.name} listServerRefs done in ${Math.round(performance.now() - readStart)} ms`, 'trace');
+      ).catch((e) => {
+        footer.log('git', `${repo.name} listServerRefs failed: ${e.message}`, 'warn');
+        return [];
+      });
+      footer.log('git', `${repo.name} listServerRefs done refs=${serverRefs.length} in ${Math.round(performance.now() - readStart)} ms`, 'trace');
+      const localTags = await git.listTags({ fs, dir: repo.dir }).catch((e) => {
+        footer.log('git', `${repo.name} listTags failed: ${e.message}`, 'warn');
+        return [];
+      });
       const tags = [...new Set([
-        ...await git.listTags({ fs, dir: repo.dir }).catch(() => []),
+        ...localTags,
         ...remoteTagNames(serverRefs),
       ])];
       tags.sort((a, b) => a.localeCompare(b));
@@ -612,14 +649,24 @@
       if (!commits.length && route?.tag && !reloadedAfterMiss) {
         reloadedAfterMiss = true;
         footer.log('git', `readRepo tag miss ${repo.name} tag=${route.tag} refetching`, 'debug');
-        await fetchRepoRefs(repo, route).catch(() => {});
+        await fetchRepoRefs(repo, route).catch((e) => {
+          footer.log('git', `${repo.name} refetch after tag miss failed: ${e.message}`, 'warn');
+        });
+        const retryLocalTags = await git.listTags({ fs, dir: repo.dir }).catch((e) => {
+          footer.log('git', `${repo.name} listTags retry failed: ${e.message}`, 'warn');
+          return [];
+        });
+        const retryServerRefs = await tryWithCorsProxies(
+          (opts) => git.listServerRefs({ fs, http, url: repo.url, ...opts }),
+          {},
+          `${repo.name} listServerRefs retry`,
+        ).catch((e) => {
+          footer.log('git', `${repo.name} listServerRefs retry failed: ${e.message}`, 'warn');
+          return [];
+        });
         const retryTags = [...new Set([
-          ...await git.listTags({ fs, dir: repo.dir }).catch(() => []),
-          ...remoteTagNames(await tryWithCorsProxies(
-            (opts) => git.listServerRefs({ fs, http, url: repo.url, ...opts }),
-            {},
-            `${repo.name} listServerRefs retry`,
-          ).catch(() => [])),
+          ...retryLocalTags,
+          ...remoteTagNames(retryServerRefs),
         ])];
         retryTags.sort((a, b) => a.localeCompare(b));
         for (const candidate of refCandidatesForRoute(route, branches, retryTags)) {

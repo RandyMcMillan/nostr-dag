@@ -117,6 +117,7 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
 
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<NodeCommand>(64);
     let (stdin_ready_tx, stdin_ready_rx) = tokio::sync::oneshot::channel::<()>();
+    let cmd_tx_stdin = cmd_tx.clone();
 
     tokio::spawn(async move {
         let stdin = BufReader::new(tokio::io::stdin());
@@ -125,7 +126,7 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
         while let Ok(Some(line)) = lines.next_line().await {
             match parse_node_command(&line) {
                 Ok(Some(command)) => {
-                    if cmd_tx.send(command).await.is_err() {
+                    if cmd_tx_stdin.send(command).await.is_err() {
                         break;
                     }
                 }
@@ -183,97 +184,25 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                         }
                     }
                     Some(NodeCommand::PublishPipBlob(message)) => {
-                        let mut waited = 0u64;
-                        while subscribed_topic_peers.is_empty() && waited < 20 {
-                            tokio::time::sleep(Duration::from_secs(1)).await;
-                            waited += 1;
-                        }
-                        if subscribed_topic_peers.is_empty() {
-                            warn!("PIP publish proceeding without subscribed peers");
-                        } else {
-                            info!(
-                                subscribed_peers = subscribed_topic_peers.len(),
-                                "PIP publish has subscribed peers"
-                            );
-                        }
-                        let root_id = format!(
-                            "nip-pip-{}-{}",
-                            runtime.public_key(),
-                            native_now_ms()
-                        );
-                        match build_nip_pip_publication(
-                            &runtime_keys,
-                            &root_id,
-                            message.as_bytes(),
-                            &[],
-                            256,
-                        ) {
-                            Ok(publication) => {
-                                let crate::p2p_node::NipPipPublication {
-                                    root_id,
-                                    total_bytes,
-                                    total_slices,
-                                    manifest_event_id,
-                                    slice_event_ids,
-                                    messages,
-                                } = publication;
-                                println!(
-                                    "PIP publishing root_id={} bytes={} slices={}",
-                                    root_id, total_bytes, total_slices
-                                );
-                                println!(
-                                    "PIP manifest event={} root_id={}",
-                                    manifest_event_id, root_id
-                                );
-
-                                for (index, message) in messages.into_iter().enumerate() {
-                                    let mut attempt = 0usize;
-                                    loop {
-                                        attempt += 1;
-                                        match swarm.behaviour_mut().gossipsub.publish(
-                                            IdentTopic::new(NOSTR_DAG_TOPIC),
-                                            message.as_bytes(),
-                                        ) {
-                                            Ok(_) => break,
-                                            Err(err)
-                                                if matches!(
-                                                    err,
-                                                    gossipsub::PublishError::InsufficientPeers
-                                                ) && attempt < 20 =>
-                                            {
-                                                warn!(
-                                                    attempt,
-                                                    ?err,
-                                                    "PIP publish waiting for peers"
-                                                );
-                                                tokio::time::sleep(Duration::from_secs(1)).await;
-                                            }
-                                            Err(err) => {
-                                                warn!(attempt, ?err, "PIP publish failed");
-                                                break;
-                                            }
-                                        }
-                                    }
-                                    if index == 0 {
-                                        println!("PIP manifest staged");
-                                    } else if let Some(slice_event_id) = slice_event_ids.get(index - 1) {
-                                        println!(
-                                            "PIP slice staged seq={} event={}",
-                                            index - 1,
-                                            slice_event_id
-                                        );
-                                    } else {
-                                        println!("PIP slice staged seq={}", index - 1);
-                                    }
+                        publish_pip_payload(&runtime_keys, message.as_bytes(), &subscribed_topic_peers, &mut swarm, None).await;
+                    }
+                    Some(NodeCommand::PublishPipPayload(bytes, path)) => {
+                        publish_pip_payload(&runtime_keys, &bytes, &subscribed_topic_peers, &mut swarm, path.as_deref()).await;
+                    }
+                    Some(NodeCommand::MirrorRepo(url)) => {
+                        let cmd_tx = cmd_tx.clone();
+                        tokio::spawn(async move {
+                            println!("MIRROR starting url={}", url);
+                            match mirror_repo_bundle(&url).await {
+                                Ok(bytes) => {
+                                    println!("MIRROR bundle ready url={} bytes={}", url, bytes.len());
+                                    let _ = cmd_tx.send(NodeCommand::PublishPipPayload(bytes, Some(url))).await;
                                 }
-
-                                println!(
-                                    "PIP publish attempted root_id={} bytes={} slices={}",
-                                    root_id, total_bytes, total_slices
-                                );
+                                Err(e) => {
+                                    println!("MIRROR failed url={} err={}", url, e);
+                                }
                             }
-                            Err(err) => warn!(?err, "PIP publish build failed"),
-                        }
+                        });
                     }
                     Some(NodeCommand::Help) => {
                         println!("HELP\n{HELP_TEXT}");
@@ -351,6 +280,7 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                     SwarmEvent::ConnectionClosed { peer_id, .. } => {
                         peer_topic_roles.remove(&peer_id);
                         relay_peers.remove(&peer_id);
+                        subscribed_topic_peers.remove(&peer_id);
                     }
                     SwarmEvent::Behaviour(BehaviourEvent::Identify(identify::Event::Received {
                         peer_id,
@@ -379,6 +309,7 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                         topic: _,
                     })) => {
                         subscribed_topic_peers.insert(peer_id);
+                        println!("SUBSCRIBED peer={} topic_peers={}", peer_id, subscribed_topic_peers.len());
                         if matches!(peer_topic_roles.get(&peer_id), Some(PeerTopicRole::WasmLike | PeerTopicRole::NativeLike)) {
                             swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
                         }
@@ -542,6 +473,8 @@ pub enum NodeCommand {
     Dial(Multiaddr),
     Help,
     PublishPipBlob(String),
+    MirrorRepo(String),
+    PublishPipPayload(Vec<u8>, Option<String>),
     Status,
     Quit,
 }
@@ -590,9 +523,10 @@ pub fn build_nip_pip_publication(
     payload: &[u8],
     relay_hints: &[String],
     threshold: usize,
+    path: Option<&str>,
 ) -> Result<NipPipPublication, NipPipPublishError> {
     let (manifest_event, slice_events) =
-        encode_payload_as_transfer_events(keys, root_id, payload, threshold)?;
+        encode_payload_as_transfer_events(keys, root_id, payload, threshold, path)?;
     let manifest_message =
         encode_bridge_message(&manifest_event, "nostr->libp2p", relay_hints)?;
 
@@ -617,6 +551,170 @@ pub fn build_nip_pip_publication(
         slice_event_ids,
         messages,
     })
+}
+
+#[cfg(feature = "p2p")]
+async fn publish_pip_payload(
+    runtime_keys: &Keys,
+    payload: &[u8],
+    subscribed_topic_peers: &HashSet<PeerId>,
+    swarm: &mut libp2p::Swarm<Behaviour>,
+    path: Option<&str>,
+) {
+    let mut waited = 0u64;
+    while subscribed_topic_peers.is_empty() && waited < 20 {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        waited += 1;
+    }
+    if subscribed_topic_peers.is_empty() {
+        warn!("PIP publish proceeding without subscribed peers");
+    } else {
+        info!(
+            subscribed_peers = subscribed_topic_peers.len(),
+            "PIP publish has subscribed peers"
+        );
+    }
+    let root_id = format!(
+        "nip-pip-{}-{}",
+        runtime_keys.public_key(),
+        native_now_ms()
+    );
+    match build_nip_pip_publication(runtime_keys, &root_id, payload, &[], 256, path) {
+        Ok(publication) => {
+            let NipPipPublication {
+                root_id,
+                total_bytes,
+                total_slices,
+                manifest_event_id,
+                slice_event_ids,
+                messages,
+            } = publication;
+            println!(
+                "PIP publishing root_id={} bytes={} slices={}",
+                root_id, total_bytes, total_slices
+            );
+            println!(
+                "PIP manifest event={} root_id={}",
+                manifest_event_id, root_id
+            );
+
+            for (index, message) in messages.into_iter().enumerate() {
+                let mut attempt = 0usize;
+                loop {
+                    attempt += 1;
+                    match swarm.behaviour_mut().gossipsub.publish(
+                        IdentTopic::new(NOSTR_DAG_TOPIC),
+                        message.as_bytes(),
+                    ) {
+                        Ok(_) => break,
+                        Err(err)
+                            if matches!(
+                                err,
+                                gossipsub::PublishError::InsufficientPeers
+                            ) && attempt < 20 =>
+                        {
+                            warn!(
+                                attempt,
+                                ?err,
+                                "PIP publish waiting for peers"
+                            );
+                            tokio::time::sleep(Duration::from_secs(1)).await;
+                        }
+                        Err(err) => {
+                            warn!(attempt, ?err, "PIP publish failed");
+                            break;
+                        }
+                    }
+                }
+                if index == 0 {
+                    println!("PIP manifest staged");
+                } else if let Some(slice_event_id) = slice_event_ids.get(index - 1) {
+                    println!(
+                        "PIP slice staged seq={} event={}",
+                        index - 1,
+                        slice_event_id
+                    );
+                } else {
+                    println!("PIP slice staged seq={}", index - 1);
+                }
+            }
+
+            println!(
+                "PIP publish attempted root_id={} bytes={} slices={}",
+                root_id, total_bytes, total_slices
+            );
+        }
+        Err(err) => warn!(?err, "PIP publish build failed"),
+    }
+}
+
+#[cfg(feature = "p2p")]
+async fn mirror_repo_bundle(
+    url: &str,
+) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+    use sha2::{Digest, Sha256};
+    let url_hash = format!("{:x}", Sha256::digest(url.as_bytes()));
+    let mirror_dir = std::env::current_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .join(".nostr-dag-mirrors")
+        .join(&url_hash);
+    let bundle_path = mirror_dir.with_extension("bundle");
+
+    if mirror_dir.exists() {
+        println!("MIRROR fetch existing url={} dir={}", url, mirror_dir.display());
+        let out = tokio::process::Command::new("git")
+            .args(["fetch", "--all", "--tags"])
+            .current_dir(&mirror_dir)
+            .output()
+            .await
+            .map_err(|e| format!("git fetch spawn failed: {e}"))?;
+        if !out.status.success() {
+            return Err(format!(
+                "git fetch failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            )
+            .into());
+        }
+    } else {
+        println!("MIRROR clone starting url={} dir={}", url, mirror_dir.display());
+        tokio::fs::create_dir_all(&mirror_dir).await?;
+        let out = tokio::process::Command::new("git")
+            .args(["clone", "--mirror", url])
+            .arg(&mirror_dir)
+            .output()
+            .await
+            .map_err(|e| format!("git clone spawn failed: {e}"))?;
+        if !out.status.success() {
+            return Err(format!(
+                "git clone failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            )
+            .into());
+        }
+    }
+
+    let out = tokio::process::Command::new("git")
+        .args([
+            "bundle",
+            "create",
+            bundle_path.to_str().unwrap_or("repo.bundle"),
+            "--all",
+        ])
+        .current_dir(&mirror_dir)
+        .output()
+        .await
+        .map_err(|e| format!("git bundle spawn failed: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "git bundle failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        )
+        .into());
+    }
+
+    let bundle_bytes = tokio::fs::read(&bundle_path).await?;
+    println!("MIRROR bundle ready url={} bytes={}", url, bundle_bytes.len());
+    Ok(bundle_bytes)
 }
 
 #[cfg(feature = "p2p")]
@@ -741,6 +839,14 @@ pub fn parse_node_command(line: &str) -> Result<Option<NodeCommand>, String> {
             return Err("/pip requires a message".to_string());
         }
         return Ok(Some(NodeCommand::PublishPipBlob(message.to_string())));
+    }
+
+    if let Some(rest) = trimmed.strip_prefix("/mirror ") {
+        let url = rest.trim();
+        if url.is_empty() {
+            return Err("/mirror requires a repo URL".to_string());
+        }
+        return Ok(Some(NodeCommand::MirrorRepo(url.to_string())));
     }
 
     Ok(Some(NodeCommand::Broadcast(trimmed.to_string())))
@@ -885,6 +991,7 @@ pub const HELP_TEXT: &str = concat!(
     "  /status               print local peer status\n",
     "  /dial <multiaddr>     dial a peer by multiaddr\n",
     "  /pip <message>        publish a PIP/NIP-PIP blob\n",
+    "  /mirror <url>         clone a git repo, bundle it, and publish via PIP\n",
     "  /broadcast <message>  publish a message\n",
     "  /quit                 exit the process\n",
     "Any other non-empty line is broadcast as-is.\n",
@@ -984,6 +1091,10 @@ mod tests {
         assert!(matches!(
             parse_node_command("hello world").unwrap(),
             Some(NodeCommand::Broadcast(message)) if message == "hello world"
+        ));
+        assert!(matches!(
+            parse_node_command("/mirror https://github.com/example/repo.git").unwrap(),
+            Some(NodeCommand::MirrorRepo(url)) if url == "https://github.com/example/repo.git"
         ));
     }
 
@@ -1162,6 +1273,7 @@ mod tests {
             b"hello nip-pip network",
             &[],
             8,
+            None,
         )
         .unwrap();
 

@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execSync, spawn } from 'node:child_process';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import test from 'node:test';
+import test, { before, after } from 'node:test';
 
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const WASM_LIKE_BOOTSTRAP =
@@ -10,10 +11,58 @@ const NATIVE_LIKE_BOOTSTRAP =
   '/ip4/127.0.0.1/tcp/4001/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN';
 const DETERMINISTIC_NATIVE_PEER_ID = '12D3KooWSL8rLNFrwVGVBJbHWxXQfFTfVtYnozURrqBFYBMfrniH';
 
+function killAllP2PNodes() {
+  try {
+    // First gentle SIGTERM
+    execSync('pkill -f "p2p-node"', { stdio: 'ignore' });
+  } catch {}
+  // Give processes a moment to die, then SIGKILL any survivors
+  const start = Date.now();
+  while (Date.now() - start < 2000) {
+    try {
+      execSync('pgrep -f "p2p-node"', { stdio: 'ignore' });
+      // Still running
+    } catch {
+      return; // All dead
+    }
+  }
+  try {
+    execSync('pkill -9 -f "p2p-node"', { stdio: 'ignore' });
+  } catch {}
+}
+
+function killPeer(child) {
+  return new Promise((resolve) => {
+    if (child.killed || child.exitCode !== null) {
+      resolve();
+      return;
+    }
+    child.kill('SIGTERM');
+    const t = setTimeout(() => {
+      if (!child.killed && child.exitCode === null) {
+        child.kill('SIGKILL');
+      }
+      resolve();
+    }, 3000);
+    child.on('close', () => {
+      clearTimeout(t);
+      resolve();
+    });
+  });
+}
+
+before(() => {
+  killAllP2PNodes();
+});
+
+after(() => {
+  killAllP2PNodes();
+});
+
 function runNativePeer(bootstrap = WASM_LIKE_BOOTSTRAP, extraCommands = []) {
   return new Promise((resolve, reject) => {
-    console.log('[native-node:test] launching cargo run --features p2p --bin p2p-node');
-    const child = spawn('cargo', ['run', '--features', 'p2p', '--bin', 'p2p-node'], {
+    console.log('[native-node:test] launching target/debug/p2p-node');
+    const child = spawn('./target/debug/p2p-node', [], {
       cwd: REPO_ROOT,
       env: {
         ...process.env,
@@ -115,7 +164,7 @@ test('native p2p node publishes a nip-pip blob on demand', async () => {
 function startNativePeer({ bootstrapPeers = ',', nativeSeedHex = '' } = {}) {
   return new Promise((resolve, reject) => {
     console.log('[native-node:test] starting native peer');
-    const child = spawn('cargo', ['run', '--quiet', '--features', 'p2p', '--bin', 'p2p-node'], {
+    const child = spawn('./target/debug/p2p-node', [], {
       cwd: REPO_ROOT,
       env: {
         ...process.env,
@@ -213,10 +262,9 @@ test('two native peers exchange a nip-pip blob over libp2p', { timeout: 120_000 
   });
 
   try {
-    // Wait for receiver to connect to publisher
+    // Wait for receiver to connect to publisher and for gossipsub meshing
     await waitForLine(receiver.stdoutLines, /DETECTED .* peer peer=/, 30_000);
-    // Give gossipsub a moment to establish topic subscriptions
-    await new Promise((r) => setTimeout(r, 2000));
+    await waitForLine(publisher.stdoutLines, /SUBSCRIBED peer=/, 30_000);
 
     // Publisher sends PIP blob
     const pipStart = Date.now();
@@ -229,8 +277,8 @@ test('two native peers exchange a nip-pip blob over libp2p', { timeout: 120_000 
     console.log(`[native-node:test] libp2p->nostr->libp2p RTT ~${rttMs} ms`);
     assert.ok(rttMs < 30_000, `RTT ${rttMs} ms should be under 30s`);
   } finally {
-    publisher.child.kill('SIGTERM');
-    receiver.child.kill('SIGTERM');
+    await killPeer(publisher.child);
+    await killPeer(receiver.child);
   }
 });
 
@@ -245,7 +293,7 @@ test('nip-pip round-trip logs manifest and slice event IDs', { timeout: 120_000 
 
   try {
     await waitForLine(receiver.stdoutLines, /DETECTED .* peer peer=/, 30_000);
-    await new Promise((r) => setTimeout(r, 2000));
+    await waitForLine(publisher.stdoutLines, /SUBSCRIBED peer=/, 30_000);
 
     publisher.child.stdin.write('/pip log-store-test\n');
 
@@ -264,7 +312,50 @@ test('nip-pip round-trip logs manifest and slice event IDs', { timeout: 120_000 
     await waitForLine(publisher.stdoutLines, /PIP manifest staged/, 30_000);
     await waitForLine(publisher.stdoutLines, /PIP slice staged seq=0/, 30_000);
   } finally {
-    publisher.child.kill('SIGTERM');
-    receiver.child.kill('SIGTERM');
+    await killPeer(publisher.child);
+    await killPeer(receiver.child);
+  }
+});
+
+test('native peer mirrors a local git repo and publishes via nip-pip', { timeout: 120_000 }, async () => {
+  // Create a tiny local bare repo to mirror
+  const tmpDir = fs.mkdtempSync('/tmp/nostr-dag-mirror-test-');
+  const srcDir = `${tmpDir}/src-repo`;
+  fs.mkdirSync(srcDir, { recursive: true });
+  execSync('git init', { cwd: srcDir });
+  fs.writeFileSync(`${srcDir}/README.md`, '# test\n');
+  execSync('git add README.md', { cwd: srcDir });
+  execSync('git -c user.email=test@test.com -c user.name=Test commit -m init', { cwd: srcDir });
+
+  const mirrorUrl = `file://${srcDir}/.git`;
+
+  const publisher = await startNativePeer({ nativeSeedHex: '33'.repeat(32) });
+  const publisherAddr = buildWsDialAddress(publisher.wsListenAddr, publisher.peerId);
+
+  const receiver = await startNativePeer({
+    bootstrapPeers: publisherAddr,
+    nativeSeedHex: '44'.repeat(32),
+  });
+
+  try {
+    await waitForLine(receiver.stdoutLines, /DETECTED .* peer peer=/, 30_000);
+    await new Promise((r) => setTimeout(r, 8000));
+
+    publisher.child.stdin.write(`/mirror ${mirrorUrl}\n`);
+
+    // Publisher should clone, bundle, and publish
+    await waitForLine(publisher.stdoutLines, /MIRROR bundle ready/, 60_000);
+    await waitForLine(publisher.stdoutLines, /PIP publish attempted/, 30_000);
+
+    // Receiver should see inbound bridge envelopes
+    await waitForLine(receiver.stdoutLines, /INBOUND bridge direction=nostr->libp2p/, 30_000);
+
+    // Verify the manifest path carries the repo URL
+    const manifestLine = publisher.stdoutLines.find((l) => /PIP manifest event=/.test(l));
+    assert.ok(manifestLine, 'publisher should log manifest event ID');
+  } finally {
+    await killPeer(publisher.child);
+    await killPeer(receiver.child);
+    try { fs.rmSync(tmpDir, { recursive: true }); } catch {}
   }
 });

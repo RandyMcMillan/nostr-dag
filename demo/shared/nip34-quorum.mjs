@@ -279,3 +279,63 @@ export function buildSealDraft({
     pubkey,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Parse and reconstruct transfer events
+// ---------------------------------------------------------------------------
+
+export function parseTransferEvent(event) {
+  if (!event || typeof event !== 'object') return null;
+  if (event.kind !== PIP_TRANSFER_MANIFEST_KIND && event.kind !== PIP_TRANSFER_SLICE_KIND) return null;
+  try {
+    const content = JSON.parse(event.content);
+    if (content.protocol !== PIP_PROTOCOL || content.version !== PIP_VERSION) return null;
+    if (content.type === 'manifest') {
+      return {
+        kind: 'manifest',
+        rootId: content.root || content.root_id,
+        sha256: content.sha256,
+        size: content.size ?? content.total_bytes,
+        packets: content.packets ?? content.total_slices,
+        depth: content.depth,
+        mtu: content.mtu,
+        encoding: content.encoding,
+        path: content.path || '',
+        eventId: event.id,
+        pubkey: event.pubkey,
+      };
+    }
+    if (content.type === 'slice') {
+      return {
+        kind: 'slice',
+        id: content.id,
+        rootId: content.root_id || content.rootId,
+        seqNum: content.header?.seq_num ?? content.seq,
+        totalPackets: content.header?.total_packets ?? content.total_slices,
+        data: content.data,
+        isParity: content.is_parity,
+        eventId: event.id,
+        parentIds: (event.tags || [])
+          .filter((t) => Array.isArray(t) && t[0] === 'e' && t[1])
+          .map((t) => t[1]),
+      };
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+export function reconstructPayload(manifest, slices) {
+  if (!manifest || !Array.isArray(slices)) return null;
+  const sorted = [...slices].sort((a, b) => (a.seqNum ?? 0) - (b.seqNum ?? 0));
+  const totalLength = sorted.reduce((sum, s) => sum + (s.data?.length ?? 0), 0);
+  const result = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const slice of sorted) {
+    const data = new Uint8Array(slice.data);
+    result.set(data, offset);
+    offset += data.length;
+  }
+  return result;
+}

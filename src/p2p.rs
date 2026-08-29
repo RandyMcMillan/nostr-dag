@@ -416,8 +416,9 @@ pub fn encode_payload_as_transfer_events(
     root_id: &str,
     payload: &[u8],
     threshold: usize,
+    path: Option<&str>,
 ) -> Result<(nostr::Event, Vec<nostr::Event>), nostr::event::builder::Error> {
-    encode_payload_as_transfer_events_chained(keys, root_id, payload, threshold, None)
+    encode_payload_as_transfer_events_chained(keys, root_id, payload, threshold, None, path)
 }
 
 /// Encode a payload into a deterministic chain of PIP manifest + slice events.
@@ -426,12 +427,15 @@ pub fn encode_payload_as_transfer_events(
 /// slice 0, the previous slice for slice N), producing a verifiable chain.
 /// When `rtt_started_at_ms` is provided, every event is stamped with a
 /// `bridge-rtt` tag so receivers can measure round-trip time.
+///
+/// `path` is stored in the manifest content (e.g. the repo URL being mirrored).
 pub fn encode_payload_as_transfer_events_chained(
     keys: &nostr::Keys,
     root_id: &str,
     payload: &[u8],
     threshold: usize,
     rtt_started_at_ms: Option<i64>,
+    path: Option<&str>,
 ) -> Result<(nostr::Event, Vec<nostr::Event>), nostr::event::builder::Error> {
     use sha2::{Digest, Sha256};
     use crate::bridge_roundtrip::stamp_bridge_round_trip_tag;
@@ -458,7 +462,7 @@ pub fn encode_payload_as_transfer_events_chained(
         depth,
         mtu: threshold as u64,
         encoding: "json".to_string(),
-        path: String::new(),
+        path: path.unwrap_or("").to_string(),
     };
 
     // Build manifest with optional RTT tag.
@@ -744,7 +748,7 @@ mod transfer_tests {
         let keys = nostr::Keys::generate();
         let payload = b"fractal swarm adaptation for nostr dag";
         let (manifest_event, slice_events) =
-            encode_payload_as_transfer_events(&keys, "root-bridge", payload, 7).unwrap();
+            encode_payload_as_transfer_events(&keys, "root-bridge", payload, 7, None).unwrap();
 
         let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(64);
         let relay_hints = vec!["ws://localhost:8080".to_string()];
@@ -1054,6 +1058,7 @@ mod git_bare_pip_tests {
                 &root_id,
                 &bundle_bytes,
                 slice_size,
+                None,
             )
             .expect("encode payload as transfer events");
             let slice_count = slice_events.len();
@@ -1134,6 +1139,7 @@ mod git_bare_pip_tests {
             root_id,
             &bundle_bytes,
             slice_size,
+            None,
         )
         .expect("encode payload as transfer events");
 
@@ -1199,6 +1205,7 @@ mod git_bare_pip_tests {
             root_id,
             &bundle_bytes,
             slice_size,
+            None,
         )
         .expect("encode payload as transfer events");
         println!("=== encoded bare repo ===");
@@ -1257,7 +1264,7 @@ mod git_bare_pip_tests {
         let rtt_start = 1_700_000_000_000i64;
 
         let (manifest_event, slice_events) =
-            encode_payload_as_transfer_events_chained(&keys, root_id, payload, 8, Some(rtt_start))
+            encode_payload_as_transfer_events_chained(&keys, root_id, payload, 8, Some(rtt_start), None)
                 .expect("encode chained transfer events");
 
         // Manifest has RTT tag.
