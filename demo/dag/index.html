@@ -1343,6 +1343,13 @@
           'info',
           'available',
         );
+        logNostrEvent('create', event, 'info', 'available');
+        window.__sharedFooter?.log(
+          'nostr',
+          `create event json:\n${JSON.stringify(event, null, 2)}`,
+          'info',
+          'available',
+        );
         insertEvent(event);
         contentEl.value = '';
         render();

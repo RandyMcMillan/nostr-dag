@@ -343,6 +343,9 @@
       if (route?.branch) {
         return { ref: route.branch };
       }
+      if (route?.tag) {
+        return { ref: `refs/tags/${route.tag}` };
+      }
       return {};
     }
 
