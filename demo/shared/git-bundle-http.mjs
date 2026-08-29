@@ -1,10 +1,12 @@
 /**
  * Minimal git-bundle → isomorphic-git HTTP transport.
  *
- * Git bundle format (v3):
- *   # v3 git bundle
- *   - <ref> <oid> [<message>]
- *   <packfile data>
+ * Git bundle format (v2/v3):
+ *   # v2 git bundle
+ *   <oid> <ref-name>
+ *   <oid> HEAD
+ *
+ *   PACK...
  *
  * This module parses a bundle already stored in LightningFS and exposes a
  * custom `http` client compatible with isomorphic-git's `GitHttpRequest` /
@@ -40,7 +42,7 @@ export function createBundleHttpClient({ fs, bundlePath }) {
               'content-type': `application/x-${service}-advertisement`,
               'content-length': String(body.byteLength),
             },
-            body: [body],
+            body: (async function* () { yield body; })(),
           };
         }
       }
@@ -58,7 +60,7 @@ export function createBundleHttpClient({ fs, bundlePath }) {
             'content-type': 'application/x-git-upload-pack-result',
             'content-length': String(body.byteLength),
           },
-          body: [body],
+          body: (async function* () { yield body; })(),
         };
       }
 
@@ -68,7 +70,7 @@ export function createBundleHttpClient({ fs, bundlePath }) {
         statusCode: 404,
         statusMessage: 'Not Found',
         headers: {},
-        body: [],
+        body: (async function* () {})(),
       };
     },
   };
@@ -86,35 +88,46 @@ async function parseBundleHeader(fs, bundlePath) {
   const lines = text.split('\n');
   const refs = [];
   let packOffset = 0;
-  let inHeader = true;
   let byteOffset = 0;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const lineBytes = new TextEncoder().encode(line + '\n').length;
 
-    if (inHeader) {
-      if (line.startsWith('# v') && line.includes('git bundle')) {
-        byteOffset += lineBytes;
-        continue;
-      }
-      if (line.startsWith('- ')) {
-        const parts = line.slice(2).trim().split(' ');
-        const oid = parts[0];
-        const name = parts[1] || '';
+    // Version header
+    if (line.startsWith('# v') && line.includes('git bundle')) {
+      byteOffset += lineBytes;
+      continue;
+    }
+    // Prerequisite lines (v3) — skip them
+    if (line.startsWith('- ')) {
+      byteOffset += lineBytes;
+      continue;
+    }
+    // Blank line separates header from packfile
+    if (line.trim() === '') {
+      byteOffset += lineBytes;
+      continue;
+    }
+    // Ref line: <oid> <ref-name>
+    const spaceIdx = line.indexOf(' ');
+    if (spaceIdx > 0) {
+      const oid = line.slice(0, spaceIdx).trim();
+      const name = line.slice(spaceIdx + 1).trim();
+      if (oid.length === 40 && /^[0-9a-f]+$/.test(oid)) {
         refs.push({ name, oid });
         byteOffset += lineBytes;
         continue;
       }
-      if (line.trim() === '') {
-        byteOffset += lineBytes;
-        continue;
-      }
-      // First non-header line — packfile starts here
-      inHeader = false;
+    }
+    // If we see PACK, the packfile starts here
+    if (line.startsWith('PACK')) {
       packOffset = byteOffset;
       break;
     }
+    // Otherwise assume packfile starts at current offset
+    packOffset = byteOffset;
+    break;
   }
 
   return { refs, packOffset };

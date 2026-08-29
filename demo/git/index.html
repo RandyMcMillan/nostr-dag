@@ -56,6 +56,7 @@
     import http from 'https://cdn.jsdelivr.net/npm/isomorphic-git@1.25.0/http/web/+esm';
     import LightningFS from 'https://cdn.jsdelivr.net/npm/@isomorphic-git/lightning-fs@4.6.0/+esm';
     import { createGitP2PTransport } from '../shared/git-p2p-transport.mjs';
+    import { createBundleHttpClient } from '../shared/git-bundle-http.mjs';
 
     const fs = new LightningFS('git-viewer');
     const repoHealth = new Map();
@@ -523,13 +524,14 @@
         await ensureDir(fs, '/repos');
 
         // Try libp2p bundle fetch first
+        let bundlePath = null;
         const transport = window.__gitViewerP2pTransport;
         if (transport && transport.hasRepo(url)) {
           try {
             setRepoStatus(repo.name, 'fetching p2p bundle...');
             footer.log('git', `${repo.name} requesting bundle via libp2p`, 'info');
             const bundle = await transport.requestBundle(url, 15000);
-            const bundlePath = `/bundles/${repo.name}.bundle`;
+            bundlePath = `/bundles/${repo.name}.bundle`;
             await ensureDir(fs, '/bundles');
             await fs.writeFile(bundlePath, bundle);
             footer.log('git', `${repo.name} p2p bundle received bytes=${bundle.length}`, 'info', 'available');
@@ -544,28 +546,54 @@
           setRepoStatus(repo.name, 'cloning...');
           footer.log('git', `${repo.name} cloning${route ? ` (${progressContextLabel(route)})` : ''}`, 'debug');
           await ensureDir(fs, dir);
-          const cloneOptions = {
-            fs,
-            http,
-            dir,
-            url,
-            singleBranch: true,
-            depth: route ? GIT_HISTORY_DEPTH : 1,
-            onProgress: (progress) => {
-              const message = getGitProgressReporter(repo, 'clone', route)(progress);
-              if (message) {
-                footer.log('git', message, 'trace');
-              }
-            },
-          };
-          await cloneWithSingleBranchFallback(
-            (options) => tryWithCorsProxies((opts) => git.clone(opts), options, `${repo.name} clone`),
-            cloneOptions,
-            (error) => {
-              footer.log('git', `${repo.name} clone failed with singleBranch=true: ${error.message}`, 'warn');
-              footer.log('git', `${repo.name} retrying clone with singleBranch=false`, 'warn');
-            },
-          );
+
+          // If we have a bundle, clone from it using the custom bundle HTTP transport.
+          let clonedFromBundle = false;
+          if (bundlePath) {
+            try {
+              const bundleHttp = createBundleHttpClient({ fs, bundlePath });
+              await git.clone({
+                fs,
+                http: bundleHttp,
+                dir,
+                url: 'bundle://local',
+                singleBranch: false,
+                onProgress: (progress) => {
+                  const message = getGitProgressReporter(repo, 'clone', route)(progress);
+                  if (message) footer.log('git', `[bundle] ${message}`, 'trace');
+                },
+              });
+              clonedFromBundle = true;
+              footer.log('git', `${repo.name} cloned from libp2p bundle`, 'info', 'available');
+            } catch (bundleErr) {
+              footer.log('git', `${repo.name} bundle clone failed: ${bundleErr.message}`, 'warn');
+            }
+          }
+
+          if (!clonedFromBundle) {
+            const cloneOptions = {
+              fs,
+              http,
+              dir,
+              url,
+              singleBranch: true,
+              depth: route ? GIT_HISTORY_DEPTH : 1,
+              onProgress: (progress) => {
+                const message = getGitProgressReporter(repo, 'clone', route)(progress);
+                if (message) {
+                  footer.log('git', message, 'trace');
+                }
+              },
+            };
+            await cloneWithSingleBranchFallback(
+              (options) => tryWithCorsProxies((opts) => git.clone(opts), options, `${repo.name} clone`),
+              cloneOptions,
+              (error) => {
+                footer.log('git', `${repo.name} clone failed with singleBranch=true: ${error.message}`, 'warn');
+                footer.log('git', `${repo.name} retrying clone with singleBranch=false`, 'warn');
+              },
+            );
+          }
           footer.log('git', `${repo.name} clone done in ${Math.round(performance.now() - ensureStart)} ms`, 'debug');
         } else {
           setRepoStatus(repo.name, 'reusing cached clone...');
