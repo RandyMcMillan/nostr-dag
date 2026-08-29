@@ -44,6 +44,11 @@ name = "p2p-node"
 path = "src/bin/p2p-node.rs"
 required-features = ["p2p"]
 
+[[bin]]
+name = "nip-pip-example"
+path = "src/bin/nip-pip-example.rs"
+required-features = ["p2p"]
+
 [features]
 default = []
 native = [
