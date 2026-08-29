@@ -75,10 +75,13 @@
     const repoSource = new Map();
     const faviconCache = new Map();
 
+    // Proxy chain for git smart-HTTP requests.
+    // Public CORS proxies have become unreliable (Cloudflare blocks, API keys,
+    // rate limits).  On GH Pages only the localhost proxy is unavailable, so
+    // the primary fetch path is the libp2p P2P bundle (see GitP2PTransport).
+    // If you run nostr-dag-server publicly you can append its /proxy/ URL here.
     const CORS_PROXIES = [
       'http://127.0.0.1:3000/proxy/',
-      'https://cors.isomorphic-git.org',
-      'https://corsproxy.io/?',
     ];
 
     async function tryWithCorsProxies(operation, baseOptions, contextLabel) {
