@@ -141,8 +141,16 @@ export class GitP2PTransport {
   }
 
   /**
-   * Phase 3: returns an isomorphic-git-compatible HTTP client that attempts
-   * libp2p first, then falls back to the real HTTP client.
+   * Returns an isomorphic-git-compatible HTTP client that attempts libp2p
+   * first, then falls back to the real HTTP client.
+   *
+   * NOTE: The git viewer (`demo/git/index.html`) does not currently use this
+   * method.  Instead it calls `requestBundle()` directly, writes the bundle
+   * bytes to LightningFS, and clones from it via `createBundleHttpClient()`
+   * (see `demo/shared/git-bundle-http.mjs`).  That path is simpler because it
+   * avoids re-implementing git smart-HTTP streaming from raw bundle bytes.
+   * This method is kept for future use if we want transparent interception of
+   * every isomorphic-git HTTP request.
    */
   getHttpClient(realHttp) {
     const transport = this;

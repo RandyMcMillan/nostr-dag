@@ -144,6 +144,55 @@ on GH Pages even if CDNs are blocked or rate-limited:
 Source-map files (`.map`) are **not** vendored; browsers will log 404s for
 them. This is harmless and avoids shipping hundreds of extra files.
 
+## Transport Stack & Hole Punching
+
+The browser libp2p node is inspired by the
+[universal-connectivity](https://github.com/libp2p/universal-connectivity)
+reference implementation.  It layers multiple transports and falls back
+gracefully when one is unavailable:
+
+| Transport | Role | Fallback order |
+|-----------|------|----------------|
+| WebSocket (`/wss`) | Reliable browser↔server path | Always tried first |
+| WebRTC-direct | Browser↔browser without relay | Tried after WSS |
+| Circuit Relay v2 | NAT traversal via reservation | Used when direct dials fail |
+| DCUtR | Hole punching through relay | Auto-triggered by `dcutr` service |
+
+The stack tries four bootstrap configs in order:
+1. **Full browser stack** — WebSocket + WebRTC + WebRTC-direct + circuit relay
+2. **No WebRTC-direct** — some corporate firewalls block UDP STUN
+3. **WebSockets only** — last-resort for heavily restricted networks
+4. **Abort** — all configs failed
+
+Because GH Pages is served over HTTPS, unencrypted `ws://` dials are stripped
+by `secureWsDialFilter` before any connection attempt.  This keeps the page
+marked as secure in Chrome while still allowing `/wss`, WebRTC, and circuit
+paths.
+
+## NIP-PIP Bundle Transfer
+
+The decentralised git proxy replaces the `cors.isomorphic-git.org` dependency
+with a peer-to-peer bundle protocol:
+
+1. **Mirror** — `nostr-dag-server` (native) clones repos listed in
+   `GIT_MIRROR_REPOS`, creates git bundles, and re-mirrors every 5 min.
+2. **Packetize** — Bundles are split into PIP slices (kind 39079) and
+   advertised by a manifest (kind 39078) on the `nostr-dag-bridge` gossipsub
+   topic.  Slices form a deterministic chain: each slice references its parent
+   event via an `e` tag.
+3. **Fetch** — The browser `GitP2PTransport` listens for manifests, indexes
+   them by repo URL, and collects slices.  Once all slices arrive it
+   reconstructs the bundle bytes.
+4. **Clone** — The git viewer writes the reconstructed bundle into
+   LightningFS and clones from it using `createBundleHttpClient`, a minimal
+   smart-HTTP transport that serves the bundle refs and packfile to
+   `isomorphic-git`.
+5. **Fallback** — If the P2P path fails (no peers, timeout, or missing
+   slices), the viewer falls back to the isomorphic-git CORS proxy and shows
+   a grey "proxy" pill instead of the green "p2p" pill.
+
+See `git/GIT_PROXY.md` for the full protocol specification.
+
 ## Development Tips
 
 - The deterministic native peer ID is derived from the seed

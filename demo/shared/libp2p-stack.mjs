@@ -1,3 +1,24 @@
+/**
+ * Browser libp2p node factory.
+ *
+ * Builds a full-stack libp2p node for the browser with graceful fallback
+ * through multiple transport configurations.  The stack is inspired by the
+ * universal-connectivity reference implementation and layers:
+ *
+ *   WebSocket (/wss)  →  WebRTC  →  WebRTC-direct  →  Circuit Relay v2  →  DCUtR
+ *
+ * On HTTPS pages (GitHub Pages) unencrypted `ws://` dials are stripped by
+ * `secureWsDialFilter` before any connection attempt so the page stays secure.
+ *
+ * Fallback order:
+ *   1. Full browser stack (all transports)
+ *   2. No WebRTC-direct (some corporate firewalls block UDP STUN)
+ *   3. WebSockets only (heavily restricted networks)
+ *   4. Abort
+ *
+ * The node always uses noise + yamux for encryption and multiplexing,
+ * identify + autoNAT for peer discovery, and gossipsub for pubsub.
+ */
 import { createLibp2p } from "https://esm.sh/libp2p";
 import { autoNAT } from "https://esm.sh/@libp2p/autonat";
 import { bootstrap } from "https://esm.sh/@libp2p/bootstrap";
