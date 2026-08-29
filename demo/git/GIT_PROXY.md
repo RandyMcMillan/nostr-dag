@@ -1,70 +1,116 @@
-# Plan: Decentralized Git Viewer via libp2p
+# Decentralized Git Viewer via libp2p
 
 ## Objective
 Replace the centralized CORS proxy (`cors.isomorphic-git.org`) and GitHub HTTP dependency with peer-to-peer git transport using our native `p2p-node.rs` and browser libp2p stack.
 
 ---
 
-## Phase 1 — Native Peer Becomes a Git Mirror
+## Architecture
 
-**Goal:** The native `p2p-node.rs` maintains local clones and advertises them as PIP bundles over gossipsub.
-
-| Step | Action |
-|------|--------|
-| 1.1 | Add a `git-mirror` config/mode to `p2p-node.rs` that reads a list of repo URLs to mirror |
-| 1.2 | On startup, native peer clones each repo to local disk using `git2` (native feature) |
-| 1.3 | Periodically (or on-demand), create a `git bundle` of each mirrored repo |
-| 1.4 | Compute bundle SHA-256 and packetize via existing `packetize_payload()` |
-| 1.5 | Publish a PIP **transfer manifest** (kind 39078) on `nostr-dag-bridge` gossipsub topic advertising the bundle |
-| 1.6 | Listen for slice requests and publish PIP **transfer slices** (kind 39079) |
-
-**Reuses existing code:** `git_bare_pip_tests` in `src/p2p.rs` already does the bundle -> packetize -> transfer flow.
+```
+┌─────────────────┐     gossipsub (nostr-dag-bridge)     ┌─────────────────┐
+│  Browser (WASM) │ ◄──────────────────────────────────► │  Native peer    │
+│                 │   manifest (kind 39078)              │  (p2p-node.rs)  │
+│  GitP2PTransport│   slices   (kind 39079)              │                 │
+│                 │                                        │  git mirror     │
+│  LightningFS    │                                        │  bundle create  │
+│  isomorphic-git │                                        │  packetize      │
+└─────────────────┘                                        └─────────────────┘
+```
 
 ---
 
-## Phase 2 — Browser Peer Requests Git via libp2p
+## Phase 1 — Native Peer Becomes a Git Mirror ✅
 
-**Goal:** The browser discovers available git bundles from peers and requests them.
+The native `p2p-node.rs` reads `GIT_MIRROR_REPOS` (comma-separated URLs) on
+startup, clones each repo using `git2`, creates a `git bundle`, packetizes it
+via `packetize_payload()`, and publishes a PIP manifest + slices on the
+`nostr-dag-bridge` gossipsub topic.  Re-mirroring happens every 5 minutes.
 
-| Step | Action |
-|------|--------|
-| 2.1 | Create `demo/shared/git-p2p-transport.mjs` — a module that wraps the libp2p stack |
-| 2.2 | Subscribe to `nostr-dag-bridge` and index incoming PIP manifests by repo URL |
-| 2.3 | When the git viewer needs a repo, check the manifest index first |
-| 2.4 | If a peer advertises the repo, send a request message (with `request_id`) on gossipsub |
-| 2.5 | Collect slices, reconstruct the bundle via `reconstruct_payload()` |
-| 2.6 | Unpack the bundle into LightningFS using isomorphic-git |
-
----
-
-## Phase 3 — Custom isomorphic-git Transport
-
-**Goal:** Make isomorphic-git use libp2p instead of HTTP for fetch/clone operations.
-
-| Step | Action |
-|------|--------|
-| 3.1 | Implement a custom `http` client for isomorphic-git that routes git-upload-pack requests through libp2p |
-| 3.2 | For `git.clone()` / `git.fetch()`: if a peer has the repo, stream the bundle instead of using CORS proxy |
-| 3.3 | For `git.listServerRefs()`: query the peer for refs via gossipsub, or fall back to HTTP |
-| 3.4 | Export the transport from `git-p2p-transport.mjs` as a drop-in replacement for `isomorphic-git/http/web` |
+Key code:
+- `src/p2p_node.rs` lines ~150–180 — mirror startup & periodic re-mirror
+- `src/p2p_node.rs` `mirror_repo_bundle()` — `git clone --mirror` + `git bundle create`
+- `src/p2p.rs` `encode_payload_as_transfer_events_chained()` — manifest + slice event builder
 
 ---
 
-## Phase 4 — Integrate & Fallback
+## Phase 2 — Browser Peer Requests Git via libp2p ✅
 
-**Goal:** Wire the git viewer to use libp2p when available, HTTP when not.
+`demo/shared/git-p2p-transport.mjs` subscribes to `nostr-dag-bridge`, indexes
+incoming manifests by repo URL, and accumulates slices.  `requestBundle(url)`
+waits until all slices arrive, calls `reconstructPayload()`, and returns the
+bundle bytes.
 
-| Step | Action |
-|------|--------|
-| 4.1 | Update `demo/git/index.html` and `blame.html` to import `git-p2p-transport.mjs` alongside the HTTP client |
-| 4.2 | Modify `ensureRepo()` and `fetchRepoRefs()` to try libp2p first, then fall back to `cors.isomorphic-git.org` after a timeout |
-| 4.3 | Add UI indicator showing whether a repo is being fetched from peers or from GitHub directly |
-| 4.4 | End-to-end test: start `p2p-node` native peer, open browser git viewer, verify clone works without CORS proxy |
+Key code:
+- `demo/shared/git-p2p-transport.mjs` — `GitP2PTransport` class
+- `demo/shared/nip34-quorum.mjs` — `parseTransferEvent()`, `reconstructPayload()`
+
+---
+
+## Phase 3 — Bundle → isomorphic-git ✅
+
+Instead of implementing a full git smart-HTTP stream from bundle bytes (which
+would require re-implementing `git-upload-pack` negotiation), the viewer takes
+a simpler path:
+
+1. `requestBundle()` returns raw bundle bytes.
+2. Bytes are written to LightningFS at `/bundles/{repo}.bundle`.
+3. `createBundleHttpClient()` (in `demo/shared/git-bundle-http.mjs`) parses the
+   bundle header, serves refs advertisement for `info/refs?service=git-upload-pack`,
+   and streams the packfile for `git-upload-pack` POST.
+4. `isomorphic-git.clone()` uses this custom HTTP client with `url: 'bundle://local'`.
+
+This avoids the complexity of smart-HTTP state machines while still allowing
+isomorphic-git to clone from a peer-provided bundle.
+
+Key code:
+- `demo/shared/git-bundle-http.mjs` — `createBundleHttpClient()`
+- `demo/git/index.html` `ensureRepo()` lines ~528–570 — bundle fetch + clone
+
+---
+
+## Phase 4 — Integrate & Fallback ✅
+
+`demo/git/index.html` and `blame.html` import `git-p2p-transport.mjs`.
+`ensureRepo()` tries libp2p first:
+
+1. Check `transport.hasRepo(url)`.
+2. If yes, call `transport.requestBundle(url, 15000)`.
+3. On success, clone from bundle and set `repoSource.set(repo.name, 'p2p')`.
+4. On failure (timeout, missing slices, etc.), fall back to the CORS proxy
+   and set `repoSource.set(repo.name, 'proxy')`.
+
+The repo card renders a green **p2p** pill or grey **proxy** pill so the user
+knows which path was used.
+
+Key code:
+- `demo/git/index.html` `ensureRepo()` lines ~521–600
+- `demo/shared/page.css` `.pill-source-p2p` / `.pill-source-proxy`
+
+---
+
+## Remaining Work
+
+- **Smart-HTTP interception:** `GitP2PTransport.getHttpClient()` has a TODO
+  for converting bundle bytes into a git smart-HTTP response.  This is *not*
+  used by the current viewer because `createBundleHttpClient()` is simpler and
+  works.  It is kept for future use if we want transparent interception of
+  every isomorphic-git HTTP request.
+- **DCUtR hole punching:** The browser stack already enables `dcutr`, but
+  verification across NATs (GH Pages → home router → laptop) is hard to
+  automate.  Manual testing shows the path works via circuit relay.
+- **On-demand slice requests:** Currently the native peer publishes all slices
+  proactively.  A request/response protocol (browser asks for missing slices
+  by sequence number) would reduce bandwidth for large repos.
 
 ---
 
 ## Deliverables
 
-- `src/bin/p2p-node.rs` — git mirror mode
-- `demo/shared/git-p2p-transport.mjs` — browser-side libp2p git transport
-- Updated `demo/git/index.html` + `blame.html` — libp2p-first with HTTP fallback
+| File | Role |
+|------|------|
+| `src/p2p_node.rs` | Native peer git mirror mode |
+| `src/p2p.rs` | PIP packetize / reconstruct / event builders |
+| `demo/shared/git-p2p-transport.mjs` | Browser-side libp2p git transport |
+| `demo/shared/git-bundle-http.mjs` | Bundle → smart-HTTP adapter for isomorphic-git |
+| `demo/git/index.html` + `blame.html` | libp2p-first clone with HTTP fallback |
