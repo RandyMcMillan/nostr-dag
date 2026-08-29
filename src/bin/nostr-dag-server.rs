@@ -13,7 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use tokio::fs;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::process::{Child, Command};
 use tokio::sync::{watch, Semaphore};
@@ -167,11 +167,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .env_remove("P2P_ENABLE")
                 .env_remove("HOST")
                 .env_remove("PORT")
-                .stdout(Stdio::inherit())
+                .stdout(Stdio::piped())
                 .stderr(Stdio::inherit())
                 .spawn()
             {
-                Ok(child) => {
+                Ok(mut child) => {
+                    if let Some(stdout) = child.stdout.take() {
+                        tokio::spawn(async move {
+                            let reader = BufReader::new(stdout);
+                            let mut lines = reader.lines();
+                            while let Ok(Some(line)) = lines.next_line().await {
+                                let trimmed = line.trim();
+                                if trimmed.starts_with("READY ")
+                                    || trimmed.starts_with("LISTENING ")
+                                    || trimmed.starts_with("STATUS ")
+                                    || trimmed.starts_with("BOOTSTRAP ")
+                                    || trimmed.starts_with("DETECTED ")
+                                    || trimmed.starts_with("IDENTIFIED ")
+                                    || trimmed.starts_with("SUBSCRIBED ")
+                                    || trimmed.starts_with("CONNECTION ")
+                                    || trimmed.starts_with("DISCONNECTED ")
+                                    || trimmed.starts_with("PEER_EXTERNAL_ADDR ")
+                                    || trimmed.starts_with("PUBLIC_ADDR ")
+                                    || trimmed.starts_with("HOLE_PUNCH ")
+                                    || trimmed.starts_with("RELAY ")
+                                    || trimmed.starts_with("MIRROR ")
+                                    || trimmed.starts_with("PIP ")
+                                {
+                                    println!("[peer] {trimmed}");
+                                }
+                                debug!(target: "p2p-node", "{trimmed}");
+                            }
+                        });
+                    }
                     p2p_child = Some(child);
                 }
                 Err(e) => {
@@ -181,6 +209,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             tracing::warn!("p2p-node binary not found; set P2P_ENABLE=1 after building the p2p-node target");
         }
+    } else {
+        #[cfg(feature = "p2p")]
+        println!("[peer] P2P feature enabled but P2P_ENABLE=1 not set; peer not started");
     }
 
     let addr = format!("{host}:{port}");
