@@ -53,6 +53,15 @@ const TRANSFER_PROTOCOL: &str = "nostr-dag-transfer";
 /// PIP transfer payload version.
 const TRANSFER_VERSION: u64 = 1;
 
+/// Standard Nostr topic tags applied to every NIP-PIP event for discoverability.
+fn pip_topic_tags() -> Vec<nostr::Tag> {
+    vec![
+        nostr::Tag::hashtag("nostr-dag"),
+        nostr::Tag::hashtag("nip-pip"),
+        nostr::Tag::hashtag("transfer"),
+    ]
+}
+
 fn hex_to_bytes<const N: usize>(hex: &str) -> [u8; N] {
     assert_eq!(hex.len(), N * 2, "hex string must be exactly {} bytes", N);
     let mut out = [0u8; N];
@@ -388,7 +397,9 @@ pub fn build_transfer_manifest_event(
     })
     .to_string();
 
-    nostr::EventBuilder::new(TRANSFER_MANIFEST_KIND, content).sign_with_keys(keys)
+    nostr::EventBuilder::new(TRANSFER_MANIFEST_KIND, content)
+        .tags(pip_topic_tags())
+        .sign_with_keys(keys)
 }
 
 /// Build a PIP transfer-slice Nostr event and link it to the manifest via `e` tag.
@@ -412,7 +423,8 @@ pub fn build_transfer_slice_event(
     })
     .to_string();
 
-    let tags = [nostr::Tag::event(manifest_id)];
+    let mut tags = pip_topic_tags();
+    tags.push(nostr::Tag::event(manifest_id));
     nostr::EventBuilder::new(TRANSFER_SLICE_KIND, content)
         .tags(tags)
         .sign_with_keys(keys)
@@ -480,12 +492,11 @@ pub fn encode_payload_as_transfer_events_chained(
         path: path.unwrap_or("").to_string(),
     };
 
-    // Build manifest with optional RTT tag.
-    let manifest_tags: Vec<nostr::Tag> = if let Some(ts) = rtt_started_at_ms {
-        stamp_bridge_round_trip_tag(&[], ts)
-    } else {
-        vec![]
-    };
+    // Build manifest with topic tags and optional RTT tag.
+    let mut manifest_tags = pip_topic_tags();
+    if let Some(ts) = rtt_started_at_ms {
+        manifest_tags = stamp_bridge_round_trip_tag(&manifest_tags, ts);
+    }
     let manifest_event = nostr::EventBuilder::new(TRANSFER_MANIFEST_KIND, serde_json::json!({
         "protocol": TRANSFER_PROTOCOL,
         "version": TRANSFER_VERSION,
@@ -506,7 +517,8 @@ pub fn encode_payload_as_transfer_events_chained(
     let mut slice_events = Vec::with_capacity(slices.len());
     let mut parent_id = manifest_event.id;
     for slice in slices {
-        let mut tags = vec![nostr::Tag::event(parent_id)];
+        let mut tags = pip_topic_tags();
+        tags.push(nostr::Tag::event(parent_id));
         if let Some(ts) = rtt_started_at_ms {
             tags = stamp_bridge_round_trip_tag(&tags, ts);
         }

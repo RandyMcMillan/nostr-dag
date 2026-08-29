@@ -188,7 +188,11 @@ export function buildTransferManifestDraft({
   return {
     kind: PIP_TRANSFER_MANIFEST_KIND,
     created_at: createdAt,
-    tags: withParents([], parents),
+    tags: withParents([
+      ['t', 'nostr-dag'],
+      ['t', 'nip-pip'],
+      ['t', 'transfer'],
+    ], parents),
     content: stringifyProtocolEvent({
       protocol: PIP_PROTOCOL,
       version: PIP_VERSION,
@@ -214,7 +218,12 @@ export function buildTransferSliceDraft({
   return {
     kind: PIP_TRANSFER_SLICE_KIND,
     created_at: createdAt,
-    tags: withParents([['e', manifestId]], parents),
+    tags: withParents([
+      ['t', 'nostr-dag'],
+      ['t', 'nip-pip'],
+      ['t', 'transfer'],
+      ['e', manifestId],
+    ], parents),
     content: stringifyProtocolEvent({
       protocol: PIP_PROTOCOL,
       version: PIP_VERSION,
@@ -241,6 +250,9 @@ export function buildAttestDraft({
     kind: PIP_ATTEST_KIND,
     created_at: createdAt,
     tags: withParents([
+      ['t', 'nostr-dag'],
+      ['t', 'nip-pip'],
+      ['t', 'transfer'],
       ['e', manifestId],
       ...sliceIds.map((id) => ['e', id]),
     ], parents),
@@ -267,7 +279,12 @@ export function buildSealDraft({
   return {
     kind: PIP_SEAL_KIND,
     created_at: createdAt,
-    tags: withParents(attestIds.map((id) => ['e', id]), parents),
+    tags: withParents([
+      ['t', 'nostr-dag'],
+      ['t', 'nip-pip'],
+      ['t', 'transfer'],
+      ...attestIds.map((id) => ['e', id]),
+    ], parents),
     content: stringifyProtocolEvent({
       protocol: PIP_PROTOCOL,
       version: PIP_VERSION,

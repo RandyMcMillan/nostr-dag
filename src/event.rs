@@ -86,7 +86,10 @@ pub fn create_attest_event(
         sha256_hex = sha256_hex,
         manifest_id = manifest_event_id.to_hex(),
     );
-    let mut tags: Vec<Tag> = Vec::with_capacity(1 + slice_event_ids.len());
+    let mut tags: Vec<Tag> = Vec::with_capacity(4 + 1 + slice_event_ids.len());
+    tags.push(Tag::hashtag("nostr-dag"));
+    tags.push(Tag::hashtag("nip-pip"));
+    tags.push(Tag::hashtag("transfer"));
     tags.push(Tag::event(manifest_event_id));
     for sid in slice_event_ids {
         tags.push(Tag::event(*sid));
@@ -124,7 +127,17 @@ pub fn create_seal_event(
         sha256_hex = sha256_hex,
         attest_ids = ids_arr,
     );
-    EventBuilder::new(PIP_SEAL_KIND, content).sign_with_keys(keys)
+    let mut tags: Vec<Tag> = vec![
+        Tag::hashtag("nostr-dag"),
+        Tag::hashtag("nip-pip"),
+        Tag::hashtag("transfer"),
+    ];
+    for id in attest_event_ids {
+        tags.push(Tag::event(*id));
+    }
+    EventBuilder::new(PIP_SEAL_KIND, content)
+        .tags(tags)
+        .sign_with_keys(keys)
 }
 
 /// Build a PIP Quorum Membership (join) event (kind 39082).
@@ -147,7 +160,12 @@ pub fn create_join_event(
         seal_id = seal_event_id.to_hex(),
     );
     EventBuilder::new(PIP_JOIN_KIND, content)
-        .tags([Tag::event(seal_event_id)])
+        .tags([
+            Tag::hashtag("nostr-dag"),
+            Tag::hashtag("nip-pip"),
+            Tag::hashtag("transfer"),
+            Tag::event(seal_event_id),
+        ])
         .sign_with_keys(keys)
 }
 
