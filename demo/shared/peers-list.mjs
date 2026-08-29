@@ -47,7 +47,13 @@ export function createPeersListController({
   }
 
   function allPeers() {
-    return [...localPeers.values(), ...remotePeers.values()].sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0));
+    return [...localPeers.values(), ...remotePeers.values()].sort((a, b) => {
+      const aDet = deterministicPeerIds.has(String(a.peer_id));
+      const bDet = deterministicPeerIds.has(String(b.peer_id));
+      if (aDet && !bDet) return -1;
+      if (bDet && !aDet) return 1;
+      return (b.updated_at || 0) - (a.updated_at || 0);
+    });
   }
 
   function extractPeerSummary(detail) {
