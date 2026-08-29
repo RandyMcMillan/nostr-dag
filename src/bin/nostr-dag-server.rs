@@ -186,11 +186,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     cmd.env("P2P_RELAY", relay);
                 }
             }
-            if let Ok(mirror) = env::var("GIT_MIRROR_REPOS") {
-                if !mirror.trim().is_empty() {
-                    cmd.env("GIT_MIRROR_REPOS", mirror);
-                }
-            }
+            // Default repos to mirror via NIP-PIP so browsers can discover bundles
+            // without relying on public CORS proxies.
+            const DEFAULT_MIRROR_REPOS: &str = concat!(
+                "https://github.com/RandyMcMillan/nostr-dag,",
+                "https://github.com/isomorphic-git/isomorphic-git,",
+                "https://github.com/nbd-wtf/nostr-tools,",
+                "https://github.com/libp2p/js-libp2p,",
+                "https://github.com/ChainSafe/js-libp2p-noise,",
+                "https://github.com/ChainSafe/js-libp2p-yamux,",
+                "https://github.com/ChainSafe/discv5,",
+                "https://github.com/isomorphic-git/lightning-fs,",
+                "https://github.com/w-s-bitcoin/entropylab",
+            );
+            let mirror_repos = env::var("GIT_MIRROR_REPOS")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| DEFAULT_MIRROR_REPOS.to_string());
+            cmd.env("GIT_MIRROR_REPOS", mirror_repos);
             match cmd.spawn()
             {
                 Ok(mut child) => {
