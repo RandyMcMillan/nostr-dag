@@ -1,68 +1,80 @@
 # Release Process
 
-## Versioning
+This document describes how to cut a new versioned release of `nostr-dag`.
 
-This project follows [Semantic Versioning](https://semver.org/).
+## 1. Bump the version
 
-- **MAJOR**: Breaking changes to the NIP-PIP protocol, libp2p wire format, or storage schema.
-- **MINOR**: New features (git mirror mode, transport layers, relay support).
-- **PATCH**: Bug fixes, test improvements, documentation updates.
+Edit `Cargo.toml` and update the `version` field under `[package]`:
 
-## Steps to Cut a Release
+```toml
+[package]
+name = "nostr-dag"
+version = "0.17.2"
+```
 
-1. **Ensure tests pass**
-   ```bash
-   make test-all
-   ```
-   All tests must be green before tagging.
+The `build.rs` script automatically regenerates `demo/shared/app-version.generated.mjs` from this value on the next `cargo check`.
 
-2. **Update version**
-   Edit `Cargo.toml` and bump `version`:
-   ```toml
-   [package]
-   version = "x.y.z"
-   ```
+## 2. Run the full test suite
 
-3. **Update generated version file**
-   ```bash
-   node -e "require('fs').writeFileSync('demo/shared/app-version.generated.mjs', \`export const APP_VERSION = '\${require('./package.json').version}'\n\`)"
-   ```
+```bash
+make test-all
+```
 
-4. **Commit version bump**
-   ```bash
-   git add Cargo.toml Cargo.lock demo/shared/app-version.generated.mjs
-   git commit -m "release: bump version to vX.Y.Z"
-   ```
+This runs:
+- Native Rust tests (`cargo test --features native`)
+- JavaScript/Node tests (`node --test test/*.test.mjs`)
 
-5. **Create annotated tag**
-   ```bash
-   git tag -a vX.Y.Z -m "nostr-dag vX.Y.Z"
-   ```
+Ensure everything passes before tagging.
 
-6. **Push tag**
-   ```bash
-   git push origin master
-   git push origin vX.Y.Z
-   ```
+## 3. Commit the version bump
 
-7. **Verify CI and GitHub Pages**
-   - Check Actions run: https://github.com/RandyMcMillan/nostr-dag/actions
-   - Verify GitHub Pages deployment of `/git/` and `/dag/` endpoints.
+```bash
+git add Cargo.toml Cargo.lock demo/shared/app-version.generated.mjs
+git commit -m "chore(release): bump version to 0.17.2"
+```
 
-## Post-Release Checks
+## 4. Tag the release
 
-- [ ] `http://127.0.0.1:3000/git/` loads without 404s
-- [ ] `http://127.0.0.1:3000/dag/` Create Event logs to footer
-- [ ] `http://127.0.0.1:3000/git/?repo=nostr-dag&branch=master` shows current tags
-- [ ] Native P2P test suite passes: `node --test test/p2p-node-integration.test.mjs`
-- [ ] WASM NIP-PIP test passes: `node --test test/nip-pip-wasm.test.mjs`
+Use an annotated tag:
 
-## Notes
+```bash
+git tag -a v0.17.2 -m "Release v0.17.2"
+```
 
-- The `demo/shared/app-version.generated.mjs` file is checked in so GitHub Pages builds reflect the correct version without needing a Node build step.
-- GitHub Pages deployments can take 1–2 minutes to propagate after the Actions workflow completes.
-- If a release is broken, delete the tag locally and remotely, fix, and re-tag:
-  ```bash
-  git tag -d vX.Y.Z
-  git push --delete origin vX.Y.Z
-  ```
+## 5. Push to trigger CI and GitHub Pages
+
+```bash
+git push origin master --follow-tags
+```
+
+Pushing to `master` triggers:
+- `.github/workflows/ci.yml` — builds and tests
+- `.github/workflows/pages.yml` — builds the WASM package and deploys to GitHub Pages
+
+## 6. Verify the deployment
+
+1. Check the CI run: `gh run list --workflow=ci.yml`
+2. Check the Pages deployment: `gh run list --workflow=pages.yml`
+3. Visit the live site: `https://randymcmillan.github.io/nostr-dag/`
+4. Verify the version in the footer/header matches the new tag.
+
+## 7. (Optional) Trigger Pages manually
+
+If the Pages workflow does not auto-trigger, run:
+
+```bash
+make deploy
+```
+
+Or via `gh`:
+
+```bash
+gh workflow run "Deploy to GitHub Pages" --ref master
+```
+
+## Versioning policy
+
+- We follow [SemVer](https://semver.org/).
+- Patch bumps (`0.17.1 -> 0.17.2`) for bug fixes and small features.
+- Minor bumps (`0.17.x -> 0.18.0`) for new capabilities or breaking demo changes.
+- Major bumps (`0.x -> 1.0.0`) when the NIP-PIP wire protocol or public API stabilizes.
