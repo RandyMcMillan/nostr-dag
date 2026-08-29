@@ -9,7 +9,7 @@ Edit `Cargo.toml` and update the `version` field under `[package]`:
 ```toml
 [package]
 name = "nostr-dag"
-version = "0.17.2"
+version = "0.18.2"
 ```
 
 The `build.rs` script automatically regenerates `demo/shared/app-version.generated.mjs` from this value on the next `cargo check`.
@@ -30,7 +30,7 @@ Ensure everything passes before tagging.
 
 ```bash
 git add Cargo.toml Cargo.lock demo/shared/app-version.generated.mjs
-git commit -m "chore(release): bump version to 0.17.2"
+git commit -m "chore(release): bump version to 0.18.2"
 ```
 
 ## 4. Tag the release
@@ -38,7 +38,7 @@ git commit -m "chore(release): bump version to 0.17.2"
 Use an annotated tag:
 
 ```bash
-git tag -a v0.17.2 -m "Release v0.17.2"
+git tag -a v0.18.2 -m "Release v0.18.2"
 ```
 
 ## 5. Push to trigger CI and GitHub Pages
