@@ -455,7 +455,7 @@ async fn handle_connection(
                 )
             }
         }
-    } else if method != "GET" && method != "HEAD" {
+    } else if method != "GET" && method != "HEAD" && !path.starts_with("/proxy/") {
         info!(%method, %path, "rejecting unsupported method");
         response_text(
             405,
