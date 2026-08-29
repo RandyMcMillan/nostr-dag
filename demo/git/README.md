@@ -1,64 +1,56 @@
-# Git Viewer — Why Decentralized Git Matters
+# nostr-dag Git Viewer
 
-## The Problem
+The Git Viewer clones public repositories into an in-browser
+[LightningFS](https://github.com/isomorphic-git/lightning-fs) filesystem using
+[isomorphic-git](https://isomorphic-git.org/).  It works both on localhost
+(development) and on GitHub Pages (production).
 
-Git is decentralized by design — every clone is a full copy. Yet in practice, git hosting is **heavily centralized** around a handful of platforms (GitHub, GitLab, Bitbucket). When these platforms block, rate-limit, or go down, access to code disappears.
+## Why a CORS proxy is required
 
-For browser-based git tools like `isomorphic-git`, the problem is worse:
+Git hosts (GitHub, GitLab, etc.) do not send `Access-Control-Allow-Origin`
+headers on their smart-HTTP endpoints (`/info/refs?service=git-upload-pack` and
+`/git-upload-pack`).  Browsers block cross-origin requests that lack CORS, so
+isomorphic-git cannot talk to GitHub directly from a web page.
 
-1. **CORS Lockout** — Browsers enforce same-origin policy. GitHub/GitLab do not send `Access-Control-Allow-Origin` headers, so browsers cannot talk to them directly.
-2. **Proxy Dependency** — `isomorphic-git` relies on a centralized CORS proxy (`cors.isomorphic-git.org`). When that proxy is blocked (Cloudflare 403) or down, cloning stops working entirely.
-3. **Single Point of Failure** — One proxy serves all users. Rate limits, outages, or censorship affect everyone.
-4. **No Peer Redundancy** — If GitHub blocks a repo or region, there is no automatic fallback to mirrors or peers.
+The standard workaround is a **CORS proxy** that forwards the git request and
+injects the missing headers.
 
-## Why Decentralized Git
+## Proxy fallback chain
 
-- **Censorship Resistance** — Code should remain accessible even if a platform removes it.
-- **Offline-First** — Peers can share bundles without internet access to the original host.
-- **Redundancy** — Any peer with a clone becomes a mirror. No single server is critical.
-- **Protocol Agnostic** — Git over HTTP, SSH, or peer-to-peer should all work.
+The viewer tries proxies in this order:
 
-## What isomorphic-git Needs from Servers
+1. `http://127.0.0.1:3000/proxy/` — local server (localhost only)
+2. `https://cors.isomorphic-git.org` — public fallback
+3. `https://corsproxy.io/?` — second public fallback
 
-### CORS Proxy Basics
+On localhost the local proxy is usually enough.  On GitHub Pages the local
+proxy is unreachable, so the viewer falls back to the public proxies.
 
-`isomorphic-git` transforms the repo URL through the proxy:
+## Local proxy endpoint
 
-```js
-// Path-style (what we use)
-https://cors.isomorphic-git.org/https://github.com/user/repo
+`nostr-dag-server` (started with `cargo run --bin nostr-dag-server`) exposes:
 
-// Query-string style (also supported)
-https://proxy.example.com/proxy.php?https://github.com/user/repo
+```
+GET  /proxy/<upstream-url>
+POST /proxy/<upstream-url>
 ```
 
-### Git HTTP Endpoints the Proxy Must Forward
+It forwards the request to the upstream git host and adds:
 
-| Method | Endpoint | Purpose |
-|--------|----------|---------|
-| `GET` | `/info/refs?service=git-upload-pack` | Discover refs for cloning/fetching |
-| `POST` | `/git-upload-pack` | Download packfile (actual clone/fetch) |
-| `GET` | `/info/refs?service=git-receive-pack` | Discover refs for pushing |
-| `POST` | `/git-receive-pack` | Upload packfile (push) |
+```
+Access-Control-Allow-Origin: *
+Access-Control-Allow-Methods: GET, POST, OPTIONS
+Access-Control-Allow-Headers: *
+```
 
-### Current Setup
+The proxy also forwards `Content-Type`, `Accept`, and `Git-Protocol` headers so
+that git smart-HTTP POST requests work correctly.
 
-We use `https://cors.isomorphic-git.org` — a free community proxy sponsored by Clever Cloud. It can be slow, rate-limited, or down.
+## Cloudflare Worker reference implementation
 
-**Current GH Pages failure:** `cors.isomorphic-git.org` returns HTTP 403 (blocked by Cloudflare), so `https://randymcmillan.github.io/nostr-dag/git/?repo=nostr-dag&branch=master` cannot clone repos.
+A minimal isomorphic-git CORS proxy looks like this:
 
-### Self-Hosting Options
-
-- **`@isomorphic-git/cors-proxy`** — npm package you can run locally
-- **CloudFlare Workers** — serverless proxy ([setup gist](https://gist.github.com/tomlarkworthy/cf1d4ceabeabdb6d1628575ab3a83acf))
-- **Gogs / Gitea** — self-hosted git servers that already send CORS headers (no proxy needed)
-- **Azure DevOps** — supports CORS with authentication
-
-GitHub, GitLab, and Bitbucket **do not** support CORS natively.
-
-### CloudFlare Worker CORS Proxy (from gist)
-
-```js
+```javascript
 addEventListener('fetch', e => e.respondWith(handle(e.request)))
 
 const ok = (req,u)=>{
@@ -67,18 +59,18 @@ const ok = (req,u)=>{
     (req.method==='GET' && u.pathname.endsWith('/info/refs') &&
       ['git-upload-pack','git-receive-pack'].includes(q.get('service')))||
     (req.method==='POST'&&u.pathname.endsWith('git-upload-pack')  &&
-      req.headers.get('content-type')==='application/x-git-upload-pack-request')||
+      req.headers.get('content-type')=='application/x-git-upload-pack-request')||
     (req.method==='POST'&&u.pathname.endsWith('git-receive-pack') &&
-      req.headers.get('content-type')==='application/x-git-receive-pack-request')
+      req.headers.get('content-type')=='application/x-git-receive-pack-request')
 }
 
 async function handle(req){
   const src=new URL(req.url)
   if(!ok(req,src)) return new Response('Forbidden',{status:403})
 
-  const target='https://'+src.pathname.slice(1)+src.search   // drop leading "/"
+  const target='https://'+src.pathname.slice(1)+src.search
 
-  if(req.method==='OPTIONS')
+  if(req.method=='OPTIONS')
     return new Response(null,{status:200,headers:cors(req)})
 
   const resp=await fetch(target,{
@@ -111,13 +103,15 @@ const strip=h=>{
 const merge=(h,x)=>{const o=new Headers(h);for(const[k,v]of Object.entries(x))o.set(k,v);return o}
 ```
 
-## Our Approach: NIP-PIP + libp2p
+(From <https://gist.githubusercontent.com/RandyMcMillan/cbe978f175e69a499898a6786430040d/raw/8ea88a09dfc925cda7a83e28e92059266e7ab67b/isomorphic-git-cors-proxy.js>)
 
-Instead of relying on centralized CORS proxies, we use:
+## Long-term direction: NIP-PIP decentralisation
 
-- **NIP-PIP** — Packetized Information Protocol over Nostr/libp2p for transferring git bundles
-- **Native peer (`p2p-node.rs`)** — Maintains local clones and advertises bundles as PIP manifests
-- **Browser libp2p stack** — Discovers peers, requests bundles, and reconstructs them in LightningFS
-- **isomorphic-git** — Reads from LightningFS once the bundle is available
+The goal is to remove the dependency on public CORS proxies entirely.  A native
+`p2p-node` peer can mirror git repos, bundle them, and publish the bundle as
+NIP-PIP events (kind 39078 manifest + 39079 slices) over libp2p gossipsub.
+Browsers discover these peers via Nostr presence events (kind 0) and fetch the
+bundle directly, then clone from the local bundle using
+`createBundleHttpClient`.
 
-See [GIT_PROXY.md](./GIT_PROXY.md) for the implementation plan.
+See [GIT_PROXY.md](./GIT_PROXY.md) for the full protocol specification.
