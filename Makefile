@@ -78,8 +78,13 @@ wasm: ensure-wasm-target
 		AR="$$LLVM_PATH/bin/llvm-ar"; \
 	fi; \
 	if [ -z "$${CC:-}" ]; then \
-		CC="$$(command -v clang || xcrun --sdk macosx --find clang)"; \
-		AR="$$(command -v llvm-ar || xcrun --sdk macosx --find llvm-ar || command -v ar)"; \
+		if [ "$$(uname -s)" = Darwin ]; then \
+			CC="$$(command -v clang || xcrun --sdk macosx --find clang)"; \
+			AR="$$(command -v llvm-ar || xcrun --sdk macosx --find llvm-ar || command -v ar)"; \
+		else \
+			CC="$$(command -v clang || echo clang)"; \
+			AR="$$(command -v llvm-ar || command -v ar || echo ar)"; \
+		fi; \
 	fi; \
 	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) CC="$$CC" AR="$$AR" $(WASM_PACK) build --target web --release --out-dir site/pkg -- --no-default-features --features wasm
 
