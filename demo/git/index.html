@@ -715,12 +715,22 @@
       });
       const cache = loadRepoCache();
       const cachedTags = cache[repo.name]?.tags || [];
+      const remoteTags = remoteTagNames(serverRefs);
       const tags = [...new Set([
         ...localTags,
-        ...remoteTagNames(serverRefs),
+        ...remoteTags,
         ...cachedTags,
       ])];
       tags.sort((a, b) => a.localeCompare(b));
+      // Build tagMap from server refs so consumers can resolve tag -> commit.
+      const tagMap = {};
+      for (const entry of serverRefs) {
+        const refStr = String(entry?.ref || '');
+        if (!refStr.startsWith('refs/tags/')) continue;
+        const tagName = refStr.replace('refs/tags/', '').replace(/\^\{\}$/u, '');
+        if (!tagName) continue;
+        tagMap[tagName] = entry.oid || tagMap[tagName] || '';
+      }
       const ref = resolveRefSelection(branches, tags, route || {});
       const selectedRef = selectedRefForRoute(route) || ref;
       footer.log('git', `readRepo refs ${repo.name} branches=${branches.length} tags=${tags.length} ref=${ref} selectedRef=${selectedRef}`, 'debug');
@@ -812,6 +822,7 @@
         commitDiff,
         files: files.slice(0, 100),
         tags,
+        tagMap,
         branches: branches.sort((a, b) => a.localeCompare(b)),
         ref,
         defaultRef: defaultRefForRefs(branches, tags),

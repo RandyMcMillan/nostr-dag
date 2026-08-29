@@ -47,7 +47,9 @@ export function cacheRepoData(repoName, data, storageKey = DEFAULT_REPO_CACHE_KE
     ...(data.tags || []),
     ...(existing?.tags || []),
   ])].sort((a, b) => a.localeCompare(b));
-  data = { ...data, tags: mergedTags };
+  // Merge tagMap (tag name -> commit oid) so callers can resolve tags.
+  const mergedTagMap = { ...(existing?.tagMap || {}), ...(data.tagMap || {}) };
+  data = { ...data, tags: mergedTags, tagMap: mergedTagMap };
   cache[repoName] = data;
   saveRepoCache(cache, storageKey);
 }
@@ -58,6 +60,7 @@ export function emptyRepoData() {
     latestCommit: null,
     files: [],
     tags: [],
+    tagMap: {},
     branches: [],
     ref: 'n/a',
     defaultRef: 'n/a',
