@@ -31,6 +31,20 @@ use crate::p2p::{
 };
 
 #[cfg(feature = "p2p")]
+macro_rules! safe_println {
+    ($($arg:tt)*) => {{
+        let _ = std::writeln!(std::io::stdout(), $($arg)*);
+    }};
+}
+
+#[cfg(feature = "p2p")]
+macro_rules! safe_eprintln {
+    ($($arg:tt)*) => {{
+        let _ = std::writeln!(std::io::stderr(), $($arg)*);
+    }};
+}
+
+#[cfg(feature = "p2p")]
 #[derive(NetworkBehaviour)]
 struct Behaviour {
     gossipsub: gossipsub::Behaviour,
@@ -233,25 +247,25 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                     }
                 }
                 Ok(None) => {}
-                Err(err) => eprintln!("COMMAND_ERROR {err}"),
+                Err(err) => safe_eprintln!("COMMAND_ERROR {err}"),
             }
         }
     });
 
     let _ = stdin_ready_rx.await;
 
-    println!(
+    safe_println!(
         "READY peer_id={local_peer_id} nostr_pubkey={} topic={NOSTR_DAG_TOPIC}",
         runtime.public_key()
     );
     let _ = std::io::stdout().flush();
-    println!(
+    safe_println!(
         "BOOTSTRAP peers={} wasm_like={}",
         bootstrap_peers.len(),
         bootstrap_wasm_like
     );
     let _ = std::io::stdout().flush();
-    println!("HELP\n{HELP_TEXT}");
+    safe_println!("HELP\n{HELP_TEXT}");
     let _ = std::io::stdout().flush();
 
     // Auto-start git mirrors from GIT_MIRROR_REPOS env var (comma-separated URLs).
@@ -303,7 +317,7 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
         let addr = addr.trim();
         if !addr.is_empty() {
             let dial_addr = addr.parse::<Multiaddr>()?;
-            println!("DIAL {dial_addr}");
+            safe_println!("DIAL {dial_addr}");
             swarm.dial(dial_addr)?;
         }
     }
@@ -315,7 +329,7 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
         } else { None })
     });
     if let Some(ref addr) = relay_addr {
-        println!("RELAY dial {addr}");
+        safe_println!("RELAY dial {addr}");
         if let Err(err) = swarm.dial(addr.clone()) {
             warn!(%addr, ?err, "relay dial failed");
         }
@@ -366,7 +380,7 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                         ) {
                             debug!(?err, "presence broadcast failed");
                         } else {
-                            println!("PRESENCE broadcast peers={} addrs={}", subscribed_topic_peers.len(), listen_addrs.len());
+                            safe_println!("PRESENCE broadcast peers={} addrs={}", subscribed_topic_peers.len(), listen_addrs.len());
                             let _ = std::io::stdout().flush();
                         }
                         // Also publish a kind-0 Nostr event so GitHub Pages browsers can discover us.
@@ -388,7 +402,7 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                                 if let Err(e) = pool.send_event(&event).await {
                                     debug!(?e, "nostr presence publish failed");
                                 } else {
-                                    println!("NOSTR presence published id={}", event.id);
+                                    safe_println!("NOSTR presence published id={}", event.id);
                                     let _ = std::io::stdout().flush();
                                 }
                             });
@@ -409,23 +423,23 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                     Some(NodeCommand::MirrorRepo(url)) => {
                         let cmd_tx = cmd_tx.clone();
                         tokio::spawn(async move {
-                            println!("MIRROR starting url={}", url);
+                            safe_println!("MIRROR starting url={}", url);
                             match mirror_repo_bundle(&url).await {
                                 Ok(bytes) => {
-                                    println!("MIRROR bundle ready url={} bytes={}", url, bytes.len());
+                                    safe_println!("MIRROR bundle ready url={} bytes={}", url, bytes.len());
                                     let _ = cmd_tx.send(NodeCommand::PublishPipPayload(bytes, Some(url))).await;
                                 }
                                 Err(e) => {
-                                    println!("MIRROR failed url={} err={}", url, e);
+                                    safe_println!("MIRROR failed url={} err={}", url, e);
                                 }
                             }
                         });
                     }
                     Some(NodeCommand::Help) => {
-                        println!("HELP\n{HELP_TEXT}");
+                        safe_println!("HELP\n{HELP_TEXT}");
                     }
                     Some(NodeCommand::Status) => {
-                        println!(
+                        safe_println!(
                             "{} discovered_peers={} relay_peers={} wasm_like_peers={} external_addrs={} nat=observing",
                             runtime.status_line(&listen_addrs, swarm.connected_peers().count()),
                             discovered_peers.len(),
@@ -438,7 +452,7 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                         );
                     }
                     Some(NodeCommand::Quit) => {
-                        println!("SHUTDOWN requested");
+                        safe_println!("SHUTDOWN requested");
                         break;
                     }
                     None => break,
@@ -451,19 +465,19 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                         if !listen_addrs.iter().any(|existing| existing == &address) {
                             listen_addrs.push(address.clone());
                         }
-                        println!("LISTENING {address}");
+                        safe_println!("LISTENING {address}");
                         let dial_addr = format!("{address}/p2p/{local_peer_id}");
-                        println!("DIAL {dial_addr}");
+                        safe_println!("DIAL {dial_addr}");
                     }
                     SwarmEvent::ExternalAddrConfirmed { address } => {
                         let address = address.to_string();
                         if !external_addrs.iter().any(|existing| existing == &address) {
                             external_addrs.push(address.clone());
                         }
-                        println!("PUBLIC_ADDR {address}");
+                        safe_println!("PUBLIC_ADDR {address}");
                     }
                     SwarmEvent::NewExternalAddrOfPeer { peer_id, address } => {
-                        println!("PEER_EXTERNAL_ADDR peer={peer_id} addr={address}");
+                        safe_println!("PEER_EXTERNAL_ADDR peer={peer_id} addr={address}");
                     }
                     SwarmEvent::Behaviour(BehaviourEvent::Mdns(mdns::Event::Discovered(peers))) => {
                         for (peer_id, addr) in peers {
@@ -472,9 +486,9 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                             if discovered_peers.insert(peer_id) {
                                 info!(%peer_id, %addr, ?role, "mDNS peer discovered");
                                 if matches!(role, PeerTopicRole::WasmLike) {
-                                    println!("DETECTED wasm-topic peer peer={} addr={}", peer_id, addr);
+                                    safe_println!("DETECTED wasm-topic peer peer={} addr={}", peer_id, addr);
                                 } else {
-                                    println!("DETECTED native-topic peer peer={} addr={}", peer_id, addr);
+                                    safe_println!("DETECTED native-topic peer peer={} addr={}", peer_id, addr);
                                 }
                             }
                             swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
@@ -491,15 +505,15 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                         let role = classify_peer_topic_role(endpoint.get_remote_address());
                         peer_topic_roles.insert(peer_id, role);
                         if matches!(role, PeerTopicRole::WasmLike) {
-                            println!("DETECTED wasm-topic peer peer={} addr={}", peer_id, remote_addr);
+                            safe_println!("DETECTED wasm-topic peer peer={} addr={}", peer_id, remote_addr);
                         } else {
-                            println!("DETECTED native-topic peer peer={} addr={}", peer_id, remote_addr);
+                            safe_println!("DETECTED native-topic peer peer={} addr={}", peer_id, remote_addr);
                         }
                         // If this is our explicit relay peer, start listening via the relay.
                         if relay_peer_id == Some(peer_id) {
                             if let Some(ref addr) = relay_addr {
                                 let circuit = addr.clone().with(Protocol::P2pCircuit);
-                                println!("RELAY listening on {circuit}");
+                                safe_println!("RELAY listening on {circuit}");
                                 if let Err(err) = swarm.listen_on(circuit) {
                                     warn!(?err, "relay listen failed");
                                 }
@@ -508,7 +522,7 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                         // Also try to listen on a circuit through any bootstrap peer that supports relay.
                         if let Some(addr) = bootstrap_peer_addrs.get(&peer_id) {
                             let circuit = addr.clone().with(Protocol::P2pCircuit);
-                            println!("BOOTSTRAP_RELAY listening on {circuit}");
+                            safe_println!("BOOTSTRAP_RELAY listening on {circuit}");
                             if let Err(err) = swarm.listen_on(circuit) {
                                 debug!(?err, "bootstrap relay listen failed (peer may not be a relay)");
                             }
@@ -530,7 +544,7 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                             swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
                         }
                         if matches!(role, PeerTopicRole::WasmLike) {
-                            println!(
+                            safe_println!(
                                 "IDENTIFIED wasm-topic peer peer={} addrs={}",
                                 peer_id,
                                 info.listen_addrs
@@ -545,7 +559,7 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                         let protocols: Vec<String> = info.protocols.iter().map(|p| p.to_string()).collect();
                         let supports_relay = protocols.iter().any(|p| p == &hop_str);
                         if protocols.iter().any(|p| p.contains("circuit") || p.contains("relay")) {
-                            println!("RELAY protocols peer={} protocols={}", peer_id, protocols.join(", "));
+                            safe_println!("RELAY protocols peer={} protocols={}", peer_id, protocols.join(", "));
                         }
                         if supports_relay && !relay_peers.contains(&peer_id) {
                             for addr in &info.listen_addrs {
@@ -554,9 +568,9 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                                     base.push(Protocol::P2p(peer_id));
                                 }
                                 let circuit = base.with(Protocol::P2pCircuit);
-                                println!("RELAY try reservation via peer={} circuit={circuit}", peer_id);
+                                safe_println!("RELAY try reservation via peer={} circuit={circuit}", peer_id);
                                 if let Err(err) = swarm.listen_on(circuit) {
-                                    println!("RELAY reservation request failed peer={} err={err:?}", peer_id);
+                                    safe_println!("RELAY reservation request failed peer={} err={err:?}", peer_id);
                                 } else {
                                     break;
                                 }
@@ -568,7 +582,7 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                         topic: _,
                     })) => {
                         subscribed_topic_peers.insert(peer_id);
-                        println!("SUBSCRIBED peer={} topic_peers={}", peer_id, subscribed_topic_peers.len());
+                        safe_println!("SUBSCRIBED peer={} topic_peers={}", peer_id, subscribed_topic_peers.len());
                         if matches!(peer_topic_roles.get(&peer_id), Some(PeerTopicRole::WasmLike | PeerTopicRole::NativeLike)) {
                             swarm.behaviour_mut().gossipsub.add_explicit_peer(&peer_id);
                         }
@@ -579,7 +593,7 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                         ..
                     })) => {
                         match result {
-                            Ok(connection_id) => println!(
+                            Ok(connection_id) => safe_println!(
                                 "HOLE_PUNCH success peer={} connection={connection_id:?}",
                                 remote_peer_id
                             ),
@@ -588,7 +602,7 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                     }
                     SwarmEvent::Behaviour(BehaviourEvent::Relay(relay::client::Event::ReservationReqAccepted { relay_peer_id, .. })) => {
                         relay_peers.insert(relay_peer_id);
-                        println!("RELAY reserved peer={relay_peer_id}");
+                        safe_println!("RELAY reserved peer={relay_peer_id}");
                     }
                     SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(
                         gossipsub::Event::Message { propagation_source, message, .. },
@@ -604,7 +618,7 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                             let reaction = runtime.process_inbound_message(&text);
                             let summary = reaction.summary;
                             let topic_role = peer_topic_roles.get(&propagation_source).copied();
-                            println!(
+                            safe_println!(
                                 "{} source={}{}",
                                 format_inbound_summary(&summary),
                                 propagation_source.to_string(),
@@ -616,7 +630,7 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                                     .unwrap_or("")
                             );
                             if let Some(event_id) = reaction.inserted_event_id {
-                                println!(
+                                safe_println!(
                                     "DAG inserted event={event_id} canonical={} tips={}",
                                     reaction.canonical_count,
                                     reaction.tip_count
@@ -629,14 +643,14 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                                 ) {
                                     warn!(?err, "ack publish failed");
                                 } else {
-                                    println!("ACK published");
+                                    safe_println!("ACK published");
                                 }
                             }
                             debug!(%text, "gossipsub message received");
                         }
                     }
                     SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
-                        println!("OUTGOING_CONN_ERROR peer={:?} err={}", peer_id, error);
+                        safe_println!("OUTGOING_CONN_ERROR peer={:?} err={}", peer_id, error);
                     }
                     _ => {}
                 }
@@ -842,7 +856,7 @@ async fn publish_pip_payload(
         runtime_keys.public_key(),
         native_now_ms()
     );
-    match build_nip_pip_publication(runtime_keys, &root_id, payload, &[], 256, path) {
+    match build_nip_pip_publication(runtime_keys, &root_id, payload, &[], 32768, path) {
         Ok(publication) => {
             let NipPipPublication {
                 root_id,
@@ -852,11 +866,11 @@ async fn publish_pip_payload(
                 slice_event_ids,
                 messages,
             } = publication;
-            println!(
+            safe_println!(
                 "PIP publishing root_id={} bytes={} slices={}",
                 root_id, total_bytes, total_slices
             );
-            println!(
+            safe_println!(
                 "PIP manifest event={} root_id={}",
                 manifest_event_id, root_id
             );
@@ -890,19 +904,19 @@ async fn publish_pip_payload(
                     }
                 }
                 if index == 0 {
-                    println!("PIP manifest staged");
+                    safe_println!("PIP manifest staged");
                 } else if let Some(slice_event_id) = slice_event_ids.get(index - 1) {
-                    println!(
+                    safe_println!(
                         "PIP slice staged seq={} event={}",
                         index - 1,
                         slice_event_id
                     );
                 } else {
-                    println!("PIP slice staged seq={}", index - 1);
+                    safe_println!("PIP slice staged seq={}", index - 1);
                 }
             }
 
-            println!(
+            safe_println!(
                 "PIP publish attempted root_id={} bytes={} slices={}",
                 root_id, total_bytes, total_slices
             );
@@ -924,7 +938,7 @@ async fn mirror_repo_bundle(
     let bundle_path = mirror_dir.with_extension("bundle");
 
     if mirror_dir.exists() {
-        println!("MIRROR fetch existing url={} dir={}", url, mirror_dir.display());
+        safe_println!("MIRROR fetch existing url={} dir={}", url, mirror_dir.display());
         let out = tokio::process::Command::new("git")
             .args(["fetch", "--all", "--tags"])
             .current_dir(&mirror_dir)
@@ -939,7 +953,7 @@ async fn mirror_repo_bundle(
             .into());
         }
     } else {
-        println!("MIRROR clone starting url={} dir={}", url, mirror_dir.display());
+        safe_println!("MIRROR clone starting url={} dir={}", url, mirror_dir.display());
         tokio::fs::create_dir_all(&mirror_dir).await?;
         let out = tokio::process::Command::new("git")
             .args(["clone", "--mirror", url])
@@ -976,7 +990,7 @@ async fn mirror_repo_bundle(
     }
 
     let bundle_bytes = tokio::fs::read(&bundle_path).await?;
-    println!("MIRROR bundle ready url={} bytes={}", url, bundle_bytes.len());
+    safe_println!("MIRROR bundle ready url={} bytes={}", url, bundle_bytes.len());
     Ok(bundle_bytes)
 }
 

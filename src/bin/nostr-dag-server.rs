@@ -186,6 +186,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     cmd.env("P2P_RELAY", relay);
                 }
             }
+            if let Ok(mirror) = env::var("GIT_MIRROR_REPOS") {
+                if !mirror.trim().is_empty() {
+                    cmd.env("GIT_MIRROR_REPOS", mirror);
+                }
+            }
             match cmd.spawn()
             {
                 Ok(mut child) => {
