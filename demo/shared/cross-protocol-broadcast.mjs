@@ -1,6 +1,6 @@
 import { buildBridgeEnvelope, decodeBridgeMessage, encodeBridgeMessage } from './bridge-protocol.mjs';
 
-export const DAG_BRIDGE_TOPIC = 'nostr/bridge';
+export const DAG_BRIDGE_TOPIC = 'nostr-dag-bridge';
 
 export function buildDagBridgeEnvelope(event, relayHints = [], meta = {}) {
   return buildBridgeEnvelope(event, 'nostr->libp2p', relayHints, {

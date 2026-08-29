@@ -294,7 +294,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     });
 
     let node = null;
-    let topic = 'nostr/bridge';
+    let topic = 'nostr-dag-bridge';
     let relays = DEFAULT_RELAYS.slice();
     let started = false;
     let peerPollTimer = null;
