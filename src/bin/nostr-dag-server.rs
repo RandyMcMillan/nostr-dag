@@ -273,11 +273,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let addr = format!("{host}:{port}");
-    let listener = TcpListener::bind(&addr).await?;
+    let listener = match TcpListener::bind(&addr).await {
+        Ok(l) => l,
+        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
+            tracing::warn!(%addr, "port in use, falling back to system-assigned port");
+            TcpListener::bind(format!("{host}:0")).await?
+        }
+        Err(e) => return Err(e.into()),
+    };
+    let bound_addr = listener.local_addr()?;
     let mut connections = JoinSet::new();
 
-    info!(%addr, site_dir = %site_dir, %db_path, "nostr-dag server listening");
-    println!("SERVER_URL=http://{addr}");
+    info!(%bound_addr, site_dir = %site_dir, %db_path, "nostr-dag server listening");
+    println!("SERVER_URL=http://{bound_addr}");
 
     loop {
         tokio::select! {
