@@ -1254,13 +1254,14 @@
         footer.log('git', `refreshOneRepo ensure done ${repo.name} proxy=${activeProxy || 'none'}`, 'debug');
         const data = await readRepo(repo, route);
         cacheRepoData(repo.name, data);
-        footer.log('git', `refreshOneRepo read done ${repo.name}`, 'debug');
+        footer.log('git', `refreshOneRepo read done ${repo.name} tags=${data.tags.length}`, 'debug');
         if (route) {
           const probeOk = await probe;
           const probeMs = probeOk?.durationMs ?? (probeOk?.ok ? Math.round(performance.now() - probeStart) : null);
           setRepoPing(repo.name, probeMs);
-          setRepoHealth(repo.name, probeOk?.ok ? 'available' : 'unavailable');
-          footer.log('git', `probe ${repo.name} ${probeOk?.ok ? 'ok' : 'fail'} ping=${probeMs ?? 'n/a'} ms`, 'debug');
+          const gitOk = data && data.commits && data.commits.length > 0;
+          setRepoHealth(repo.name, gitOk ? 'available' : 'unavailable');
+          footer.log('git', `probe ${repo.name} ${probeOk?.ok ? 'ok' : 'fail'} ping=${probeMs ?? 'n/a'} ms gitOk=${gitOk}`, 'debug');
         }
         renderApp(repos.map((entry) => {
           const cache = loadRepoCache();
@@ -1315,9 +1316,10 @@
             const probeOk = await probe;
             const probeMs = probeOk?.ok ? Math.round(performance.now() - probeStart) : null;
             setRepoPing(repo.name, probeMs);
-            setRepoHealth(repo.name, probeOk?.ok ? 'available' : 'unavailable');
+            const gitOk = data && data.commits && data.commits.length > 0;
+            setRepoHealth(repo.name, gitOk ? 'available' : 'unavailable');
             setRepoStatus(repo.name, 'ready');
-            footer.log('git', `probe ${repo.name} ${probeOk?.ok ? 'ok' : 'fail'} ping=${probeMs ?? 'n/a'} ms`, 'debug');
+            footer.log('git', `probe ${repo.name} ${probeOk?.ok ? 'ok' : 'fail'} ping=${probeMs ?? 'n/a'} ms gitOk=${gitOk} tags=${data.tags.length}`, 'debug');
             footer.log('git', `ready ${repo.name}`, 'info', 'available');
             dataByRepo.set(repo.name, data);
             if (repoRoute) {
@@ -1366,11 +1368,12 @@
         footer.log('git', `refreshDetail ensure done ${route.repo.name}`, 'debug');
         const data = await readRepo(route.repo, route);
         cacheRepoData(route.repo.name, data);
-        footer.log('git', `refreshDetail read done ${route.repo.name}`, 'debug');
+        footer.log('git', `refreshDetail read done ${route.repo.name} tags=${data.tags.length}`, 'debug');
         const available = await probe;
         const probeMs = available?.ok ? Math.round(performance.now() - probeStart) : null;
         setRepoPing(route.repo.name, probeMs);
-        setRepoHealth(route.repo.name, available?.ok ? 'available' : 'unavailable');
+        const gitOk = data && data.commits && data.commits.length > 0;
+        setRepoHealth(route.repo.name, gitOk ? 'available' : 'unavailable');
         renderApp(data);
         setStatus('ready', 'available');
         footer.log('git', `ready ${route.repo.name}`, 'info', 'available');
