@@ -246,6 +246,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         peer_store_for_child.upsert(entry);
                                     }
                                 }
+                                // Parse remote peer discovery events from p2p-node stdout
+                                // and upsert them as distinct PeerEntry objects so the /peers
+                                // endpoint (and db-viewer) can see real gossipsub/mdns/identify peers.
+                                if let Some(discovered) = parse_peer_discovery(trimmed) {
+                                    peer_store_for_child.upsert(discovered);
+                                }
+
                                 let is_peer_line = trimmed.starts_with("READY ")
                                     || trimmed.starts_with("LISTENING ")
                                     || trimmed.starts_with("DIAL ")
@@ -840,6 +847,89 @@ fn handle_peer_get(
     serde_json::to_vec(&payload)
         .map(|body| (body, "application/json; charset=utf-8"))
         .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))
+}
+
+/// Parse structured peer-discovery lines emitted by the p2p-node binary.
+/// Lines like `DETECTED wasm-topic peer peer=12D3... addr=/ip4/...` or
+/// `IDENTIFIED wasm-topic peer peer=12D3... addrs=/ip4/... | /ip4/...`
+/// are turned into `PeerEntry` objects so the server's `/peers` endpoint
+/// can surface real gossipsub / mDNS / identify peers to db-viewer.
+#[cfg(feature = "p2p")]
+fn parse_peer_discovery(line: &str) -> Option<PeerEntry> {
+    if line.starts_with("DETECTED ") {
+        // DETECTED wasm-topic peer peer={id} addr={addr}
+        // DETECTED native-topic peer peer={id} addr={addr}
+        let kind = if line.contains("wasm-topic") {
+            "wasm"
+        } else {
+            "native"
+        };
+        let peer_id = extract_after(line, "peer=")?;
+        let addr = extract_after(line, "addr=")?;
+        return Some(PeerEntry {
+            peer_id: peer_id.to_string(),
+            kind: kind.to_string(),
+            path: addr.to_string(),
+            detail: Some(line.to_string()),
+            source: Some("gossipsub".to_string()),
+            updated_at: now_ms(),
+        });
+    }
+
+    if line.starts_with("IDENTIFIED ") {
+        // IDENTIFIED wasm-topic peer peer={id} addrs={addr1} | {addr2}
+        let kind = if line.contains("wasm-topic") { "wasm" } else { "native" };
+        let peer_id = extract_after(line, "peer=")?;
+        let addrs = extract_after(line, "addrs=")?;
+        let first_addr = addrs.split(" | ").next().unwrap_or(addrs);
+        return Some(PeerEntry {
+            peer_id: peer_id.to_string(),
+            kind: kind.to_string(),
+            path: first_addr.to_string(),
+            detail: Some(addrs.to_string()),
+            source: Some("identify".to_string()),
+            updated_at: now_ms(),
+        });
+    }
+
+    if line.starts_with("PEER_EXTERNAL_ADDR ") {
+        // PEER_EXTERNAL_ADDR peer={id} addr={addr}
+        let peer_id = extract_after(line, "peer=")?;
+        let addr = extract_after(line, "addr=")?;
+        return Some(PeerEntry {
+            peer_id: peer_id.to_string(),
+            kind: "native".to_string(),
+            path: addr.to_string(),
+            detail: Some(line.to_string()),
+            source: Some("autonat".to_string()),
+            updated_at: now_ms(),
+        });
+    }
+
+    if line.starts_with("SUBSCRIBED ") {
+        // SUBSCRIBED peer={id} topic_peers={count}
+        let peer_id = extract_after(line, "peer=")?;
+        return Some(PeerEntry {
+            peer_id: peer_id.to_string(),
+            kind: "native".to_string(),
+            path: "/".to_string(),
+            detail: Some(line.to_string()),
+            source: Some("gossipsub".to_string()),
+            updated_at: now_ms(),
+        });
+    }
+
+    None
+}
+
+/// Helper: extract the value after `prefix` up to the next whitespace.
+#[cfg(feature = "p2p")]
+fn extract_after<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
+    let start = text.find(prefix)? + prefix.len();
+    let rest = &text[start..];
+    let end = rest.find(' ').unwrap_or(rest.len());
+    let value = &rest[..end];
+    if value.is_empty() { None } else { Some(value) }
 }
 
 // ---------------------------------------------------------------------------
