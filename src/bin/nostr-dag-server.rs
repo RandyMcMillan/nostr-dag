@@ -246,7 +246,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         peer_store_for_child.upsert(entry);
                                     }
                                 }
-                                if trimmed.starts_with("READY ")
+                                let is_peer_line = trimmed.starts_with("READY ")
                                     || trimmed.starts_with("LISTENING ")
                                     || trimmed.starts_with("DIAL ")
                                     || trimmed.starts_with("STATUS ")
@@ -263,9 +263,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     || trimmed.starts_with("MIRROR ")
                                     || trimmed.starts_with("PIP ")
                                     || trimmed.starts_with("PRESENCE ")
-                                    || trimmed.starts_with("NOSTR ")
-                                {
+                                    || trimmed.starts_with("NOSTR ");
+                                if is_peer_line {
                                     println!("[peer] {trimmed}");
+                                    // Refresh the local peer timestamp so it isn't pruned
+                                    // while the p2p-node is still alive.
+                                    if !peer_id.is_empty() {
+                                        peer_store_for_child.upsert(PeerEntry {
+                                            peer_id: peer_id.clone(),
+                                            kind: "native".to_string(),
+                                            path: "/".to_string(),
+                                            detail: Some(trimmed.to_string()),
+                                            source: Some("localhost".to_string()),
+                                            updated_at: now_ms(),
+                                        });
+                                    }
                                 }
                                 debug!(target: "p2p-node", "{trimmed}");
                             }
