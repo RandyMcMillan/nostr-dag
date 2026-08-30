@@ -832,6 +832,7 @@
         files: files.slice(0, 100),
         tags,
         tagMap,
+        serverRefs,
         branches: branches.sort((a, b) => a.localeCompare(b)),
         ref,
         defaultRef: defaultRefForRefs(branches, tags),
@@ -1417,7 +1418,7 @@
       }
     }
 
-    refreshBtn.addEventListener('click', () => { void refreshList(); });
+    refreshBtn.addEventListener('click', () => { void refreshList({ force: true }); });
     renderApp();
     void refresh();
   </script>
