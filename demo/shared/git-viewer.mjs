@@ -49,7 +49,18 @@ export function cacheRepoData(repoName, data, storageKey = DEFAULT_REPO_CACHE_KE
   ])].sort((a, b) => a.localeCompare(b));
   // Merge tagMap (tag name -> commit oid) so callers can resolve tags.
   const mergedTagMap = { ...(existing?.tagMap || {}), ...(data.tagMap || {}) };
-  data = { ...data, tags: mergedTags, tagMap: mergedTagMap };
+  // Merge server refs so we keep the full remote ref list (branches, tags,
+  // HEAD, etc.) for other consumers such as the NIP-PIP transport.
+  const mergedServerRefs = [...(existing?.serverRefs || []), ...(data.serverRefs || [])];
+  const seenRef = new Set();
+  const dedupedServerRefs = [];
+  for (const ref of mergedServerRefs) {
+    const key = `${ref?.ref || ''}|${ref?.oid || ''}`;
+    if (seenRef.has(key)) continue;
+    seenRef.add(key);
+    dedupedServerRefs.push(ref);
+  }
+  data = { ...data, tags: mergedTags, tagMap: mergedTagMap, serverRefs: dedupedServerRefs };
   cache[repoName] = data;
   saveRepoCache(cache, storageKey);
 }
@@ -61,6 +72,7 @@ export function emptyRepoData() {
     files: [],
     tags: [],
     tagMap: {},
+    serverRefs: [],
     branches: [],
     ref: 'n/a',
     defaultRef: 'n/a',
