@@ -666,18 +666,25 @@
         throw e;
       }
 
-      setRepoStatus(repo.name, 'fetching tags...');
-      const fetchStart = performance.now();
-      footer.log('git', `${repo.name} fetching tags${route ? ` (${progressContextLabel(route)})` : ''}`, 'debug');
-      await fetchRepoRefs(repo, route, (progress) => {
-        const message = getGitProgressReporter(repo, 'fetch', route)(progress);
-        if (message) {
-          footer.log('git', message, 'trace');
-        }
-      }).catch((e) => {
-        footer.log('git', `${repo.name} fetch failed: ${e.message}`, 'warn');
-      });
-      footer.log('git', `${repo.name} fetch done in ${Math.round(performance.now() - fetchStart)} ms proxy=${activeProxy || 'none'}`, 'debug');
+      const cache = loadRepoCache();
+      const hasCachedRefs = cache[repo.name]?.tags?.length > 0 || cache[repo.name]?.branches?.length > 0;
+      if (!exists || !hasCachedRefs) {
+        setRepoStatus(repo.name, 'fetching tags...');
+        const fetchStart = performance.now();
+        footer.log('git', `${repo.name} fetching tags${route ? ` (${progressContextLabel(route)})` : ''}`, 'debug');
+        await fetchRepoRefs(repo, route, (progress) => {
+          const message = getGitProgressReporter(repo, 'fetch', route)(progress);
+          if (message) {
+            footer.log('git', message, 'trace');
+          }
+        }).catch((e) => {
+          footer.log('git', `${repo.name} fetch failed: ${e.message}`, 'warn');
+        });
+        footer.log('git', `${repo.name} fetch done in ${Math.round(performance.now() - fetchStart)} ms proxy=${activeProxy || 'none'}`, 'debug');
+      } else {
+        setRepoStatus(repo.name, 'using cached refs');
+        footer.log('git', `${repo.name} skipping fetch — cached refs available`, 'info');
+      }
       setRepoStatus(repo.name, 'ready');
       footer.log('git', `${repo.name} ensureRepo complete in ${Math.round(performance.now() - ensureStart)} ms`, 'debug');
     }
@@ -705,28 +712,36 @@
       );
     }
 
-    async function readRepo(repo, route = null) {
+    async function readRepo(repo, route = null, { skipNetwork = false } = {}) {
       const readStart = performance.now();
-      footer.log('git', `readRepo start ${repo.name}`, 'debug');
+      footer.log('git', `readRepo start ${repo.name} skipNetwork=${skipNetwork}`, 'debug');
       const localBranches = await git.listBranches({ fs, dir: repo.dir }).catch(() => []);
       const remoteBranches = await git.listBranches({ fs, dir: repo.dir, remote: 'origin' }).catch(() => []);
       const branches = [...new Set([...localBranches, ...remoteBranches])];
       footer.log('git', `${repo.name} listBranches done in ${Math.round(performance.now() - readStart)} ms`, 'trace');
-      const serverRefs = await tryWithCorsProxies(
-        (opts) => git.listServerRefs({ fs, http, url: repo.url, ...opts }),
-        {},
-        `${repo.name} listServerRefs`,
-      ).catch((e) => {
-        footer.log('git', `${repo.name} listServerRefs failed: ${e.message}`, 'warn');
-        return [];
-      });
-      footer.log('git', `${repo.name} listServerRefs done refs=${serverRefs.length} in ${Math.round(performance.now() - readStart)} ms`, 'trace');
+      const cache = loadRepoCache();
+      const cached = cache[repo.name];
+      const hasCachedRefs = cached && (cached.tags?.length > 0 || cached.branches?.length > 0);
+      let serverRefs = [];
+      if (!skipNetwork || !hasCachedRefs) {
+        serverRefs = await tryWithCorsProxies(
+          (opts) => git.listServerRefs({ fs, http, url: repo.url, ...opts }),
+          {},
+          `${repo.name} listServerRefs`,
+        ).catch((e) => {
+          footer.log('git', `${repo.name} listServerRefs failed: ${e.message}`, 'warn');
+          return [];
+        });
+        footer.log('git', `${repo.name} listServerRefs done refs=${serverRefs.length} in ${Math.round(performance.now() - readStart)} ms`, 'trace');
+      } else {
+        serverRefs = cached.serverRefs || [];
+        footer.log('git', `${repo.name} using cached serverRefs (${serverRefs.length})`, 'info');
+      }
       const localTags = await git.listTags({ fs, dir: repo.dir }).catch((e) => {
         footer.log('git', `${repo.name} listTags failed: ${e.message}`, 'warn');
         return [];
       });
-      const cache = loadRepoCache();
-      const cachedTags = cache[repo.name]?.tags || [];
+      const cachedTags = cached?.tags || [];
       const remoteTags = remoteTagNames(serverRefs);
       const tags = [...new Set([
         ...localTags,
@@ -1265,11 +1280,11 @@
       });
     }
 
-    async function refreshOneRepo(repoName, { force = false } = {}) {
+    async function refreshOneRepo(repoName, { force = false, skipNetwork = false } = {}) {
       const repo = repos.find((entry) => entry.name === repoName);
       if (!repo) return;
       const route = getRouteContext(repos).repo?.name === repo.name ? getRouteContext(repos) : null;
-      footer.log('git', `refreshOneRepo start ${repo.name} force=${force} route=${route ? 'yes' : 'no'}`, 'debug');
+      footer.log('git', `refreshOneRepo start ${repo.name} force=${force} skipNetwork=${skipNetwork} route=${route ? 'yes' : 'no'}`, 'debug');
       try {
         setRepoStatus(repo.name, 'refreshing...');
         if (route) setRepoHealth(repo.name, 'checking');
@@ -1282,7 +1297,7 @@
         const probe = route ? probeRemoteHost(repo).catch(() => ({ ok: false, durationMs: null })) : null;
         await ensureRepo(repo, route, { skipP2P: force });
         footer.log('git', `refreshOneRepo ensure done ${repo.name} proxy=${activeProxy || 'none'}`, 'debug');
-        const data = await readRepo(repo, route);
+        const data = await readRepo(repo, route, { skipNetwork });
         cacheRepoData(repo.name, data);
         footer.log('git', `refreshOneRepo read done ${repo.name} tags=${data.tags.length}`, 'debug');
         if (route) {
@@ -1308,14 +1323,14 @@
       }
     }
 
-    async function refreshList({ force = false } = {}) {
+    async function refreshList({ force = false, skipNetwork = false } = {}) {
       try {
         const route = getRouteContext(repos);
         const cache = loadRepoCache();
         const hasCachedData = repos.some((repo) => cache[repo.name]?.commits?.length > 0);
         // Show green immediately when cached data exists; background refresh updates cards.
         setStatus(hasCachedData ? 'ready (refreshing)' : 'loading repos...', hasCachedData ? 'available' : 'checking');
-        footer.log('git', `refreshing ${repos.length} repos force=${force}`, 'debug');
+        footer.log('git', `refreshing ${repos.length} repos force=${force} skipNetwork=${skipNetwork}`, 'debug');
         repos.forEach((repo) => {
           setRepoStatus(repo.name, 'refreshing...');
           setRepoHealth(repo.name, 'checking');
@@ -1343,7 +1358,7 @@
               setRepoPing(repo.name, null);
               const probe = probeRemoteHost(repo).catch(() => ({ ok: false, durationMs: null }));
               await ensureRepo(repo, repoRoute, { skipP2P: force });
-              const data = await readRepo(repo, repoRoute);
+              const data = await readRepo(repo, repoRoute, { skipNetwork });
               const probeOk = await probe;
               const probeMs = probeOk?.durationMs ?? null;
               setRepoPing(repo.name, probeMs);
@@ -1399,12 +1414,12 @@
       }
     }
 
-    async function refreshDetail(route) {
+    async function refreshDetail(route, { skipNetwork = false } = {}) {
       if (!route.repo) {
         renderApp();
         return;
       }
-      footer.log('git', `refreshDetail start ${route.repo.name} view=${route.view || 'code'} branch=${route.branch || ''} tag=${route.tag || ''} commit=${route.commit || ''}`, 'debug');
+      footer.log('git', `refreshDetail start ${route.repo.name} skipNetwork=${skipNetwork} view=${route.view || 'code'} branch=${route.branch || ''} tag=${route.tag || ''} commit=${route.commit || ''}`, 'debug');
       try {
         setStatus(`loading ${route.repo.name}...`, 'checking');
         setRepoHealth(route.repo.name, 'checking');
@@ -1412,7 +1427,7 @@
         const probe = probeRemoteHost(route.repo).catch(() => ({ ok: false, durationMs: null }));
         await ensureRepo(route.repo, route);
         footer.log('git', `refreshDetail ensure done ${route.repo.name}`, 'debug');
-        const data = await readRepo(route.repo, route);
+        const data = await readRepo(route.repo, route, { skipNetwork });
         cacheRepoData(route.repo.name, data);
         footer.log('git', `refreshDetail read done ${route.repo.name} tags=${data.tags.length}`, 'debug');
         const available = await probe;
@@ -1431,16 +1446,16 @@
       }
     }
 
-    async function refresh() {
+    async function refresh({ skipNetwork = false } = {}) {
       const route = getRouteContext(repos);
-      footer.log('git', `refresh dispatch repo=${route.repoName || 'none'} view=${route.view || 'list'}`, 'debug');
+      footer.log('git', `refresh dispatch repo=${route.repoName || 'none'} view=${route.view || 'list'} skipNetwork=${skipNetwork}`, 'debug');
       if (route.repo) {
-        await refreshDetail(route);
+        await refreshDetail(route, { skipNetwork });
       } else if (route.repoName) {
         renderApp();
         setStatus(`unknown repo: ${route.repoName}`, 'unavailable');
       } else {
-        await refreshList();
+        await refreshList({ skipNetwork });
       }
     }
 
@@ -1452,8 +1467,15 @@
         void refreshList({ force: true });
       }
     });
-    renderApp();
-    void refresh();
+    // Render from cache immediately so branches/tags appear without waiting for network.
+    const cache = loadRepoCache();
+    const cachedValues = repos.map((repo) => cache[repo.name] || emptyRepoData());
+    renderApp(cachedValues);
+    // First refresh: use local clone + cache only (no network) for instant UI.
+    void refresh({ skipNetwork: true });
+    // After a short delay, do a background refresh that hits the network
+    // to pick up any new tags/branches published since the last visit.
+    setTimeout(() => refresh({ skipNetwork: false }), 3000);
   </script>
 </body>
 </html>
