@@ -66,7 +66,7 @@
     import git from 'https://cdn.jsdelivr.net/npm/isomorphic-git@1.25.0/+esm';
     import http from 'https://cdn.jsdelivr.net/npm/isomorphic-git@1.25.0/http/web/+esm';
     import LightningFS from 'https://cdn.jsdelivr.net/npm/@isomorphic-git/lightning-fs@4.6.0/+esm';
-    import { createGitP2PTransport } from '../shared/git-p2p-transport.mjs';
+    import { createGitP2PTransport, DEFAULT_RELAYS } from '../shared/git-p2p-transport.mjs';
     import { createBundleHttpClient } from '../shared/git-bundle-http.mjs';
 
     const fs = new LightningFS('git-viewer');
@@ -158,6 +158,7 @@
         networkTime.attachNode(node);
         const p2pTransport = createGitP2PTransport({
           node,
+          relays: DEFAULT_RELAYS,
           onLog(level, text) {
             footer.log('git-p2p', text, level);
           },

@@ -234,6 +234,38 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
     };
 
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<NodeCommand>(64);
+
+    // Subscribe to PIP bundle requests on Nostr relays so browsers on GH Pages
+    // (which cannot dial the local peer directly due to mixed-content) can
+    // request bundles via the relay backbone.
+    let relay_cmd_tx = cmd_tx.clone();
+    let relay_pool_for_sub = relay_pool.clone();
+    tokio::spawn(async move {
+        use nostr::Filter;
+        use crate::p2p::PIP_REQUEST_KIND;
+        let filter = Filter::new().kind(PIP_REQUEST_KIND).limit(0);
+        if let Err(e) = relay_pool_for_sub.subscribe(filter, SubscribeOptions::default()).await {
+            warn!(?e, "relay subscription failed");
+            return;
+        }
+        info!("subscribed to PIP requests on relays");
+        if let Err(e) = relay_pool_for_sub.handle_notifications(move |notification| {
+            let cmd_tx = relay_cmd_tx.clone();
+            async move {
+                if let RelayPoolNotification::Event { event, .. } = notification {
+                    if let Ok(content) = serde_json::from_str::<serde_json::Value>(&event.content) {
+                        if let Some(path) = content.get("path").and_then(|v| v.as_str()) {
+                            info!(%path, "relay PIP request received");
+                            let _ = cmd_tx.try_send(NodeCommand::RelayBundleRequest(path.to_string()));
+                        }
+                    }
+                }
+                Ok(false)
+            }
+        }).await {
+            warn!(?e, "relay notification handler failed");
+        }
+    });
     let (stdin_ready_tx, stdin_ready_rx) = tokio::sync::oneshot::channel::<()>();
     let cmd_tx_stdin = cmd_tx.clone();
 
@@ -418,13 +450,21 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                         }
                     }
                     Some(NodeCommand::PublishPipBlob(message)) => {
-                        publish_pip_payload(&runtime_keys, message.as_bytes(), &subscribed_topic_peers, &mut swarm, None).await;
+                        publish_pip_payload(&runtime_keys, message.as_bytes(), &subscribed_topic_peers, &mut swarm, None, Some(&relay_pool)).await;
                     }
                     Some(NodeCommand::PublishPipPayload(bytes, path)) => {
                         if let Some(ref p) = path {
                             bundle_cache.insert(p.clone(), bytes.clone());
                         }
-                        publish_pip_payload(&runtime_keys, &bytes, &subscribed_topic_peers, &mut swarm, path.as_deref()).await;
+                        publish_pip_payload(&runtime_keys, &bytes, &subscribed_topic_peers, &mut swarm, path.as_deref(), Some(&relay_pool)).await;
+                    }
+                    Some(NodeCommand::RelayBundleRequest(url)) => {
+                        if let Some(bytes) = bundle_cache.get(&url) {
+                            safe_println!("RELAY_REQUEST url={} cached_bytes={}", url, bytes.len());
+                            publish_pip_payload(&runtime_keys, bytes, &subscribed_topic_peers, &mut swarm, Some(&url), Some(&relay_pool)).await;
+                        } else {
+                            safe_println!("RELAY_REQUEST url={} not_cached", url);
+                        }
                     }
                     Some(NodeCommand::MirrorRepo(url)) => {
                         let cmd_tx = cmd_tx.clone();
@@ -774,6 +814,8 @@ pub enum NodeCommand {
     PublishPipBlob(String),
     MirrorRepo(String),
     PublishPipPayload(Vec<u8>, Option<String>),
+    /// Relay-based bundle request: look up `url` in cache and publish if found.
+    RelayBundleRequest(String),
     Status,
     Quit,
 }
@@ -813,6 +855,10 @@ pub struct NipPipPublication {
     pub manifest_event_id: String,
     pub slice_event_ids: Vec<String>,
     pub messages: Vec<String>,
+    /// Raw manifest event ready for relay publication.
+    pub manifest_event: nostr::Event,
+    /// Raw slice events ready for relay publication.
+    pub slice_events: Vec<nostr::Event>,
 }
 
 /// Build a complete NIP-PIP publication ready for gossipsub broadcast.
@@ -860,6 +906,8 @@ pub fn build_nip_pip_publication(
         manifest_event_id: manifest_event.id.to_hex(),
         slice_event_ids,
         messages,
+        manifest_event,
+        slice_events,
     })
 }
 
@@ -878,6 +926,7 @@ async fn publish_pip_payload(
     _subscribed_topic_peers: &HashSet<PeerId>,
     swarm: &mut libp2p::Swarm<Behaviour>,
     path: Option<&str>,
+    relay_pool: Option<&RelayPool>,
 ) {
     // Note: we no longer wait for explicit SUBSCRIBE events.
     // Gossipsub mesh/fanout peers can receive publishes even before
@@ -897,6 +946,8 @@ async fn publish_pip_payload(
                 manifest_event_id,
                 slice_event_ids,
                 messages,
+                manifest_event,
+                slice_events,
             } = publication;
             safe_println!(
                 "PIP publishing root_id={} bytes={} slices={}",
@@ -946,6 +997,27 @@ async fn publish_pip_payload(
                 } else {
                     safe_println!("PIP slice staged seq={}", index - 1);
                 }
+            }
+
+            // Also publish raw Nostr events to relays so GH Pages browsers can receive them.
+            if let Some(pool) = relay_pool {
+                let pool = pool.clone();
+                let manifest_event = manifest_event.clone();
+                let slice_events = slice_events.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = pool.send_event(&manifest_event).await {
+                        debug!(?e, "PIP manifest relay publish failed");
+                    } else {
+                        safe_println!("PIP manifest relay published id={}", manifest_event.id);
+                    }
+                    for slice in &slice_events {
+                        if let Err(e) = pool.send_event(slice).await {
+                            debug!(?e, "PIP slice relay publish failed");
+                        } else {
+                            safe_println!("PIP slice relay published id={}", slice.id);
+                        }
+                    }
+                });
             }
 
             safe_println!(

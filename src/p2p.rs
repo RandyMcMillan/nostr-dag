@@ -27,6 +27,8 @@ pub const NOSTR_DAG_TOPIC: &str = "nostr-dag-bridge";
 pub const NETWORK_TIME_PROTOCOL: &str = "nostr-dag-network-time";
 pub const NETWORK_TIME_VERSION: u64 = 1;
 
+/// PIP Nostr event kind used for on-demand bundle requests (browser → native peer).
+pub const PIP_REQUEST_KIND: nostr::Kind = nostr::Kind::Custom(39077);
 /// PIP Nostr event kind used for transfer manifests.
 pub const TRANSFER_MANIFEST_KIND: nostr::Kind = nostr::Kind::Custom(39078);
 /// PIP Nostr event kind used for transfer slices.
