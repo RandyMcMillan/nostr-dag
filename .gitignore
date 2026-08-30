@@ -13,3 +13,4 @@ demo/shared/app-version.generated.mjs
 
 node_modules
 *.pem
+demo/pkg/
