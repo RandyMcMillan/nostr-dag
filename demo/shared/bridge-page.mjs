@@ -80,6 +80,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     const seenProcessed = new Set();
     const deterministicPeerKeyLabels = ['nostr-dag-native', 'nostr-dag-wasm'];
     const deterministicPeerIds = new Set();
+    const deterministicNostrPubkeys = new Set();
     const recentNostrToLibp2p = [];
     const recentLibp2pToNostr = [];
     const recentSeenRelay = [];
@@ -227,6 +228,18 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       deterministicPeerIds.clear();
       for (const peerId of ids) {
         deterministicPeerIds.add(peerId);
+      }
+      // Compute matching Nostr pubkeys so we can query relays for presence events.
+      deterministicNostrPubkeys.clear();
+      for (const label of deterministicPeerKeyLabels) {
+        try {
+          const encoded = new TextEncoder().encode(label);
+          const digest = await crypto.subtle.digest('SHA-256', encoded);
+          const sk = new Uint8Array(digest);
+          deterministicNostrPubkeys.add(getPublicKey(sk));
+        } catch {
+          // ignore
+        }
       }
       schedulePeerRender();
     }
@@ -1847,6 +1860,22 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
           },
           oneose() {},
         });
+
+        // Explicitly query for deterministic native peer presence events.
+        // Generic subscriptions on busy relays may miss kind-0 metadata events.
+        for (const pubkey of deterministicNostrPubkeys) {
+          window.__sharedFooter?.log('bridge', `querying presence for deterministic pubkey ${pubkey.slice(0, 16)}…`, 'trace', 'checking');
+          pool.querySync(relaysSnapshot, { kinds: [0], authors: [pubkey], limit: 3 }, { maxWait: 5000 })
+            .then((events) => {
+              for (const ev of events) {
+                window.__sharedFooter?.log('bridge', `presence query hit kind=${ev.kind} ${ev.id.slice(0, 16)}…`, 'debug', 'available');
+                void handleNostrEvent(ev, 'relay-query', null);
+              }
+            })
+            .catch((e) => {
+              window.__sharedFooter?.log('bridge', `presence query failed: ${e?.message || e}`, 'warn', 'checking');
+            });
+        }
 
         const measuredCount = measuredRelayCount(relaysSnapshot);
         const statusCount = measuredCount > 0 ? `${measuredCount} measured` : `${relaysSnapshot.length} known`;
