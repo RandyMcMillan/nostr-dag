@@ -4,7 +4,22 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 CONFIG_FILE="${CONFIG_FILE:-$SCRIPT_DIR/federation.toml}"
-PORT="${PORT:-8080}"
+
+# Find an available port starting from 8080.
+# macOS WebDriver often occupies 8080, so we scan upwards.
+find_free_port() {
+    local start_port="${1:-8080}"
+    local port="$start_port"
+    while true; do
+        if ! lsof -i ":$port" >/dev/null 2>&1; then
+            echo "$port"
+            return
+        fi
+        port=$((port + 1))
+    done
+}
+
+PORT="${PORT:-$(find_free_port 8080)}"
 
 PIDS=()
 
