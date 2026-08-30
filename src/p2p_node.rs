@@ -324,6 +324,7 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(300));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        interval.tick().await; // consume the immediate first tick
         loop {
             interval.tick().await;
             if let Ok(mirror_repos) = std::env::var("GIT_MIRROR_REPOS") {
@@ -1101,7 +1102,6 @@ async fn mirror_repo_bundle(
     }
 
     let bundle_bytes = tokio::fs::read(&bundle_path).await?;
-    safe_println!("MIRROR bundle ready url={} bytes={}", url, bundle_bytes.len());
     Ok(bundle_bytes)
 }
 
