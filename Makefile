@@ -46,24 +46,19 @@ test-native:
 test-js:
 	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) cargo check --quiet
 	@for f in test/*.test.mjs; do \
-		case "$$f" in \
-			*p2p-native-wasm*) continue ;; \
-		esac; \
 		echo "=== running $$f ==="; \
 		NODE_OPTIONS=--trace-uncaught node --test "$$f" || exit 1; \
 	done
 
 test-p2p:
-	NODE_OPTIONS=--trace-uncaught node --test test/p2p-node-integration.test.mjs test/p2p-native-wasm.test.mjs
+	NODE_OPTIONS=--trace-uncaught node --test test/p2p-wasm.test.mjs test/pip-js-rust-parity.test.mjs test/nip-pip-wasm.test.mjs test/pip-git-bare-transfer.test.mjs
 
 test-p2p-native-wasm:
-	NODE_OPTIONS=--trace-uncaught node --test test/p2p-native-wasm.test.mjs
 	NODE_OPTIONS=--trace-uncaught node --test test/p2p-native-wasm-chromium.mjs
 
 test-pip-bare-repo:
 	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) RUST_BACKTRACE=full RUST_TEST_THREADS=1 CARGO_TERM_VERBOSE=true $(CARGO) test --features p2p git_bare_pip_transfer_verbose_trace -- --nocapture
-	NODE_OPTIONS=--trace-uncaught node --test --test-name-pattern "bare-repo" test/p2p-native-wasm.test.mjs
-	NODE_OPTIONS=--trace-uncaught node --test --test-name-pattern "bare-repo" test/p2p-native-wasm-chromium.mjs
+	NODE_OPTIONS=--trace-uncaught node --test test/pip-git-bare-transfer.test.mjs
 
 build-relay:
 	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) $(CARGO) build --release --bin relay --bin federation --features relay
