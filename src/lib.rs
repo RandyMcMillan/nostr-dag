@@ -14,6 +14,8 @@ pub mod store;
 
 #[cfg(feature = "native")]
 pub mod git;
+#[cfg(feature = "native")]
+pub mod server;
 
 #[cfg(feature = "wasm")]
 pub mod git_wasm;
@@ -52,6 +54,14 @@ pub use native_cli::run_federation;
 pub use native_cli::run_local_relay;
 #[cfg(feature = "p2p")]
 pub use p2p_node::run_native_p2p_node;
+#[cfg(feature = "native")]
+pub use native_cli::run_keygen;
+#[cfg(feature = "native")]
+pub use native_cli::run_git_info;
+#[cfg(feature = "db-viewer")]
+pub mod db_viewer;
+#[cfg(feature = "db-viewer")]
+pub use db_viewer::run_db_viewer;
 
 #[cfg(feature = "wasm")]
 mod wasm {

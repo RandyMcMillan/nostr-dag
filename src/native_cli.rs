@@ -379,3 +379,98 @@ mod tests {
         );
     }
 }
+
+/// Run the keygen CLI logic (generate 5 federation keys and print config).
+#[cfg(feature = "native")]
+pub fn run_keygen() {
+    use nostr::Keys;
+    use tracing::{debug, info, trace};
+
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::from_default_env()
+                .add_directive("keygen=info".parse().unwrap()),
+        )
+        .init();
+
+    info!("starting federation key generation");
+    println!("Generating 5 federation keys...\n");
+
+    let mut pubkeys = Vec::new();
+    let mut secrets = Vec::new();
+
+    for i in 1..=5 {
+        trace!(member = i, "generating keypair");
+        let keys = Keys::generate();
+        let sk_hex = keys.secret_key().to_secret_hex();
+        let pk_hex = keys.public_key().to_hex();
+
+        debug!(member = i, pubkey = %pk_hex, "generated keypair");
+        println!("=== Federation Member {} ===", i);
+        println!("Secret key: {}", sk_hex);
+        println!("Public key: {}", pk_hex);
+        println!();
+
+        secrets.push(sk_hex);
+        pubkeys.push(pk_hex);
+    }
+
+    let all_pubkeys = pubkeys.join(",");
+    info!(member_count = pubkeys.len(), "finished federation key generation");
+
+    println!("=== Configuration ===\n");
+    println!("FEDERATION_PUBKEYS={}\n", all_pubkeys);
+
+    println!("=== Start Commands ===\n");
+    for (i, sk) in secrets.iter().enumerate() {
+        println!(
+            "# Terminal {}\nFEDERATION_KEY={} RELAY_URL=ws://localhost:8080 FEDERATION_PUBKEYS={} cargo run --bin federation\n",
+            i + 1,
+            sk,
+            all_pubkeys
+        );
+    }
+
+    println!("=== Frontend Config ===\n");
+    println!("Paste this into the 'Federation Pubkeys' field:\n{}", all_pubkeys);
+}
+
+/// Run the git-info CLI logic.
+#[cfg(feature = "native")]
+pub fn run_git_info(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>> {
+    use crate::git::native::{blame, log, open_repo};
+
+    if args.len() < 3 {
+        eprintln!("Usage:");
+        eprintln!("  git-info log   <repo-path> [limit]");
+        eprintln!("  git-info blame <repo-path> <file-path> [commit-ish]");
+        std::process::exit(1);
+    }
+
+    let subcommand = args[1].as_str();
+    let repo_path = &args[2];
+
+    let repo = open_repo(repo_path)?;
+
+    match subcommand {
+        "log" => {
+            let limit: usize = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(20);
+            let commits = log(&repo, limit)?;
+            println!("{}", serde_json::to_string_pretty(&commits)?);
+        }
+        "blame" => {
+            let file_path = args.get(3).ok_or("blame requires a file-path argument")?;
+            let commit_ish = args.get(4).map(String::as_str).unwrap_or("HEAD");
+            let hunks = blame(&repo, file_path, commit_ish)?;
+            println!("{}", serde_json::to_string_pretty(&hunks)?);
+        }
+        other => {
+            eprintln!("Unknown subcommand: {other}");
+            std::process::exit(1);
+        }
+    }
+
+    Ok(())
+}
+
+

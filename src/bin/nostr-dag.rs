@@ -1,5 +1,8 @@
 //! Unified `nostr-dag` CLI with subcommands.
 //!
+//! Replaces the individual binaries with a single entry point that calls
+//! library functions directly (no child-process spawning).
+//!
 //!   nostr-dag server          # Run the static-file server
 //!   nostr-dag p2p             # Run the native libp2p peer
 //!   nostr-dag federation      # Run a federation daemon
@@ -9,7 +12,6 @@
 //!   nostr-dag db-viewer       # TUI database explorer
 
 use clap::{Parser, Subcommand};
-use std::process::{Command, Stdio};
 
 #[derive(Parser)]
 #[command(name = "nostr-dag")]
@@ -60,65 +62,30 @@ enum Commands {
 
     /// Generate deterministic keys and config
     #[cfg(feature = "native")]
-    Keygen {
-        /// Output format
-        #[arg(long, default_value = "toml")]
-        format: String,
-    },
+    Keygen,
 
     /// Git repository introspection helpers
     #[cfg(feature = "native")]
-    GitInfo,
+    GitInfo {
+        /// Subcommand (log or blame)
+        #[arg(required = true)]
+        subcommand: String,
+        /// Repository path
+        #[arg(required = true)]
+        repo_path: String,
+        /// Optional limit (for log) or file path (for blame)
+        arg3: Option<String>,
+        /// Optional commit-ish (for blame)
+        arg4: Option<String>,
+    },
 
     /// TUI database explorer
     #[cfg(feature = "db-viewer")]
-    DbViewer,
-}
-
-fn cargo_target_dir() -> String {
-    std::env::var("CARGO_TARGET_DIR").unwrap_or_else(|_| "target".into())
-}
-
-fn find_binary(name: &str) -> Option<std::path::PathBuf> {
-    let target_dir = cargo_target_dir();
-    let candidates = [
-        format!("{}/release/{}", target_dir, name),
-        format!("{}/debug/{}", target_dir, name),
-    ];
-    for path in &candidates {
-        let p = std::path::Path::new(path);
-        if p.is_file() {
-            return Some(p.to_path_buf());
-        }
-    }
-    // Try PATH via `command -v`
-    if let Ok(output) = Command::new("sh").arg("-c").arg(format!("command -v {}", name)).output() {
-        if output.status.success() {
-            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path.is_empty() {
-                return Some(std::path::PathBuf::from(path));
-            }
-        }
-    }
-    None
-}
-
-fn run_binary(name: &str, envs: Vec<(&str, String)>) -> Result<(), Box<dyn std::error::Error>> {
-    let bin_path = find_binary(name)
-        .ok_or_else(|| format!("binary '{}' not found. Build it first with: cargo build --bin {}", name, name))?;
-
-    let mut cmd = Command::new(&bin_path);
-    cmd.stdout(Stdio::inherit())
-        .stderr(Stdio::inherit());
-    for (key, value) in envs {
-        cmd.env(key, value);
-    }
-
-    let status = cmd.status()?;
-    if !status.success() {
-        std::process::exit(status.code().unwrap_or(1));
-    }
-    Ok(())
+    DbViewer {
+        /// SQLite database path
+        #[arg(long, default_value = "nostr-dag.db", env = "DB_PATH")]
+        db_path: String,
+    },
 }
 
 #[tokio::main]
@@ -134,38 +101,47 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             db_path,
             p2p,
         } => {
-            let mut envs = vec![
-                ("HOST", host),
-                ("PORT", port.to_string()),
-                ("SITE_DIR", site_dir),
-                ("DB_PATH", db_path),
-            ];
-            if p2p {
-                envs.push(("P2P_ENABLE", "1".into()));
-            }
-            run_binary("nostr-dag-server", envs)
+            nostr_dag::server::run_server(&host, port, &site_dir, &db_path, p2p).await
         }
 
         #[cfg(feature = "p2p")]
-        Commands::P2p => run_binary("p2p-node", vec![]),
+        Commands::P2p => nostr_dag::run_native_p2p_node().await.map_err(|e| e as Box<dyn std::error::Error>),
 
         #[cfg(feature = "native")]
-        Commands::Federation => run_binary("federation", vec![]),
+        Commands::Federation => nostr_dag::run_federation().await,
 
         #[cfg(feature = "relay")]
         Commands::Relay { port } => {
-            run_binary("relay", vec![("PORT", port.to_string())])
+            std::env::set_var("PORT", port.to_string());
+            nostr_dag::run_local_relay().await
         }
 
         #[cfg(feature = "native")]
-        Commands::Keygen { format } => {
-            run_binary("keygen", vec![("FORMAT", format)])
+        Commands::Keygen => {
+            nostr_dag::run_keygen();
+            Ok(())
         }
 
         #[cfg(feature = "native")]
-        Commands::GitInfo => run_binary("git-info", vec![]),
+        Commands::GitInfo {
+            subcommand,
+            repo_path,
+            arg3,
+            arg4,
+        } => {
+            let mut args = vec!["git-info".to_string(), subcommand, repo_path];
+            if let Some(a3) = arg3 {
+                args.push(a3);
+            }
+            if let Some(a4) = arg4 {
+                args.push(a4);
+            }
+            nostr_dag::run_git_info(args)
+        }
 
         #[cfg(feature = "db-viewer")]
-        Commands::DbViewer => run_binary("db-viewer", vec![]),
+        Commands::DbViewer { db_path } => {
+            nostr_dag::run_db_viewer(&db_path)
+        }
     }
 }
