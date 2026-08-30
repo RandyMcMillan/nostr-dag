@@ -27,6 +27,12 @@ if (!serverUp) {
     return { status: res.status, text };
   }
 
+  async function fetchSize(path) {
+    const res = await fetch(`${BASE}${path}`);
+    const blob = await res.blob();
+    return { status: res.status, size: blob.size };
+  }
+
   test('git page returns HTML with repo names', async () => {
     const { status, text } = await fetchText('/git/');
     assert.strictEqual(status, 200);
@@ -35,10 +41,32 @@ if (!serverUp) {
     assert.ok(text.includes('Refresh repos'), 'should contain refresh button');
   });
 
-  test('blame page returns HTML', async () => {
+  test('git page uses hosted vendor imports, not CDN', async () => {
+    const { text } = await fetchText('/git/');
+    assert.ok(text.includes("import git from '../vendor/isomorphic-git.mjs'"), 'should import isomorphic-git from vendor');
+    assert.ok(text.includes("import http from '../vendor/isomorphic-git-http-web.mjs'"), 'should import http from vendor');
+    assert.ok(text.includes("import LightningFS from '../vendor/lightning-fs.mjs'"), 'should import lightning-fs from vendor');
+    assert.ok(!text.includes('cdn.jsdelivr.net/npm/isomorphic-git'), 'should not reference isomorphic-git CDN');
+  });
+
+  test('blame page returns HTML and uses vendor imports', async () => {
     const { status, text } = await fetchText('/git/blame.html');
     assert.strictEqual(status, 200);
     assert.ok(text.includes('Blame View'), 'should contain "Blame View"');
+    assert.ok(text.includes("import git from '../vendor/isomorphic-git.mjs'"), 'should import from vendor');
+  });
+
+  test('vendor files are accessible and non-empty', async () => {
+    const vendors = [
+      { path: '/vendor/isomorphic-git.mjs', minSize: 100_000 },
+      { path: '/vendor/isomorphic-git-http-web.mjs', minSize: 1_000 },
+      { path: '/vendor/lightning-fs.mjs', minSize: 10_000 },
+    ];
+    for (const v of vendors) {
+      const { status, size } = await fetchSize(v.path);
+      assert.strictEqual(status, 200, `${v.path} should be accessible`);
+      assert.ok(Number(size) >= v.minSize, `${v.path} should be at least ${v.minSize} bytes (got ${size})`);
+    }
   });
 
   test('proxy forwards git smart-HTTP info/refs', { timeout: 30_000 }, async () => {

@@ -101,7 +101,7 @@
           return result;
         } catch (e) {
           lastError = e;
-          footer.log('git', `${contextLabel} proxy[${i}] ${proxy} failed: ${e.message}`, 'trace');
+          footer.log('git', `${contextLabel} proxy[${i}] ${proxy} failed: ${e.message}`, 'debug');
         }
       }
       activeProxy = null;
@@ -756,9 +756,11 @@
         try {
           commits = await git.log({ fs, dir: repo.dir, ref: candidate, depth: GIT_HISTORY_DEPTH });
           resolvedRef = candidate;
+          footer.log('git', `readRepo ${repo.name} git.log candidate=${candidate} commits=${commits.length}`, 'debug');
           break;
-        } catch {
+        } catch (e) {
           commits = [];
+          footer.log('git', `readRepo ${repo.name} git.log candidate=${candidate} failed: ${e.message}`, 'debug');
         }
       }
       footer.log('git', `${repo.name} git.log done in ${Math.round(performance.now() - logStart)} ms`, 'trace');
@@ -791,9 +793,11 @@
           try {
             commits = await git.log({ fs, dir: repo.dir, ref: candidate, depth: GIT_HISTORY_DEPTH });
             resolvedRef = candidate;
+            footer.log('git', `readRepo retry ${repo.name} git.log candidate=${candidate} commits=${commits.length}`, 'debug');
             break;
-          } catch {
+          } catch (e) {
             commits = [];
+            footer.log('git', `readRepo retry ${repo.name} git.log candidate=${candidate} failed: ${e.message}`, 'debug');
           }
         }
       }
@@ -1299,8 +1303,8 @@
         if (route) setRepoHealth(repo.name, 'unavailable');
         setRepoPing(repo.name, null);
         setRepoStatus(repo.name, `refresh failed: ${e.message}`);
-        footer.log('git', `refresh failed: ${e.message}`, 'error', 'unavailable');
-        footer.log('git', `viewer failed: ${e.message}`, 'warn', 'unavailable');
+        footer.log('git', `refreshOneRepo catch ${repo.name}: ${e.message}`, 'error', 'unavailable');
+        footer.log('git', `stack: ${e.stack || 'no stack'}`, 'trace');
       }
     }
 
@@ -1360,7 +1364,8 @@
                 renderApp(data);
               }
             } catch (e) {
-              footer.log('git', `${repo.name} failed: ${e.message}`, 'error', 'unavailable');
+              footer.log('git', `refreshList worker catch ${repo.name}: ${e.message}`, 'error', 'unavailable');
+              footer.log('git', `stack: ${e.stack || 'no stack'}`, 'trace');
               setRepoStatus(repo.name, `refresh failed: ${e.message}`);
               setRepoHealth(repo.name, 'unavailable');
               setRepoPing(repo.name, null);
@@ -1389,7 +1394,8 @@
         setStatus(readyCount === repos.length ? 'ready' : `partial: ${readyCount}/${repos.length} repos ready`, readyCount > 0 ? 'available' : 'checking');
       } catch (e) {
         setStatus(`unavailable: ${e.message}`, 'unavailable');
-        footer.log('git', `viewer failed: ${e.message}`, 'error', 'unavailable');
+        footer.log('git', `refreshList top-level catch: ${e.message}`, 'error', 'unavailable');
+        footer.log('git', `stack: ${e.stack || 'no stack'}`, 'trace');
       }
     }
 
