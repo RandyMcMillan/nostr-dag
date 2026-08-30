@@ -91,6 +91,9 @@ struct App {
     sync_progress: f64,
     sync_running: bool,
     sync_log: Vec<String>,
+
+    // Display
+    time_format_human: bool,
 }
 
 impl App {
@@ -115,6 +118,7 @@ impl App {
             sync_progress: 0.0,
             sync_running: false,
             sync_log: Vec::new(),
+            time_format_human: false,
         };
         app.refresh_all();
         Ok(app)
@@ -315,7 +319,7 @@ fn draw_events(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
         .map(|(id, kind, pubkey, created_at, _source_relay)| {
             Row::new(vec![
                 Cell::from(kind.to_string()),
-                Cell::from(format_timestamp(*created_at)),
+                Cell::from(app.format_timestamp(*created_at)),
                 Cell::from(truncate(pubkey, 16)),
                 Cell::from(truncate(id, 16)),
             ])
@@ -347,8 +351,8 @@ fn draw_relays(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
         .map(|(url, first, last, error)| {
             Row::new(vec![
                 Cell::from(url.clone()),
-                Cell::from(format_timestamp_ms(*first)),
-                Cell::from(format_timestamp_ms(*last)),
+                Cell::from(app.format_timestamp_ms(*first)),
+                Cell::from(app.format_timestamp_ms(*last)),
                 Cell::from(error.clone().unwrap_or_default()).style(Style::default().fg(Color::Red)),
             ])
             .height(1)
@@ -379,8 +383,8 @@ fn draw_users(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
         .map(|(pubkey, first, last)| {
             Row::new(vec![
                 Cell::from(truncate(pubkey, 32)),
-                Cell::from(format_timestamp_ms(*first)),
-                Cell::from(format_timestamp_ms(*last)),
+                Cell::from(app.format_timestamp_ms(*first)),
+                Cell::from(app.format_timestamp_ms(*last)),
             ])
             .height(1)
         })
@@ -444,16 +448,26 @@ fn truncate(s: &str, max: usize) -> String {
     }
 }
 
-fn format_timestamp(ts: i64) -> String {
-    chrono::DateTime::from_timestamp(ts, 0)
-        .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
-        .unwrap_or_else(|| ts.to_string())
-}
+impl App {
+    fn format_timestamp(&self, ts: i64) -> String {
+        if self.time_format_human {
+            chrono::DateTime::from_timestamp(ts, 0)
+                .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+                .unwrap_or_else(|| ts.to_string())
+        } else {
+            ts.to_string()
+        }
+    }
 
-fn format_timestamp_ms(ts: i64) -> String {
-    chrono::DateTime::from_timestamp_millis(ts)
-        .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
-        .unwrap_or_else(|| ts.to_string())
+    fn format_timestamp_ms(&self, ts: i64) -> String {
+        if self.time_format_human {
+            chrono::DateTime::from_timestamp_millis(ts)
+                .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+                .unwrap_or_else(|| ts.to_string())
+        } else {
+            ts.to_string()
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
