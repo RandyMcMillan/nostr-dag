@@ -572,18 +572,18 @@
       await rmrf(dir);
     }
 
-    async function ensureRepo(repo, route = null) {
+    async function ensureRepo(repo, route = null, { skipP2P = false } = {}) {
       const url = repo.url;
       const dir = repo.dir;
       const ensureStart = performance.now();
-      footer.log('git', `ensureRepo start ${repo.name}`, 'debug');
+      footer.log('git', `ensureRepo start ${repo.name} skipP2P=${skipP2P}`, 'debug');
       try {
         await ensureDir(fs, '/repos');
 
         // Try libp2p bundle fetch first (always request; transport handles cache hits)
         let bundlePath = null;
         const transport = window.__gitViewerP2pTransport;
-        if (transport) {
+        if (transport && !skipP2P) {
           try {
             setRepoStatus(repo.name, 'fetching p2p bundle...');
             footer.log('git', `${repo.name} requesting bundle via libp2p`, 'info');
@@ -1274,7 +1274,7 @@
         }
         const probeStart = performance.now();
         const probe = route ? probeRemoteHost(repo).catch(() => ({ ok: false, durationMs: null })) : null;
-        await ensureRepo(repo, route);
+        await ensureRepo(repo, route, { skipP2P: force });
         footer.log('git', `refreshOneRepo ensure done ${repo.name} proxy=${activeProxy || 'none'}`, 'debug');
         const data = await readRepo(repo, route);
         cacheRepoData(repo.name, data);
@@ -1329,7 +1329,7 @@
             const probeStart = performance.now();
             const probe = probeRemoteHost(repo).catch(() => false);
             footer.log('git', `ensuring ${repo.name}`, 'debug');
-            await ensureRepo(repo, repoRoute);
+            await ensureRepo(repo, repoRoute, { skipP2P: force });
             footer.log('git', `ensure done ${repo.name} proxy=${activeProxy || 'none'}`, 'debug');
             footer.log('git', `reading ${repo.name}`, 'trace');
             const data = await readRepo(repo, repoRoute);
