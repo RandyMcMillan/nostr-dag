@@ -601,21 +601,39 @@ fn draw_users(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     f.render_stateful_widget(table, area, &mut app.users_state);
 }
 
+fn focus_block(title: &str, active: bool) -> Block<'static> {
+    if active {
+        Block::default()
+            .borders(Borders::ALL)
+            .title(format!("* {} *", title))
+            .border_style(Style::default().fg(Color::Cyan))
+    } else {
+        Block::default()
+            .borders(Borders::ALL)
+            .title(title.to_string())
+            .border_style(Style::default().fg(Color::DarkGray))
+    }
+}
+
 fn draw_sync(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
+    let dropdown_height = if app.sync_dropdown_open {
+        (app.sync_urls.len() as u16 + 2).min(10)
+    } else {
+        0
+    };
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3), // sub-header
-            Constraint::Min(8),    // main (sidebar + detail)
-            Constraint::Length(3), // status + progress
-            Constraint::Length(8), // log
+            Constraint::Length(3 + dropdown_height), // sub-header + dropdown
+            Constraint::Min(8),                      // main (sidebar + detail)
+            Constraint::Length(3),                   // status + progress
+            Constraint::Length(8),                   // log
         ])
         .split(area);
 
-    // Sub-header
-    let subheader = Paragraph::new(format!("URL: {}  |  Shift+S = sync all", app.sync_url))
-        .block(Block::default().borders(Borders::ALL).title("Sync"));
-    f.render_widget(subheader, chunks[0]);
+    // Sub-header with dropdown
+    draw_sync_header(f, app, chunks[0]);
 
     // Main: sidebar + detail
     let main = Layout::default()
@@ -632,26 +650,65 @@ fn draw_sync(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(chunks[2]);
 
+    let status_active = app.sync_focus == SyncFocus::StatusProgress;
     let status_para = Paragraph::new(app.sync_status.as_str())
-        .block(Block::default().borders(Borders::ALL).title("Status"));
+        .block(focus_block("Status", status_active));
     f.render_widget(status_para, status_chunks[0]);
 
     let gauge = Gauge::default()
-        .block(Block::default().borders(Borders::ALL).title("Progress"))
+        .block(focus_block("Progress", false))
         .gauge_style(Style::default().fg(Color::Cyan))
         .ratio(app.sync_progress.clamp(0.0, 1.0));
     f.render_widget(gauge, status_chunks[1]);
 
     // Log
+    let log_active = app.sync_focus == SyncFocus::Log;
     let log_text = app.sync_log.join("\n");
     let log_para = Paragraph::new(log_text)
-        .block(Block::default().borders(Borders::ALL).title("Log"))
+        .block(focus_block("Log", log_active))
         .wrap(Wrap { trim: true })
         .scroll((app.sync_log.len().saturating_sub(10) as u16, 0));
     f.render_widget(log_para, chunks[3]);
 }
 
+fn draw_sync_header(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
+    let is_active = app.sync_focus == SyncFocus::UrlDropdown;
+    let title = if app.sync_dropdown_open {
+        format!("Sync URL ({} urls) — a=add d=del ▼", app.sync_urls.len())
+    } else {
+        "Sync".to_string()
+    };
+    let block = focus_block(&title, is_active);
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    if app.sync_dropdown_open {
+        let items: Vec<Line> = app
+            .sync_urls
+            .iter()
+            .enumerate()
+            .map(|(i, url)| {
+                let prefix = if i == app.sync_url_index { "> " } else { "  " };
+                Line::from(format!("{}{}", prefix, url))
+            })
+            .collect();
+        let scroll = app.sync_url_index.saturating_sub(3) as u16;
+        let para = Paragraph::new(items)
+            .wrap(Wrap { trim: true })
+            .scroll((scroll, 0));
+        f.render_widget(para, inner);
+    } else {
+        let text = format!(
+            "URL: {}  |  Shift+S = sync all  |  Enter=open dropdown",
+            app.sync_url()
+        );
+        let para = Paragraph::new(text);
+        f.render_widget(para, inner);
+    }
+}
+
 fn draw_peer_sidebar(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
+    let active = app.sync_focus == SyncFocus::PeerSidebar;
     let header = Row::new(vec!["Peer ID"])
         .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
         .height(1);
@@ -666,14 +723,15 @@ fn draw_peer_sidebar(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) 
 
     let table = Table::new(rows, [Constraint::Min(20)])
         .header(header)
-        .block(Block::default().borders(Borders::ALL).title(format!("Peers ({})", app.peers.len())))
+        .block(focus_block(&format!("Peers ({})", app.peers.len()), active))
         .row_highlight_style(Style::default().bg(Color::DarkGray))
         .highlight_symbol("> ");
     f.render_stateful_widget(table, area, &mut app.peers_state);
 }
 
 fn draw_peer_detail(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
-    let block = Block::default().borders(Borders::ALL).title("Peer Detail");
+    let active = app.sync_focus == SyncFocus::PeerDetail;
+    let block = focus_block("Peer Detail", active);
     let inner = block.inner(area);
     f.render_widget(block, area);
 
