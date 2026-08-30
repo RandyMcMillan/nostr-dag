@@ -512,6 +512,42 @@ impl EventStore {
         self.conn
             .query_row("SELECT COUNT(*) FROM users", [], |row| row.get(0))
     }
+
+    /// Return recent events ordered by `created_at DESC`.
+    /// Each tuple is (id, kind, pubkey, created_at, source_relay).
+    pub fn recent_events(&self, limit: usize) -> Result<Vec<(String, i64, String, i64, Option<String>)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, kind, pubkey, created_at, source_relay FROM events ORDER BY created_at DESC LIMIT ?1"
+        )?;
+        let rows = stmt.query_map(params![limit as i64], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))
+        })?;
+        rows.collect()
+    }
+
+    /// Return all relays ordered by url.
+    /// Each tuple is (url, first_seen_at, last_seen_at, error).
+    pub fn all_relays(&self) -> Result<Vec<(String, i64, i64, Option<String>)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT url, first_seen_at, last_seen_at, error FROM relays ORDER BY url"
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })?;
+        rows.collect()
+    }
+
+    /// Return all users ordered by pubkey.
+    /// Each tuple is (pubkey, first_seen_at, last_seen_at).
+    pub fn all_users(&self) -> Result<Vec<(String, i64, i64)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT pubkey, first_seen_at, last_seen_at FROM users ORDER BY pubkey"
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })?;
+        rows.collect()
+    }
 }
 
 #[cfg(test)]
