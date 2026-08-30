@@ -46,9 +46,9 @@
       repoSelectionHref,
       resolveRefSelection,
     } from '../shared/git-viewer.mjs';
-    import git from 'https://cdn.jsdelivr.net/npm/isomorphic-git@1.25.0/+esm';
-    import http from 'https://cdn.jsdelivr.net/npm/isomorphic-git@1.25.0/http/web/+esm';
-    import LightningFS from 'https://cdn.jsdelivr.net/npm/@isomorphic-git/lightning-fs@4.6.0/+esm';
+    import git from '../vendor/isomorphic-git.mjs';
+    import http from '../vendor/isomorphic-git-http-web.mjs';
+    import LightningFS from '../vendor/lightning-fs.mjs';
 
     const fs = new LightningFS('git-viewer');
     const { footer, networkTime } = bootstrapGitChrome({
