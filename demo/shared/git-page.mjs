@@ -48,6 +48,11 @@ export const GIT_REPOS = [
     url: 'https://github.com/w-s-bitcoin/entropylab',
     dir: '/repos/entropylab',
   },
+  {
+    name: 'nips',
+    url: 'https://github.com/nostr-protocol/nips',
+    dir: '/repos/nips',
+  },
 ];
 
 export function isSafariMobile() {

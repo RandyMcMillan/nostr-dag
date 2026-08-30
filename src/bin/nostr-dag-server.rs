@@ -209,7 +209,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "https://github.com/ChainSafe/js-libp2p-yamux,",
                 "https://github.com/ChainSafe/discv5,",
                 "https://github.com/isomorphic-git/lightning-fs,",
-                "https://github.com/w-s-bitcoin/entropylab",
+                "https://github.com/w-s-bitcoin/entropylab,",
+                "https://github.com/nostr-protocol/nips",
             );
             let mirror_repos = env::var("GIT_MIRROR_REPOS")
                 .ok()
