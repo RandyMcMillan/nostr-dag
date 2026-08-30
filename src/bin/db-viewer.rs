@@ -62,6 +62,13 @@ impl Tab {
     }
 }
 
+struct PeerInfo {
+    id: String,
+    pubkey: String,
+    addrs: Vec<String>,
+    last_seen: i64,
+}
+
 struct App {
     tab: Tab,
     db_path: String,
@@ -91,6 +98,8 @@ struct App {
     sync_progress: f64,
     sync_running: bool,
     sync_log: Vec<String>,
+    peers: Vec<PeerInfo>,
+    peers_state: TableState,
 
     // Display
     time_format_human: bool,
@@ -118,6 +127,8 @@ impl App {
             sync_progress: 0.0,
             sync_running: false,
             sync_log: Vec::new(),
+            peers: Vec::new(),
+            peers_state: TableState::default(),
             time_format_human: false,
         };
         app.refresh_all();
@@ -157,6 +168,28 @@ impl App {
         self.refresh_events();
         self.refresh_relays();
         self.refresh_users();
+        self.refresh_peers();
+    }
+
+    fn refresh_peers(&mut self) {
+        // Placeholder: in a real implementation this would query the P2P layer or store.
+        if self.peers.is_empty() {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i64;
+            self.peers = vec![
+                PeerInfo {
+                    id: "12D3KooWSL8rLNFrwVGVBJbHWxXQfFTfVtYnozURrqBFYBMfrniH".to_string(),
+                    pubkey: "2d724a13a80b6002607737ad1a99f3c0b148843707d59ac3bff08c7fce72ecce".to_string(),
+                    addrs: vec!["/ip4/127.0.0.1/tcp/3000/ws".to_string()],
+                    last_seen: now,
+                },
+            ];
+        }
+        if !self.peers.is_empty() {
+            self.peers_state.select(Some(0));
+        }
     }
 
     fn next_tab(&mut self) {
@@ -176,6 +209,7 @@ impl App {
             Tab::Events => (self.events.len(), &mut self.events_state),
             Tab::Relays => (self.relays.len(), &mut self.relays_state),
             Tab::Users => (self.users.len(), &mut self.users_state),
+            Tab::Sync => (self.peers.len(), &mut self.peers_state),
             _ => return,
         };
         let i = state.selected().unwrap_or(0);
@@ -189,6 +223,7 @@ impl App {
             Tab::Events => &mut self.events_state,
             Tab::Relays => &mut self.relays_state,
             Tab::Users => &mut self.users_state,
+            Tab::Sync => &mut self.peers_state,
             _ => return,
         };
         let i = state.selected().unwrap_or(0);
@@ -213,6 +248,33 @@ impl App {
         self.sync_progress = 0.0;
         self.sync_log.clear();
         self.push_sync_log(format!("Starting sync from {}", self.sync_url));
+    }
+
+    fn start_sync_peer(&mut self, idx: usize) {
+        if self.sync_running {
+            return;
+        }
+        if let Some(peer) = self.peers.get(idx) {
+            self.sync_running = true;
+            self.sync_status = format!("Syncing from {}…", elide_middle(&peer.id, 24));
+            self.sync_progress = 0.0;
+            self.sync_log.clear();
+            self.push_sync_log(format!("Starting sync from peer {}", peer.id));
+        }
+    }
+
+    fn start_sync_all(&mut self) {
+        if self.sync_running {
+            return;
+        }
+        self.sync_running = true;
+        self.sync_status = "Syncing from all peers…".to_string();
+        self.sync_progress = 0.0;
+        self.sync_log.clear();
+        self.push_sync_log("Starting sync from all peers".to_string());
+        for peer in &self.peers {
+            self.push_sync_log(format!("Queueing peer {}", elide_middle(&peer.id, 24)));
+        }
     }
 
     fn tick_sync(&mut self) {
@@ -408,33 +470,100 @@ fn draw_sync(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Min(0),
+            Constraint::Length(3), // sub-header
+            Constraint::Min(8),    // main (sidebar + detail)
+            Constraint::Length(3), // status + progress
+            Constraint::Length(8), // log
         ])
         .split(area);
 
-    let url_para = Paragraph::new(app.sync_url.as_str())
-        .block(Block::default().borders(Borders::ALL).title("Peer URL"));
-    f.render_widget(url_para, chunks[0]);
+    // Sub-header
+    let subheader = Paragraph::new(format!("URL: {}  |  Shift+S = sync all", app.sync_url))
+        .block(Block::default().borders(Borders::ALL).title("Sync"));
+    f.render_widget(subheader, chunks[0]);
+
+    // Main: sidebar + detail
+    let main = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
+        .split(chunks[1]);
+
+    draw_peer_sidebar(f, app, main[0]);
+    draw_peer_detail(f, app, main[1]);
+
+    // Status + Progress
+    let status_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(chunks[2]);
 
     let status_para = Paragraph::new(app.sync_status.as_str())
         .block(Block::default().borders(Borders::ALL).title("Status"));
-    f.render_widget(status_para, chunks[1]);
+    f.render_widget(status_para, status_chunks[0]);
 
     let gauge = Gauge::default()
         .block(Block::default().borders(Borders::ALL).title("Progress"))
         .gauge_style(Style::default().fg(Color::Cyan))
         .ratio(app.sync_progress.clamp(0.0, 1.0));
-    f.render_widget(gauge, chunks[2]);
+    f.render_widget(gauge, status_chunks[1]);
 
+    // Log
     let log_text = app.sync_log.join("\n");
     let log_para = Paragraph::new(log_text)
         .block(Block::default().borders(Borders::ALL).title("Log"))
         .wrap(Wrap { trim: true })
         .scroll((app.sync_log.len().saturating_sub(10) as u16, 0));
     f.render_widget(log_para, chunks[3]);
+}
+
+fn draw_peer_sidebar(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
+    let header = Row::new(vec!["Peer ID"])
+        .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+        .height(1);
+    let rows: Vec<Row> = app
+        .peers
+        .iter()
+        .map(|peer| {
+            Row::new(vec![Cell::from(elide_middle(&peer.id, 24))])
+                .height(1)
+        })
+        .collect();
+
+    let table = Table::new(rows, [Constraint::Min(20)])
+        .header(header)
+        .block(Block::default().borders(Borders::ALL).title(format!("Peers ({})", app.peers.len())))
+        .row_highlight_style(Style::default().bg(Color::DarkGray))
+        .highlight_symbol("> ");
+    f.render_stateful_widget(table, area, &mut app.peers_state);
+}
+
+fn draw_peer_detail(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
+    let block = Block::default().borders(Borders::ALL).title("Peer Detail");
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    if let Some(idx) = app.peers_state.selected() {
+        if let Some(peer) = app.peers.get(idx) {
+            let text = format!(
+                "ID:        {}\n\
+                 Pubkey:    {}\n\
+                 Addrs:     {}\n\
+                 Last seen: {}\n\n\
+                 Press 's' to sync from this peer",
+                peer.id,
+                peer.pubkey,
+                peer.addrs.join(", "),
+                app.format_timestamp(peer.last_seen),
+            );
+            let para = Paragraph::new(text).wrap(Wrap { trim: true });
+            f.render_widget(para, inner);
+            return;
+        }
+    }
+
+    let para = Paragraph::new("Select a peer from the sidebar to view details and sync controls.")
+        .wrap(Wrap { trim: true });
+    f.render_widget(para, inner);
 }
 
 // ---------------------------------------------------------------------------
