@@ -72,7 +72,6 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         maxEntries: 5000,
       },
       footerMode: 'raf',
-      closeFooter: true,
     });
 
     const pool = new SimplePool();
