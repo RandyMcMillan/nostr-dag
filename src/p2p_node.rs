@@ -213,19 +213,23 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
         let pool = RelayPool::builder()
             .opts(RelayPoolOptions::new().automatic_authentication(false))
             .build();
-        let default_relays = [
-            "wss://nos.lol",
-            "wss://relay.nostr.com",
-            "wss://relay.nostr.band",
-            "wss://relay.primal.net",
-            "wss://nostr.wine",
-            "wss://top.testrelay.top",
-            "wss://relay.pocketnostr.com",
-            "wss://basspistol.org",
-            "wss://relay.ngit.dev",
-        ];
-        for url in default_relays {
-            if let Err(e) = pool.add_relay(url, RelayOptions::default()).await {
+        let default_relays: Vec<String> = if let Ok(custom) = std::env::var("NOSTR_DAG_RELAYS") {
+            custom.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+        } else {
+            vec![
+                "wss://nos.lol".to_string(),
+                "wss://relay.nostr.com".to_string(),
+                "wss://relay.nostr.band".to_string(),
+                "wss://relay.primal.net".to_string(),
+                "wss://nostr.wine".to_string(),
+                "wss://top.testrelay.top".to_string(),
+                "wss://relay.pocketnostr.com".to_string(),
+                "wss://basspistol.org".to_string(),
+                "wss://relay.ngit.dev".to_string(),
+            ]
+        };
+        for url in &default_relays {
+            if let Err(e) = pool.add_relay(url.clone(), RelayOptions::default()).await {
                 warn!(%url, ?e, "relay add failed");
             }
         }
