@@ -1282,7 +1282,7 @@
         footer.log('git', `refreshOneRepo read done ${repo.name} tags=${data.tags.length}`, 'debug');
         if (route) {
           const probeOk = await probe;
-          const probeMs = probeOk?.durationMs ?? (probeOk?.ok ? Math.round(performance.now() - probeStart) : null);
+          const probeMs = probeOk?.durationMs ?? null;
           setRepoPing(repo.name, probeMs);
           const gitOk = data && data.commits && data.commits.length > 0;
           setRepoHealth(repo.name, gitOk ? 'available' : 'unavailable');
@@ -1336,12 +1336,11 @@
                 await wipeRepo(repo);
               }
               setRepoPing(repo.name, null);
-              const probeStart = performance.now();
-              const probe = probeRemoteHost(repo).catch(() => false);
+              const probe = probeRemoteHost(repo).catch(() => ({ ok: false, durationMs: null }));
               await ensureRepo(repo, repoRoute, { skipP2P: force });
               const data = await readRepo(repo, repoRoute);
               const probeOk = await probe;
-              const probeMs = probeOk?.ok ? Math.round(performance.now() - probeStart) : null;
+              const probeMs = probeOk?.durationMs ?? null;
               setRepoPing(repo.name, probeMs);
               const gitOk = data && data.commits && data.commits.length > 0;
               setRepoHealth(repo.name, gitOk ? 'available' : 'unavailable');
@@ -1403,15 +1402,14 @@
         setStatus(`loading ${route.repo.name}...`, 'checking');
         setRepoHealth(route.repo.name, 'checking');
         renderApp();
-        const probeStart = performance.now();
-        const probe = probeRemoteHost(route.repo).catch(() => false);
+        const probe = probeRemoteHost(route.repo).catch(() => ({ ok: false, durationMs: null }));
         await ensureRepo(route.repo, route);
         footer.log('git', `refreshDetail ensure done ${route.repo.name}`, 'debug');
         const data = await readRepo(route.repo, route);
         cacheRepoData(route.repo.name, data);
         footer.log('git', `refreshDetail read done ${route.repo.name} tags=${data.tags.length}`, 'debug');
         const available = await probe;
-        const probeMs = available?.ok ? Math.round(performance.now() - probeStart) : null;
+        const probeMs = available?.durationMs ?? null;
         setRepoPing(route.repo.name, probeMs);
         const gitOk = data && data.commits && data.commits.length > 0;
         setRepoHealth(route.repo.name, gitOk ? 'available' : 'unavailable');
