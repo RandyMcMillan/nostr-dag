@@ -14,7 +14,7 @@ use std::{
 };
 
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -301,6 +301,7 @@ fn draw_dashboard(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
          j / ↓      next row\n\
          k / ↑      previous row\n\
          r          refresh all views\n\
+         Shift+T    toggle time format\n\
          s          start sync (on Sync tab)\n\
          q / Esc    quit",
     )
@@ -491,6 +492,9 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
                     KeyCode::Char('r') => app.refresh_all(),
                     KeyCode::Char('j') | KeyCode::Down => app.next_row(),
                     KeyCode::Char('k') | KeyCode::Up => app.prev_row(),
+                    KeyCode::Char('T') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                        app.time_format_human = !app.time_format_human;
+                    }
                     KeyCode::Char('s') if app.tab == Tab::Sync && !app.sync_running => {
                         app.start_sync();
                     }
