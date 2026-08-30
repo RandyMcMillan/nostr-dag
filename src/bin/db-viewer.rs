@@ -69,6 +69,31 @@ struct PeerInfo {
     last_seen: i64,
 }
 
+/// JSON shape returned by the nostr-dag-server `/peers` endpoint.
+#[derive(Clone, Debug, serde::Deserialize)]
+struct ServerPeerEntry {
+    peer_id: String,
+    #[allow(dead_code)]
+    kind: String,
+    path: String,
+    detail: Option<String>,
+    source: Option<String>,
+    updated_at: u64,
+}
+
+/// Blocking fetch of the peer list from the configured server.
+fn fetch_peers_blocking(url: &str) -> Result<Vec<ServerPeerEntry>, Box<dyn std::error::Error + Send + Sync>> {
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async {
+        let resp = reqwest::get(format!("{}/peers", url)).await?;
+        if !resp.status().is_success() {
+            return Err(format!("HTTP {}", resp.status()).into());
+        }
+        let entries: Vec<ServerPeerEntry> = resp.json().await?;
+        Ok(entries)
+    })
+}
+
 struct App {
     tab: Tab,
     db_path: String,
@@ -131,7 +156,12 @@ impl App {
             peers_state: TableState::default(),
             time_format_human: false,
         };
-        app.refresh_all();
+        app.refresh_dashboard();
+        app.refresh_events();
+        app.refresh_relays();
+        app.refresh_users();
+        // Defer peer fetch until first manual refresh or Sync tab visit
+        // so startup isn't blocked by a slow / unreachable server.
         Ok(app)
     }
 
@@ -172,20 +202,41 @@ impl App {
     }
 
     fn refresh_peers(&mut self) {
-        // Placeholder: in a real implementation this would query the P2P layer or store.
-        if self.peers.is_empty() {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs() as i64;
-            self.peers = vec![
-                PeerInfo {
-                    id: "12D3KooWSL8rLNFrwVGVBJbHWxXQfFTfVtYnozURrqBFYBMfrniH".to_string(),
-                    pubkey: "2d724a13a80b6002607737ad1a99f3c0b148843707d59ac3bff08c7fce72ecce".to_string(),
-                    addrs: vec!["/ip4/127.0.0.1/tcp/3000/ws".to_string()],
-                    last_seen: now,
-                },
-            ];
+        match fetch_peers_blocking(&self.sync_url) {
+            Ok(entries) => {
+                self.peers = entries.into_iter().map(|e| PeerInfo {
+                    id: e.peer_id,
+                    pubkey: e.source.unwrap_or_default(),
+                    addrs: if e.path.is_empty() {
+                        e.detail.map(|d| vec![d]).unwrap_or_default()
+                    } else {
+                        let mut addrs = vec![e.path];
+                        if let Some(d) = e.detail {
+                            addrs.push(d);
+                        }
+                        addrs
+                    },
+                    last_seen: (e.updated_at / 1000) as i64,
+                }).collect();
+                self.push_sync_log(format!("Discovered {} peer(s)", self.peers.len()));
+            }
+            Err(err) => {
+                self.push_sync_log(format!("Peer fetch failed: {}", err));
+                if self.peers.is_empty() {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs() as i64;
+                    self.peers = vec![
+                        PeerInfo {
+                            id: "12D3KooWSL8rLNFrwVGVBJbHWxXQfFTfVtYnozURrqBFYBMfrniH".to_string(),
+                            pubkey: "2d724a13a80b6002607737ad1a99f3c0b148843707d59ac3bff08c7fce72ecce".to_string(),
+                            addrs: vec!["/ip4/127.0.0.1/tcp/3000/ws".to_string()],
+                            last_seen: now,
+                        },
+                    ];
+                }
+            }
         }
         if !self.peers.is_empty() {
             self.peers_state.select(Some(0));
