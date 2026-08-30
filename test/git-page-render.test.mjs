@@ -42,8 +42,7 @@ test('git page renders repo cards with tags in Chromium', { timeout: 120_000 }, 
       if (msg.type() === 'warning') warns.push(`CONSOLE WARN: ${text}`);
     });
 
-    await page.goto(`${BASE}/git/`, { waitUntil: 'domcontentloaded', timeout: 15_000 });
-    await page.waitForTimeout(1000);
+    await page.goto(`${BASE}/git/`, { waitUntil: 'load', timeout: 15_000 });
 
     // Repo cards are rendered synchronously by renderApp() before the async
     // refresh loop, so they should be present immediately.
