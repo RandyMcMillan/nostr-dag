@@ -322,10 +322,10 @@ impl App {
             return;
         }
         self.sync_running = true;
-        self.sync_status = format!("Syncing from {}…", self.sync_url);
+        self.sync_status = format!("Syncing from {}…", self.sync_url());
         self.sync_progress = 0.0;
         self.sync_log.clear();
-        self.push_sync_log(format!("Starting sync from {}", self.sync_url));
+        self.push_sync_log(format!("Starting sync from {}", self.sync_url()));
     }
 
     fn start_sync_peer(&mut self, idx: usize) {
