@@ -1,7 +1,7 @@
 import { measureRelayPing } from './relay-ping.mjs';
 import { getDagDb } from './dag-db.mjs';
 
-export const BRIDGE_CACHE_KEY = 'nostr-dag-bridge-cache-v2';
+export const BRIDGE_CACHE_KEY = 'nostr-dag-bridge-cache-v3';
 
 export function normalizeRelayUrl(url) {
   const value = String(url || '').trim();

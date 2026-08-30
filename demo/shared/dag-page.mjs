@@ -13,7 +13,7 @@ export const DAG_RELAYS = [
   'wss://relay.ngit.dev',
 ];
 
-export const DAG_CACHE_KEY = 'nostr-dag-demo-cache-v1';
+export const DAG_CACHE_KEY = 'nostr-dag-demo-cache-v2';
 export const DAG_SITE_URL = 'https://randymcmillan.github.io/nostr-dag';
 export const DAG_QUORUM_ID = 'nostr-dag-quorum-5';
 export const DAG_PARTICIPANT_KEY_LABELS = ['nostr-dag-native', 'nostr-dag-wasm'];

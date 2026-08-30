@@ -1,6 +1,6 @@
 import { resolveHref } from './page-path.js';
 
-const DEFAULT_REPO_CACHE_KEY = 'nostr-dag-git-repo-cache-v1';
+const DEFAULT_REPO_CACHE_KEY = 'nostr-dag-git-repo-cache-v2';
 
 export function escapeHtml(value) {
   return String(value)

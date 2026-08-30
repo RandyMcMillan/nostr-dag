@@ -1,4 +1,4 @@
-const STORAGE_KEY = 'nostr-dag.network-time.v1';
+const STORAGE_KEY = 'nostr-dag.network-time.v2';
 const NETWORK_TIME_PROTOCOL = 'nostr-dag-network-time';
 const NETWORK_TIME_VERSION = 1;
 const NETWORK_TIME_TOPIC = 'nostr-dag-bridge';

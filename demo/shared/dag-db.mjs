@@ -21,7 +21,7 @@
  */
 
 const DB_NAME = 'nostr-dag-db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 // ---------------------------------------------------------------------------
 // Schema upgrade
