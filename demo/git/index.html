@@ -1437,7 +1437,14 @@
       }
     }
 
-    refreshBtn.addEventListener('click', () => { void refreshList({ force: true }); });
+    refreshBtn.addEventListener('click', () => {
+      const route = getRouteContext(repos);
+      if (route.repo) {
+        void refreshOneRepo(route.repo.name, { force: true });
+      } else {
+        void refreshList({ force: true });
+      }
+    });
     renderApp();
     void refresh();
   </script>
