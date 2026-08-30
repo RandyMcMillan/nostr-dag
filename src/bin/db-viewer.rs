@@ -272,8 +272,9 @@ impl App {
         self.sync_progress = 0.0;
         self.sync_log.clear();
         self.push_sync_log("Starting sync from all peers".to_string());
-        for peer in &self.peers {
-            self.push_sync_log(format!("Queueing peer {}", elide_middle(&peer.id, 24)));
+        let ids: Vec<String> = self.peers.iter().map(|p| elide_middle(&p.id, 24)).collect();
+        for id in ids {
+            self.push_sync_log(format!("Queueing peer {}", id));
         }
     }
 
@@ -364,7 +365,8 @@ fn draw_dashboard(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
          k / ↑      previous row\n\
          r          refresh all views\n\
          Shift+T    toggle time format\n\
-         s          start sync (on Sync tab)\n\
+         s          sync selected peer (on Sync tab)\n\
+         Shift+S    sync all peers (on Sync tab)\n\
          q / Esc    quit",
     )
     .block(Block::default().borders(Borders::ALL).title("Help"))
@@ -580,7 +582,6 @@ fn truncate(s: &str, max: usize) -> String {
 
 /// Elide a string in the middle, keeping the start and end visible.
 /// Useful for hex identifiers (event IDs, pubkeys) where both ends matter.
-#[allow(dead_code)]
 fn elide_middle(s: &str, max: usize) -> String {
     if s.len() <= max {
         s.to_string()
@@ -640,8 +641,15 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
                     KeyCode::Char('T') if key.modifiers.contains(KeyModifiers::SHIFT) => {
                         app.time_format_human = !app.time_format_human;
                     }
+                    KeyCode::Char('S') if key.modifiers.contains(KeyModifiers::SHIFT) && app.tab == Tab::Sync => {
+                        app.start_sync_all();
+                    }
                     KeyCode::Char('s') if app.tab == Tab::Sync && !app.sync_running => {
-                        app.start_sync();
+                        if let Some(idx) = app.peers_state.selected() {
+                            app.start_sync_peer(idx);
+                        } else {
+                            app.start_sync();
+                        }
                     }
                     _ => {}
                 }
