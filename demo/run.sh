@@ -28,6 +28,19 @@ echo "Building..."
 cargo build --release --bin relay --features relay 2>&1 | grep -E "Compiling|Finished" || true
 cargo build --release --bin federation --features native 2>&1 | grep -E "Compiling|Finished" || true
 
+# Build WASM package if missing so the DAG page can load it.
+if [ ! -f "$SCRIPT_DIR/pkg/nostr_dag.js" ]; then
+    echo "Building WASM package..."
+    cd "$PROJECT_DIR"
+    make wasm 2>&1 | grep -E "Compiling|Finished|Installing|warn" || true
+    if [ -d "$PROJECT_DIR/site/pkg" ]; then
+        mkdir -p "$SCRIPT_DIR/pkg"
+        cp -r "$PROJECT_DIR/site/pkg/"* "$SCRIPT_DIR/pkg/"
+        echo "WASM package copied to demo/pkg/"
+    fi
+    cd "$PROJECT_DIR"
+fi
+
 echo ""
 echo "Reading federation config from $CONFIG_FILE..."
 

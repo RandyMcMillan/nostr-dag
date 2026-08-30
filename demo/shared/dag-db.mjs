@@ -467,6 +467,16 @@ export class DagDb {
   }
 
   /**
+   * Store or overwrite a raw Nostr event in the events object store.
+   * @param {object} event — must contain `id`, `pubkey`, `kind`, `created_at`, `content`, `sig`, `tags`
+   * @returns {Promise<void>}
+   */
+  async putEvent(event) {
+    const { store } = txStore(this._db, 'events', 'readwrite');
+    await promisifyRequest(store.put(event));
+  }
+
+  /**
    * Return all stored events of a given kind, sorted by created_at desc.
    * @param {number} kind
    * @param {number} [limit]
