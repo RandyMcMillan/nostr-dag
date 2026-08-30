@@ -492,12 +492,15 @@ fn draw_dashboard(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 
     let help = Paragraph::new(
         "Keys:\n\
-         Tab / →    next tab\n\
-         Shift+Tab / ←  previous tab\n\
-         j / ↓      next row\n\
-         k / ↑      previous row\n\
+         → / ←      next / previous tab\n\
+         Tab        cycle focus (Sync tab) or next tab\n\
+         Shift+Tab  reverse cycle focus (Sync tab)\n\
+         j / ↓      next row / dropdown item\n\
+         k / ↑      previous row / dropdown item\n\
          r          refresh all views\n\
          Shift+T    toggle time format\n\
+         Enter      toggle URL dropdown (Sync tab)\n\
+         a / d      add / remove sync URL (dropdown)\n\
          s          sync selected peer (on Sync tab)\n\
          Shift+S    sync all peers (on Sync tab)\n\
          q / Esc    quit",
@@ -824,11 +827,37 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
             if let Event::Key(key) = event::read()? {
                 match key.code {
                     KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
-                    KeyCode::Tab | KeyCode::Right => app.next_tab(),
-                    KeyCode::BackTab | KeyCode::Left => app.prev_tab(),
+                    KeyCode::Right => app.next_tab(),
+                    KeyCode::Left => app.prev_tab(),
+                    KeyCode::Tab => {
+                        if app.tab == Tab::Sync {
+                            app.next_sync_focus();
+                        } else {
+                            app.next_tab();
+                        }
+                    }
+                    KeyCode::BackTab => {
+                        if app.tab == Tab::Sync {
+                            app.prev_sync_focus();
+                        } else {
+                            app.prev_tab();
+                        }
+                    }
                     KeyCode::Char('r') => app.refresh_all(),
-                    KeyCode::Char('j') | KeyCode::Down => app.next_row(),
-                    KeyCode::Char('k') | KeyCode::Up => app.prev_row(),
+                    KeyCode::Char('j') | KeyCode::Down => {
+                        if app.tab == Tab::Sync && app.sync_dropdown_open {
+                            app.next_sync_url();
+                        } else {
+                            app.next_row();
+                        }
+                    }
+                    KeyCode::Char('k') | KeyCode::Up => {
+                        if app.tab == Tab::Sync && app.sync_dropdown_open {
+                            app.prev_sync_url();
+                        } else {
+                            app.prev_row();
+                        }
+                    }
                     KeyCode::Char('T') if key.modifiers.contains(KeyModifiers::SHIFT) => {
                         app.time_format_human = !app.time_format_human;
                     }
@@ -836,11 +865,24 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>, mut app: App) -> io::Result<(
                         app.start_sync_all();
                     }
                     KeyCode::Char('s') if app.tab == Tab::Sync && !app.sync_running => {
-                        if let Some(idx) = app.peers_state.selected() {
+                        if app.sync_focus == SyncFocus::PeerDetail {
+                            if let Some(idx) = app.peers_state.selected() {
+                                app.start_sync_peer(idx);
+                            }
+                        } else if let Some(idx) = app.peers_state.selected() {
                             app.start_sync_peer(idx);
                         } else {
                             app.start_sync();
                         }
+                    }
+                    KeyCode::Enter if app.tab == Tab::Sync && app.sync_focus == SyncFocus::UrlDropdown => {
+                        app.sync_dropdown_open = !app.sync_dropdown_open;
+                    }
+                    KeyCode::Char('a') if app.tab == Tab::Sync && app.sync_focus == SyncFocus::UrlDropdown => {
+                        app.add_sync_url();
+                    }
+                    KeyCode::Char('d') if app.tab == Tab::Sync && app.sync_focus == SyncFocus::UrlDropdown => {
+                        app.remove_sync_url();
                     }
                     _ => {}
                 }
