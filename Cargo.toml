@@ -54,6 +54,11 @@ name = "db-viewer"
 path = "src/bin/db-viewer.rs"
 required-features = ["db-viewer"]
 
+[[bin]]
+name = "nostr-dag"
+path = "src/bin/nostr-dag.rs"
+required-features = ["cli"]
+
 [features]
 default = []
 native = [
@@ -81,6 +86,7 @@ wasm = [
 p2p = ["native", "dep:libp2p", "dep:libp2p-webrtc", "dep:rcgen"]
 p2p-wasm = ["wasm", "dep:libp2p", "dep:futures", "dep:js-sys"]
 db-viewer = ["native", "dep:ratatui", "dep:crossterm", "dep:chrono"]
+cli = ["dep:clap", "native", "p2p", "relay", "db-viewer"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 libp2p = { version = "0.54", optional = true, features = [
@@ -118,6 +124,7 @@ libp2p = { version = "0.54", optional = true, features = [
 nostr = { version = "0.44", default-features = false, features = ["std"] }
 
 [dependencies]
+clap = { version = "4", features = ["derive", "env"], optional = true }
 getrandom = { version = "0.2", features = ["js"], optional = true }
 getrandom_0_3 = { package = "getrandom", version = "0.3", features = ["wasm_js"], optional = true }
 git2 = { version = "0.20", optional = true }
