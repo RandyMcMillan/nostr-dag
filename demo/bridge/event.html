@@ -94,7 +94,7 @@
       return `<tr><td class="mono">${escapeHtml(name)}</td>${valueCells}</tr>`;
     }
 
-    function renderEvent(event) {
+    function renderEvent(event, foundOnRelays = []) {
       const detailEl = document.getElementById('eventDetail');
       if (!detailEl) return;
 
@@ -105,6 +105,10 @@
             <tbody>${tags.map(tagRowHtml).join('')}</tbody>
            </table>`
         : '<div class="small muted">No tags.</div>';
+
+      const relaySection = foundOnRelays.length
+        ? `<div class="bridge-event-field"><span class="bridge-event-key">relays</span><span class="bridge-event-value">${foundOnRelays.map((r) => `<span class="pill mono">${escapeHtml(r)}</span>`).join(' ')}</span></div>`
+        : '';
 
       detailEl.innerHTML = `
         <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:12px;">
@@ -117,6 +121,7 @@
           <div class="bridge-event-field"><span class="bridge-event-key">kind</span><span class="bridge-event-value">${escapeHtml(String(event.kind))}</span></div>
           <div class="bridge-event-field"><span class="bridge-event-key">created_at</span><span class="bridge-event-value">${escapeHtml(formatTimestamp(event.created_at))}</span></div>
           <div class="bridge-event-field"><span class="bridge-event-key">sig</span><span class="bridge-event-value mono small">${escapeHtml(event.sig)}</span></div>
+          ${relaySection}
         </div>
         <h3 style="margin:16px 0 8px;">Content</h3>
         <pre class="bridge-event-pre">${escapeHtml(event.content ?? '')}</pre>
@@ -161,7 +166,7 @@
         const ws = new WebSocket(relayUrl);
         const timer = setTimeout(() => {
           try { ws.close(); } catch {}
-          resolve(null);
+          resolve({ event: null, relay: relayUrl });
         }, timeoutMs);
         ws.onopen = () => {
           ws.send(JSON.stringify(['REQ', 'event-detail-' + Math.random().toString(36).slice(2, 8), { ids: [eventId] }]));
@@ -172,13 +177,13 @@
             if (data[0] === 'EVENT' && data[2] && data[2].id === eventId) {
               clearTimeout(timer);
               try { ws.close(); } catch {}
-              resolve(data[2]);
+              resolve({ event: data[2], relay: relayUrl });
               return;
             }
             if (data[0] === 'EOSE') {
               clearTimeout(timer);
               try { ws.close(); } catch {}
-              resolve(null);
+              resolve({ event: null, relay: relayUrl });
             }
           } catch {
             // ignore malformed
@@ -187,20 +192,20 @@
         ws.onerror = () => {
           clearTimeout(timer);
           try { ws.close(); } catch {}
-          resolve(null);
+          resolve({ event: null, relay: relayUrl });
         };
         ws.onclose = () => {
           clearTimeout(timer);
-          resolve(null);
+          resolve({ event: null, relay: relayUrl });
         };
       });
     }
 
     async function fetchEventFromRelays(eventId) {
-      const promises = DEFAULT_RELAYS.map((url) => queryRelayForEvent(url, eventId));
-      const results = await Promise.all(promises);
-      const found = results.find((ev) => ev !== null);
-      return { event: found || null, queried: DEFAULT_RELAYS };
+      const results = await Promise.all(DEFAULT_RELAYS.map((url) => queryRelayForEvent(url, eventId)));
+      const foundOnRelays = results.filter((r) => r.event !== null).map((r) => r.relay);
+      const firstEvent = results.find((r) => r.event !== null)?.event || null;
+      return { event: firstEvent, foundOnRelays, queriedRelays: DEFAULT_RELAYS };
     }
 
     async function boot() {
@@ -225,9 +230,11 @@
         const db = await getDagDb();
         const row = await db.getEvent(eventId);
         if (row && row.raw_json) {
-          renderEvent(JSON.parse(row.raw_json));
+          const relays = await db.getEventRelays(eventId);
+          renderEvent(JSON.parse(row.raw_json), relays.map((r) => r.relay_url));
           return;
         } else if (row && row.id) {
+          const relays = await db.getEventRelays(eventId);
           renderEvent({
             id: row.id,
             pubkey: row.pubkey,
@@ -236,23 +243,26 @@
             content: row.content,
             sig: row.sig,
             tags: [],
-          });
+          }, relays.map((r) => r.relay_url));
           return;
         }
 
         // Event not in local DB — query relays.
         renderSearching(eventId);
-        const { event, queried } = await fetchEventFromRelays(eventId);
+        const { event, foundOnRelays, queriedRelays } = await fetchEventFromRelays(eventId);
         if (event) {
-          // Optionally cache it locally for next time.
+          // Cache event and record every relay that returned it.
           try {
-            await db.putEvent({ ...event, source_relay: queried[0] || null });
+            await db.putEvent({ ...event, source_relay: foundOnRelays[0] || null });
+            for (const relayUrl of foundOnRelays) {
+              await db.upsertEventRelay(event.id, relayUrl, false);
+            }
           } catch {
             // best-effort cache
           }
-          renderEvent(event);
+          renderEvent(event, foundOnRelays);
         } else {
-          renderNotFound(eventId, queried);
+          renderNotFound(eventId, queriedRelays);
         }
       } catch (e) {
         if (detailEl) {

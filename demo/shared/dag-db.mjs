@@ -353,6 +353,14 @@ export class DagDb {
     }
   }
 
+  /** Return all relays an event was seen on. */
+  async getEventRelays(eventId) {
+    const { store } = txStore(this._db, 'event_relays', 'readonly');
+    const idx = store.index('by_event');
+    const rows = await promisifyRequest(idx.getAll(eventId));
+    return rows.sort((a, b) => b.seen_at - a.seen_at);
+  }
+
   // -------------------------------------------------------------------------
   // User-relay helpers
   // -------------------------------------------------------------------------
