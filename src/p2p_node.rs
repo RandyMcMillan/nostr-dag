@@ -962,6 +962,30 @@ async fn publish_pip_payload(
                 manifest_event_id, root_id
             );
 
+            // Publish raw Nostr events to relays FIRST so GH Pages browsers can
+            // receive them immediately, even when the local gossipsub mesh is empty.
+            if let Some(pool) = relay_pool {
+                let pool = pool.clone();
+                let manifest_event = manifest_event.clone();
+                let slice_events = slice_events.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = pool.send_event(&manifest_event).await {
+                        debug!(?e, "PIP manifest relay publish failed");
+                    } else {
+                        safe_println!("PIP manifest relay published id={}", manifest_event.id);
+                    }
+                    for slice in &slice_events {
+                        if let Err(e) = pool.send_event(slice).await {
+                            debug!(?e, "PIP slice relay publish failed");
+                        } else {
+                            safe_println!("PIP slice relay published id={}", slice.id);
+                        }
+                    }
+                });
+            }
+
+            // Publish bridge envelopes on gossipsub (best-effort; don't block
+            // relay publication when no mesh peers are available).
             for (index, message) in messages.into_iter().enumerate() {
                 let mut attempt = 0usize;
                 loop {
@@ -975,7 +999,7 @@ async fn publish_pip_payload(
                             if matches!(
                                 err,
                                 gossipsub::PublishError::InsufficientPeers
-                            ) && attempt < 20 =>
+                            ) && attempt < 5 =>
                         {
                             warn!(
                                 attempt,
@@ -1001,27 +1025,6 @@ async fn publish_pip_payload(
                 } else {
                     safe_println!("PIP slice staged seq={}", index - 1);
                 }
-            }
-
-            // Also publish raw Nostr events to relays so GH Pages browsers can receive them.
-            if let Some(pool) = relay_pool {
-                let pool = pool.clone();
-                let manifest_event = manifest_event.clone();
-                let slice_events = slice_events.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = pool.send_event(&manifest_event).await {
-                        debug!(?e, "PIP manifest relay publish failed");
-                    } else {
-                        safe_println!("PIP manifest relay published id={}", manifest_event.id);
-                    }
-                    for slice in &slice_events {
-                        if let Err(e) = pool.send_event(slice).await {
-                            debug!(?e, "PIP slice relay publish failed");
-                        } else {
-                            safe_println!("PIP slice relay published id={}", slice.id);
-                        }
-                    }
-                });
             }
 
             safe_println!(
