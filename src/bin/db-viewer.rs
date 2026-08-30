@@ -322,7 +322,7 @@ fn draw_events(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
                 Cell::from(kind.to_string()),
                 Cell::from(app.format_timestamp(*created_at)),
                 Cell::from(truncate(pubkey, 16)),
-                Cell::from(truncate(id, 16)),
+                Cell::from(id.as_str()),
             ])
             .height(1)
         })
@@ -332,7 +332,7 @@ fn draw_events(f: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
         Constraint::Length(8),
         Constraint::Length(20),
         Constraint::Length(18),
-        Constraint::Min(20),
+        Constraint::Min(64),
     ])
     .header(header)
     .block(Block::default().borders(Borders::ALL).title(format!("Events ({})", app.events.len())))
@@ -446,6 +446,21 @@ fn truncate(s: &str, max: usize) -> String {
         s.to_string()
     } else {
         format!("{}…", &s[..max.saturating_sub(1)])
+    }
+}
+
+/// Elide a string in the middle, keeping the start and end visible.
+/// Useful for hex identifiers (event IDs, pubkeys) where both ends matter.
+fn elide_middle(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        s.to_string()
+    } else if max <= 3 {
+        s[..max].to_string()
+    } else {
+        let keep = max - 3; // account for "..."
+        let start_len = keep / 2;
+        let end_len = keep - start_len;
+        format!("{}...{}", &s[..start_len], &s[s.len() - end_len..])
     }
 }
 
