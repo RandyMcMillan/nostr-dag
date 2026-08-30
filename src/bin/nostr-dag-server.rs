@@ -552,6 +552,28 @@ async fn handle_connection(
                 )
             }
         }
+    } else if method == "GET" && path == "/.well-known/nostr.json" {
+        match handle_nip05_get(&peer_store) {
+            Ok((body, content_type)) => response_bytes(200, "OK", body, content_type, head_only),
+            Err(RouteError::BadRequest) => response_text(
+                400,
+                "Bad Request",
+                "Bad Request",
+                "text/plain; charset=utf-8",
+            ),
+            Err(RouteError::NotFound) => {
+                response_text(404, "Not Found", "Not Found", "text/plain; charset=utf-8")
+            }
+            Err(RouteError::Io(err)) => {
+                error!(?err, path = %path, "failed to generate nip05 payload");
+                response_text(
+                    500,
+                    "Internal Server Error",
+                    "Internal Server Error",
+                    "text/plain; charset=utf-8",
+                )
+            }
+        }
     } else if path == EVENTS_ROUTE_PREFIX || path.starts_with("/events/") {
         match handle_events_get(path, &request, &event_store).await {
             Ok((body, content_type)) => response_bytes(200, "OK", body, content_type, head_only),
@@ -860,6 +882,76 @@ fn handle_peer_get(
     serde_json::to_vec(&payload)
         .map(|body| (body, "application/json; charset=utf-8"))
         .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))
+}
+
+/// Generate a dynamic NIP-05 `.well-known/nostr.json` response from the
+/// peer store.  The deterministic native pubkey is always included as the
+/// canonical identity, and any discovered peers that expose a `nostr_pubkey`
+/// in their detail field are added as additional names.
+fn handle_nip05_get(
+    peer_store: &Arc<PeerStore>,
+) -> Result<(Vec<u8>, &'static str), RouteError> {
+    const BASE_PUBKEY: &str = "2d724a13a80b6002607737ad1a99f3c0b148843707d59ac3bff08c7fce72ecce";
+
+    let peers = peer_store.all();
+    let mut names = serde_json::Map::new();
+    let mut relays = serde_json::Map::new();
+
+    // Always include the base / canonical identity.
+    names.insert("_".to_string(), serde_json::Value::String(BASE_PUBKEY.to_string()));
+    names.insert("nostr-dag".to_string(), serde_json::Value::String(BASE_PUBKEY.to_string()));
+    relays.insert(
+        BASE_PUBKEY.to_string(),
+        serde_json::Value::Array(vec![
+            serde_json::Value::String("wss://nos.lol".to_string()),
+            serde_json::Value::String("wss://relay.nostr.com".to_string()),
+            serde_json::Value::String("wss://relay.nostr.band".to_string()),
+            serde_json::Value::String("wss://relay.primal.net".to_string()),
+            serde_json::Value::String("wss://nostr.wine".to_string()),
+            serde_json::Value::String("wss://top.testrelay.top".to_string()),
+            serde_json::Value::String("wss://relay.pocketnostr.com".to_string()),
+            serde_json::Value::String("wss://basspistol.org".to_string()),
+            serde_json::Value::String("wss://relay.ngit.dev".to_string()),
+        ]),
+    );
+
+    // Scrape nostr_pubkey from peer detail lines.
+    for peer in peers {
+        if let Some(ref detail) = peer.detail {
+            if let Some(pk) = extract_nostr_pubkey(detail) {
+                if pk != BASE_PUBKEY && !names.values().any(|v| v.as_str() == Some(&pk)) {
+                    let safe_name = peer.peer_id.replace(" ", "_").replace("/", "_");
+                    if !safe_name.is_empty() && !names.contains_key(&safe_name) {
+                        names.insert(safe_name, serde_json::Value::String(pk.clone()));
+                    }
+                }
+            }
+        }
+    }
+
+    let payload = serde_json::json!({
+        "names": names,
+        "relays": relays,
+    });
+
+    serde_json::to_vec(&payload)
+        .map(|body| (body, "application/json; charset=utf-8"))
+        .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))
+}
+
+/// Scan a p2p-node stdout line for `nostr_pubkey=<hex>`.
+fn extract_nostr_pubkey(text: &str) -> Option<String> {
+    let prefix = "nostr_pubkey=";
+    let start = text.find(prefix)? + prefix.len();
+    let rest = &text[start..];
+    let end = rest.find(|c: char| c.is_whitespace() || c == ',' || c == '"' || c == '}')
+        .unwrap_or(rest.len());
+    let value = &rest[..end];
+    if value.len() == 64 && value.chars().all(|c| c.is_ascii_hexdigit()) {
+        Some(value.to_string())
+    } else {
+        None
+    }
 }
 
 /// Parse structured peer-discovery lines emitted by the p2p-node binary.
