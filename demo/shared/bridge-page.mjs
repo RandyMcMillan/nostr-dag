@@ -50,6 +50,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       'wss://basspistol.org',
       'wss://relay.ngit.dev',
     ];
+    const BRIDGE_SITE_URL = 'https://randymcmillan.github.io/nostr-dag/bridge/';
 
     const { networkTime } = bootstrapDemoPageChrome({
       headerRoot: document.getElementById('sharedHeader'),

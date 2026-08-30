@@ -35,6 +35,8 @@ const NIP11_MAX_CONCURRENT: usize = 8;
 const EVENTS_ROUTE_PREFIX: &str = "/events";
 /// Default SQLite database file placed next to the server working directory.
 const DEFAULT_DB_PATH: &str = "nostr-dag.db";
+/// Public GitHub Pages deployment of the bridge (WASM peer).
+const GH_PAGES_BRIDGE_URL: &str = "https://randymcmillan.github.io/nostr-dag/bridge/";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct LoggerEntry {
@@ -155,6 +157,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db_path = env::var("DB_PATH").unwrap_or_else(|_| DEFAULT_DB_PATH.to_string());
     let logger_store = Arc::new(LoggerStore::default());
     let peer_store = Arc::new(PeerStore::default());
+    // Seed the peer store with the public GitHub Pages deployment so
+    // db-viewer and /peers consumers always have a well-known remote peer.
+    peer_store.upsert(PeerEntry {
+        peer_id: "gh-pages".to_string(),
+        kind: "wasm".to_string(),
+        path: GH_PAGES_BRIDGE_URL.to_string(),
+        detail: Some("GitHub Pages deployment (WASM peer)".to_string()),
+        source: Some("well-known".to_string()),
+        updated_at: now_ms(),
+    });
     let event_store = Arc::new(EventStoreState::new(&db_path).unwrap_or_else(|err| {
         error!(?err, %db_path, "failed to open event store, using in-memory fallback");
         EventStoreState::new(":memory:").expect("in-memory event store")
