@@ -1816,7 +1816,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
             networkTime.attachNode(node);
             const isWebSocketsOnly = !config.includeWebRTC && !config.includeWebRTCDirect && !config.includeCircuitRelay;
             if (isWebSocketsOnly) {
-              setStatus('', 'warning');
+              setStatus('bridge limited (no WebRTC)', 'warning');
             }
             window.__sharedFooter?.log('bridge', `bridge p2p config ok: ${JSON.stringify(config)}`, 'debug', 'available');
             lastError = null;
@@ -1879,7 +1879,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
 
         const measuredCount = measuredRelayCount(relaysSnapshot);
         const statusCount = measuredCount > 0 ? `${measuredCount} measured` : `${relaysSnapshot.length} known`;
-        setStatus('', 'available');
+        setStatus('bridge ready', 'available');
         window.__sharedFooter?.log('bridge', `bridge ready on topic ${topic}`, 'info', 'available');
         window.__sharedFooter?.log('bridge', `relay snapshot known=${relaysSnapshot.length} measured=${measuredCount}`, 'debug', 'available');
         for (const relay of relaysSnapshot) {

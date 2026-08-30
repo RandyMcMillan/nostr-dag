@@ -47,6 +47,7 @@
       buildSelectOptions,
       cacheRepoData,
       createCommitSummary,
+      defaultRefForRefs,
       emptyRepoData,
       ensureDir,
       escapeHtml,
@@ -1304,7 +1305,11 @@
 
     async function refreshList({ force = false } = {}) {
       try {
-        setStatus('loading repos...', 'checking');
+        const route = getRouteContext(repos);
+        const cache = loadRepoCache();
+        const hasCachedData = repos.some((repo) => cache[repo.name]?.commits?.length > 0);
+        // Show green immediately when cached data exists; background refresh updates cards.
+        setStatus(hasCachedData ? 'ready (refreshing)' : 'loading repos...', hasCachedData ? 'available' : 'checking');
         footer.log('git', `refreshing ${repos.length} repos force=${force}`, 'debug');
         repos.forEach((repo) => {
           setRepoStatus(repo.name, 'refreshing...');
@@ -1312,51 +1317,65 @@
           footer.log('git', `checking ${repo.name}`, 'debug');
         });
         renderApp();
-        const route = getRouteContext(repos);
         const orderedRepos = route.repo
           ? [route.repo, ...repos.filter((repo) => repo.name !== route.repo.name)]
           : [...repos];
         const dataByRepo = new Map();
-        for (const repo of orderedRepos) {
-          const repoRoute = route.repo && repo.name === route.repo.name ? route : null;
-          try {
-            if (force) {
-              footer.log('git', `${repo.name} force=true → wiping local clone`, 'info');
-              await wipeRepo(repo);
+
+        // Process repos concurrently so the list status turns green quickly.
+        // localStorage cache writes are batched at the end to avoid RMW races.
+        const CONCURRENCY = 3;
+        const queue = orderedRepos.slice();
+        async function worker() {
+          while (queue.length) {
+            const repo = queue.shift();
+            const repoRoute = route.repo && repo.name === route.repo.name ? route : null;
+            try {
+              if (force) {
+                footer.log('git', `${repo.name} force=true → wiping local clone`, 'info');
+                await wipeRepo(repo);
+              }
+              setRepoPing(repo.name, null);
+              const probeStart = performance.now();
+              const probe = probeRemoteHost(repo).catch(() => false);
+              await ensureRepo(repo, repoRoute, { skipP2P: force });
+              const data = await readRepo(repo, repoRoute);
+              const probeOk = await probe;
+              const probeMs = probeOk?.ok ? Math.round(performance.now() - probeStart) : null;
+              setRepoPing(repo.name, probeMs);
+              const gitOk = data && data.commits && data.commits.length > 0;
+              setRepoHealth(repo.name, gitOk ? 'available' : 'unavailable');
+              setRepoStatus(repo.name, 'ready');
+              footer.log('git', `ready ${repo.name} tags=${data.tags.length}`, 'info', 'available');
+              dataByRepo.set(repo.name, data);
+              // Incrementally update the list view and status as each repo finishes.
+              if (dataByRepo.size > 0) {
+                setStatus(`${dataByRepo.size}/${repos.length} repos ready`, 'available');
+              }
+              if (!route.repo) {
+                const incrementalValues = repos.map((r) => dataByRepo.get(r.name) || cache[r.name] || emptyRepoData());
+                renderApp(incrementalValues);
+              }
+              if (repoRoute) {
+                renderApp(data);
+              }
+            } catch (e) {
+              footer.log('git', `${repo.name} failed: ${e.message}`, 'error', 'unavailable');
+              setRepoStatus(repo.name, `refresh failed: ${e.message}`);
+              setRepoHealth(repo.name, 'unavailable');
+              setRepoPing(repo.name, null);
             }
-            footer.log('git', `probing ${repo.name}`, 'trace');
-            setRepoPing(repo.name, null);
-            const probeStart = performance.now();
-            const probe = probeRemoteHost(repo).catch(() => false);
-            footer.log('git', `ensuring ${repo.name}`, 'debug');
-            await ensureRepo(repo, repoRoute, { skipP2P: force });
-            footer.log('git', `ensure done ${repo.name} proxy=${activeProxy || 'none'}`, 'debug');
-            footer.log('git', `reading ${repo.name}`, 'trace');
-            const data = await readRepo(repo, repoRoute);
-            cacheRepoData(repo.name, data);
-            const probeOk = await probe;
-            const probeMs = probeOk?.ok ? Math.round(performance.now() - probeStart) : null;
-            setRepoPing(repo.name, probeMs);
-            const gitOk = data && data.commits && data.commits.length > 0;
-            setRepoHealth(repo.name, gitOk ? 'available' : 'unavailable');
-            setRepoStatus(repo.name, 'ready');
-            footer.log('git', `probe ${repo.name} ${probeOk?.ok ? 'ok' : 'fail'} ping=${probeMs ?? 'n/a'} ms gitOk=${gitOk} tags=${data.tags.length}`, 'debug');
-            footer.log('git', `ready ${repo.name}`, 'info', 'available');
-            dataByRepo.set(repo.name, data);
-            if (repoRoute) {
-              const cache = loadRepoCache();
-              renderApp(repos.map((entry) => (
-                entry.name === repo.name ? data : (dataByRepo.get(entry.name) || cache[entry.name] || emptyRepoData())
-              )));
-            }
-          } catch (e) {
-            footer.log('git', `${repo.name} failed: ${e.message}`, 'error', 'unavailable');
-            setRepoStatus(repo.name, `refresh failed: ${e.message}`);
-            setRepoHealth(repo.name, 'unavailable');
-            setRepoPing(repo.name, null);
           }
         }
-        const cache = loadRepoCache();
+        await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
+
+        // Batch cache write to avoid localStorage read-modify-write races.
+        for (const [repoName, data] of dataByRepo) {
+          cacheRepoData(repoName, data);
+          cache[repoName] = data;
+        }
+        saveRepoCache(cache);
+
         const values = repos.map((repo) => dataByRepo.get(repo.name) || cache[repo.name] || emptyRepoData());
         renderApp(values);
         const readyCount = dataByRepo.size;
@@ -1365,8 +1384,8 @@
           const ping = getRepoPing(repo.name);
           return `${repo.name}:${health}${ping ? `(${ping}ms)` : ''}`;
         }).join(', ');
-        footer.log('git', `status: ${statusSummary}`, 'info', readyCount === repos.length ? 'available' : 'checking');
-        setStatus(readyCount === repos.length ? 'ready' : `partial: ${readyCount}/${repos.length} repos ready`, readyCount === repos.length ? 'available' : 'checking');
+        footer.log('git', `status: ${statusSummary}`, 'info', readyCount > 0 ? 'available' : 'unavailable');
+        setStatus(readyCount === repos.length ? 'ready' : `partial: ${readyCount}/${repos.length} repos ready`, readyCount > 0 ? 'available' : 'checking');
       } catch (e) {
         setStatus(`unavailable: ${e.message}`, 'unavailable');
         footer.log('git', `viewer failed: ${e.message}`, 'error', 'unavailable');

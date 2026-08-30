@@ -1362,20 +1362,23 @@ button:hover, a.button:hover { background:var(--button-hover); }
     .blob-toolbar .repo-toolbar { margin-top:0; }
     .blob-meta { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
     .blame-shell { width:100%; overflow:auto; }
-    .blame-head, .blame-row { display:grid; grid-template-columns: 12ch 4ch 22ch minmax(0, 1fr); gap:12px; align-items:start; }
-    /* 1. Commit hash */
+    .blame-head, .blame-row { display:grid; grid-template-columns: 3ch 12ch 4ch 22ch minmax(0, 1fr); gap:12px; align-items:start; }
+    /* 1. Parent arrow */
+    .blame-parent { color:var(--accent); text-decoration:none; padding:0 4px; white-space:nowrap; }
+    .blame-parent:hover { text-decoration:underline; }
+    /* 2. Commit hash */
     .blame-head { padding:10px 12px; background:var(--status-bg); color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.04em; border-bottom:1px solid var(--border); }
-    /* 2. Line */
-    .blame-head > :nth-child(2) { padding-left:2ch; }
+    /* 3. Line */
+    .blame-head > :nth-child(3) { padding-left:2ch; }
     .blame-row { padding:8px 12px; border-top:1px solid var(--border); }
-    /* 3. Time */
-    .blame-head > :nth-child(3) { padding-left:5ch; }
-    .blame-row > :nth-child(2) { transform:translateX(-4ch); }
-    .blame-row > :nth-child(3) { transform:translateX(-1ch); }
-    .blame-row > :nth-child(4) { transform:translateX(-5ch); }
+    /* 4. Time */
+    .blame-head > :nth-child(4) { padding-left:5ch; }
+    .blame-row > :nth-child(3) { transform:translateX(-4ch); }
+    .blame-row > :nth-child(4) { transform:translateX(-1ch); }
+    .blame-row > :nth-child(5) { transform:translateX(-5ch); }
     .blame-row:first-child { border-top:0; }
-    /* 4. Content */
-    .blame-head > :nth-child(4) { padding-left:9ch; }
+    /* 5. Content */
+    .blame-head > :nth-child(5) { padding-left:9ch; }
     .blame-hash, .blame-lno, .blame-time, .blame-text { min-width:0; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size:12px; line-height:1.45; }
     .blame-hash { color:var(--accent); white-space:nowrap; }
     .blame-lno { color:var(--muted); text-align:right; white-space:nowrap; }
@@ -1387,22 +1390,23 @@ button:hover, a.button:hover { background:var(--button-hover); }
     @media (max-width: 1100px) {
       .page-content { max-width: 100%; padding: 0 1rem; }
       .header-container { flex-direction:column; align-items:flex-start; padding:1rem 1.25rem; }
-      .blame-head, .blame-row { grid-template-columns: 11ch 4ch 20ch minmax(0, 1fr); gap:8px; }
-      .blame-head > :nth-child(4) { padding-left:4ch; }
-      .blame-row > :nth-child(2), .blame-row > :nth-child(3), .blame-row > :nth-child(4) { transform:none; }
+      .blame-head, .blame-row { grid-template-columns: 3ch 11ch 4ch 20ch minmax(0, 1fr); gap:8px; }
+      .blame-head > :nth-child(5) { padding-left:4ch; }
+      .blame-row > :nth-child(3), .blame-row > :nth-child(4), .blame-row > :nth-child(5) { transform:none; }
     }
     @media (max-width: 900px) {
       .page-content { margin: 1.25rem auto; padding: 0 1rem; }
       .header-container { padding:1rem; }
       .blame-head { display:none; }
-      .blame-row { display:grid; grid-template-columns: auto auto 1fr; gap:8px; padding:10px 12px; }
+      .blame-row { display:grid; grid-template-columns: auto auto auto auto; gap:8px; padding:10px 12px; }
       .blame-row > :nth-child(1) { grid-column:1; }
-      .blame-row > :nth-child(2) { grid-column:2; text-align:right; }
+      .blame-row > :nth-child(2) { grid-column:2; }
       .blame-row > :nth-child(3) { grid-column:3; text-align:right; }
-      .blame-row > :nth-child(4) { grid-column:1 / -1; padding-top:6px; border-top:1px solid var(--border); }
-      .blame-row > :nth-child(2), .blame-row > :nth-child(3), .blame-row > :nth-child(4) { transform:none; }
+      .blame-row > :nth-child(4) { grid-column:4; text-align:right; }
+      .blame-row > :nth-child(5) { grid-column:1 / -1; padding-top:6px; border-top:1px solid var(--border); }
+      .blame-row > :nth-child(2), .blame-row > :nth-child(3), .blame-row > :nth-child(4), .blame-row > :nth-child(5) { transform:none; }
       .blame-lno { text-align:right; }
-      .blame-head > :nth-child(2), .blame-head > :nth-child(3), .blame-head > :nth-child(4) { padding-left:0; }
+      .blame-head > :nth-child(2), .blame-head > :nth-child(3), .blame-head > :nth-child(4), .blame-head > :nth-child(5) { padding-left:0; }
     }
     @media (max-width: 640px) {
       .header-container { gap:.5rem; }
