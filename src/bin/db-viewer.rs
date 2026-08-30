@@ -451,6 +451,7 @@ fn truncate(s: &str, max: usize) -> String {
 
 /// Elide a string in the middle, keeping the start and end visible.
 /// Useful for hex identifiers (event IDs, pubkeys) where both ends matter.
+#[allow(dead_code)]
 fn elide_middle(s: &str, max: usize) -> String {
     if s.len() <= max {
         s.to_string()
