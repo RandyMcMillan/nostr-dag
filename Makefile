@@ -114,6 +114,8 @@ site: wasm
 	cp demo/dag/*.mjs site/dag/
 	mkdir -p site/bridge
 	cp demo/bridge/*.html site/bridge/
+	mkdir -p site/vendor
+	cp demo/vendor/*.mjs site/vendor/
 
 demo:
 	./demo/run.sh
