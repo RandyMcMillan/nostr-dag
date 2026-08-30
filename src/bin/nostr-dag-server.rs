@@ -662,7 +662,7 @@ async fn handle_proxy(
              Content-Length: 0\r\n\
              X-Frame-Options: DENY\r\n\
              X-Content-Type-Options: nosniff\r\n\
-             Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' blob: 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://esm.sh; worker-src 'self' blob: https://cdn.jsdelivr.net https://esm.sh; style-src 'self' 'unsafe-inline'; connect-src *; img-src 'self' data: https:; font-src 'self'; frame-ancestors 'none';\r\n\
+             Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' blob: 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://esm.sh; worker-src 'self' blob: 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://esm.sh; style-src 'self' 'unsafe-inline'; connect-src *; img-src 'self' data: https:; font-src 'self'; frame-ancestors 'none';\r\n\
              Connection: close\r\n\r\n"
         );
         return response.into_bytes();
@@ -709,7 +709,7 @@ async fn handle_proxy(
                  Content-Length: {}\r\n\
                  X-Frame-Options: DENY\r\n\
                  X-Content-Type-Options: nosniff\r\n\
-                 Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' blob: 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://esm.sh; worker-src 'self' blob: https://cdn.jsdelivr.net https://esm.sh; style-src 'self' 'unsafe-inline'; connect-src *; img-src 'self' data: https:; font-src 'self'; frame-ancestors 'none';\r\n\
+                 Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' blob: 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://esm.sh; worker-src 'self' blob: 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://esm.sh; style-src 'self' 'unsafe-inline'; connect-src *; img-src 'self' data: https:; font-src 'self'; frame-ancestors 'none';\r\n\
                  Connection: close\r\n",
                 if head_only { 0 } else { resp_bytes.len() }
             );
@@ -735,7 +735,7 @@ async fn handle_proxy(
                  Content-Length: {}\r\n\
                  X-Frame-Options: DENY\r\n\
                  X-Content-Type-Options: nosniff\r\n\
-                 Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' blob: 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://esm.sh; worker-src 'self' blob: https://cdn.jsdelivr.net https://esm.sh; style-src 'self' 'unsafe-inline'; connect-src *; img-src 'self' data: https:; font-src 'self'; frame-ancestors 'none';\r\n\
+                 Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' blob: 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://esm.sh; worker-src 'self' blob: 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://esm.sh; style-src 'self' 'unsafe-inline'; connect-src *; img-src 'self' data: https:; font-src 'self'; frame-ancestors 'none';\r\n\
                  Connection: close\r\n\r\n\
                  {body_text}",
                 body_text.len()
@@ -1408,7 +1408,7 @@ fn response_redirect(location: &str) -> Vec<u8> {
          Content-Length: 0\r\n\
          X-Frame-Options: DENY\r\n\
          X-Content-Type-Options: nosniff\r\n\
-         Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' blob: 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://esm.sh; worker-src 'self' blob: https://cdn.jsdelivr.net https://esm.sh; style-src 'self' 'unsafe-inline'; connect-src *; img-src 'self' data: https:; font-src 'self'; frame-ancestors 'none';\r\n\
+         Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' blob: 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://esm.sh; worker-src 'self' blob: 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://esm.sh; style-src 'self' 'unsafe-inline'; connect-src *; img-src 'self' data: https:; font-src 'self'; frame-ancestors 'none';\r\n\
          Connection: close\r\n\r\n"
     )
     .into_bytes()
@@ -1429,7 +1429,7 @@ fn response_bytes(
          Content-Length: {body_len}\r\n\
          X-Frame-Options: DENY\r\n\
          X-Content-Type-Options: nosniff\r\n\
-         Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' blob: 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://esm.sh; worker-src 'self' blob: https://cdn.jsdelivr.net https://esm.sh; style-src 'self' 'unsafe-inline'; connect-src *; img-src 'self' data: https:; font-src 'self'; frame-ancestors 'none';\r\n\
+         Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' blob: 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://esm.sh; worker-src 'self' blob: 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://esm.sh; style-src 'self' 'unsafe-inline'; connect-src *; img-src 'self' data: https:; font-src 'self'; frame-ancestors 'none';\r\n\
          Connection: close\r\n\r\n"
     )
     .into_bytes();
