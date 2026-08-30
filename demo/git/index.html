@@ -1372,11 +1372,12 @@
         // Batch cache write to avoid localStorage read-modify-write races.
         for (const [repoName, data] of dataByRepo) {
           cacheRepoData(repoName, data);
-          cache[repoName] = data;
         }
-        saveRepoCache(cache);
+        // Re-load the cache so the in-memory variable reflects the merged data
+        // that cacheRepoData persisted (tags/serverRefs accumulate across refreshes).
+        const mergedCache = loadRepoCache();
 
-        const values = repos.map((repo) => dataByRepo.get(repo.name) || cache[repo.name] || emptyRepoData());
+        const values = repos.map((repo) => dataByRepo.get(repo.name) || mergedCache[repo.name] || emptyRepoData());
         renderApp(values);
         const readyCount = dataByRepo.size;
         const statusSummary = repos.map((repo) => {
