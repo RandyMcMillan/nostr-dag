@@ -14,6 +14,7 @@ const bundles = [
   {
     entry: resolve(root, 'vendor-src/isomorphic-git.mjs'),
     outfile: resolve(root, 'demo/vendor/isomorphic-git.mjs'),
+    inject: [resolve(root, 'vendor-src/buffer-polyfill.mjs')],
   },
   {
     entry: resolve(root, 'vendor-src/isomorphic-git-http-web.mjs'),
@@ -22,10 +23,6 @@ const bundles = [
   {
     entry: resolve(root, 'vendor-src/lightning-fs.mjs'),
     outfile: resolve(root, 'demo/vendor/lightning-fs.mjs'),
-  },
-  {
-    entry: resolve(root, 'demo/shared/libp2p-stack.mjs'),
-    outfile: resolve(root, 'demo/vendor/libp2p-stack.mjs'),
   },
 ];
 
@@ -41,5 +38,6 @@ for (const bundle of bundles) {
     sourcemap: false,
     minify: false,
     legalComments: 'none',
+    ...(bundle.inject ? { inject: bundle.inject } : {}),
   });
 }
