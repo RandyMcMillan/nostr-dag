@@ -73,6 +73,15 @@ fn load_or_generate_wss_cert() -> Result<(libp2p::websocket::tls::PrivateKey, li
 }
 
 #[cfg(feature = "p2p")]
+/// Discover the local interface IP by connecting to a public address.
+/// This works even without actual internet reachability as long as a route exists.
+fn detect_local_ip() -> Option<std::net::IpAddr> {
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("8.8.8.8:80").ok()?;
+    socket.local_addr().ok().map(|a| a.ip())
+}
+
+#[cfg(feature = "p2p")]
 /// Run the native libp2p peer used by the `p2p-node` binary.
 pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     tracing_subscriber::fmt()
@@ -188,8 +197,27 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
     if std::env::var("WSS_DISABLE").is_err() {
         swarm.listen_on("/ip4/0.0.0.0/tcp/0/tls/ws".parse::<Multiaddr>()?)?;
     }
-    swarm.listen_on("/ip4/0.0.0.0/udp/0/webrtc-direct".parse::<Multiaddr>()?)?;
-    swarm.listen_on("/ip6/::/udp/0/webrtc-direct".parse::<Multiaddr>()?)?;
+    // WebRTC-direct: explicit IPs fire NewListenAddr immediately.
+    // 0.0.0.0/:: rely on IfWatcher which does not report on macOS.
+    match swarm.listen_on("/ip4/127.0.0.1/udp/0/webrtc-direct".parse::<Multiaddr>()?) {
+        Ok(id) => info!(?id, "webrtc-direct listening on 127.0.0.1"),
+        Err(e) => warn!(?e, "webrtc-direct listen on 127.0.0.1 failed"),
+    }
+    if let Some(ip) = detect_local_ip() {
+        let addr = format!("/ip4/{ip}/udp/0/webrtc-direct");
+        match swarm.listen_on(addr.parse::<Multiaddr>()?) {
+            Ok(id) => info!(?id, %addr, "webrtc-direct listening on LAN IP"),
+            Err(e) => warn!(?e, %addr, "webrtc-direct listen on LAN IP failed"),
+        }
+    }
+    match swarm.listen_on("/ip4/0.0.0.0/udp/0/webrtc-direct".parse::<Multiaddr>()?) {
+        Ok(id) => info!(?id, "webrtc-direct listening on 0.0.0.0 (IfWatcher)"),
+        Err(e) => warn!(?e, "webrtc-direct listen on 0.0.0.0 failed"),
+    }
+    match swarm.listen_on("/ip6/::/udp/0/webrtc-direct".parse::<Multiaddr>()?) {
+        Ok(id) => info!(?id, "webrtc-direct listening on :: (IfWatcher)"),
+        Err(e) => warn!(?e, "webrtc-direct listen on :: failed"),
+    }
     for addr in &bootstrap_peers {
         if let Err(err) = swarm.dial(addr.clone()) {
             warn!(%addr, ?err, "bootstrap dial failed");
