@@ -66,15 +66,16 @@ test('git page renders repo cards with tags in Chromium', { timeout: 120_000 }, 
       t.diagnostic('Status did not leave loading state within 30s (cold cache / slow network) — continuing with soft checks');
     }
 
-    // Soft-check tags: on a warm cache tags appear quickly; on cold cache we
-    // don't fail the test because the clone may still be in progress.
-    const firstTagSelect = await page.locator('select[data-tag-select]').first();
-    const tagOptions = await firstTagSelect.locator('option').count().catch(() => 0);
-    if (tagOptions > 1) {
-      t.diagnostic(`Tag dropdown has ${tagOptions} options`);
-    } else {
-      t.diagnostic('Tag dropdown not yet populated (cold cache) — skipping tag assertion');
+    // Wait up to 30s for the first tag dropdown to be populated (proves
+    // listServerRefs and the proxy both work in the browser context).
+    const firstTagSelect = page.locator('select[data-tag-select]').first();
+    const tagCount = await firstTagSelect.locator('option').count().catch(() => 0);
+    if (tagCount <= 1) {
+      await firstTagSelect.locator('option').last().waitFor({ timeout: 30_000 }).catch(() => {});
     }
+    const tagOptions = await firstTagSelect.locator('option').count().catch(() => 0);
+    assert.ok(tagOptions > 1, `tag dropdown should be populated, got ${tagOptions} options`);
+    t.diagnostic(`Tag dropdown has ${tagOptions} options`);
 
     // Verify no critical console errors (CSP, module load, etc.)
     // Relay auth/time-out errors are expected when running against public relays
