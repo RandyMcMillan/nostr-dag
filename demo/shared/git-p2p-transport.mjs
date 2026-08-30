@@ -82,7 +82,7 @@ export class GitP2PTransport {
         kinds: [PIP_MANIFEST_KIND, PIP_SLICE_KIND],
         limit: 0,
       };
-      const sub = this.relayPool.subscribeMany(this.relays, filter, {
+      const sub = this.relayPool.subscribeMany(this.relays, [filter], {
         onevent: (event) => {
           this.handleNostrEvent(event);
         },
