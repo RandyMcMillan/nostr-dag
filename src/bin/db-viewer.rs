@@ -62,6 +62,27 @@ impl Tab {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum SyncFocus {
+    UrlDropdown,
+    PeerSidebar,
+    PeerDetail,
+    StatusProgress,
+    Log,
+}
+
+impl SyncFocus {
+    fn all() -> &'static [SyncFocus] {
+        &[
+            SyncFocus::UrlDropdown,
+            SyncFocus::PeerSidebar,
+            SyncFocus::PeerDetail,
+            SyncFocus::StatusProgress,
+            SyncFocus::Log,
+        ]
+    }
+}
+
 struct PeerInfo {
     id: String,
     pubkey: String,
@@ -118,7 +139,10 @@ struct App {
     users_state: TableState,
 
     // Sync tab
-    sync_url: String,
+    sync_urls: Vec<String>,
+    sync_url_index: usize,
+    sync_dropdown_open: bool,
+    sync_focus: SyncFocus,
     sync_status: String,
     sync_progress: f64,
     sync_running: bool,
@@ -147,7 +171,10 @@ impl App {
             relays_state: TableState::default(),
             users: Vec::new(),
             users_state: TableState::default(),
-            sync_url: std::env::var("PEER_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string()),
+            sync_urls: vec![std::env::var("PEER_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string())],
+            sync_url_index: 0,
+            sync_dropdown_open: false,
+            sync_focus: SyncFocus::UrlDropdown,
             sync_status: "Idle".to_string(),
             sync_progress: 0.0,
             sync_running: false,
@@ -202,7 +229,7 @@ impl App {
     }
 
     fn refresh_peers(&mut self) {
-        match fetch_peers_blocking(&self.sync_url) {
+        match fetch_peers_blocking(self.sync_url()) {
             Ok(entries) => {
                 self.peers = entries.into_iter().map(|e| PeerInfo {
                     id: e.peer_id,
@@ -344,6 +371,61 @@ impl App {
             self.refresh_all();
         } else {
             self.push_sync_log(format!("Progress {:.0}%", self.sync_progress * 100.0));
+        }
+    }
+
+    fn sync_url(&self) -> &str {
+        self.sync_urls.get(self.sync_url_index).map(|s| s.as_str()).unwrap_or("http://127.0.0.1:3000")
+    }
+
+    fn next_sync_focus(&mut self) {
+        let all = SyncFocus::all();
+        let idx = all.iter().position(|&f| f == self.sync_focus).unwrap_or(0);
+        self.sync_focus = all[(idx + 1) % all.len()];
+    }
+
+    fn prev_sync_focus(&mut self) {
+        let all = SyncFocus::all();
+        let idx = all.iter().position(|&f| f == self.sync_focus).unwrap_or(0);
+        self.sync_focus = all[(idx + all.len() - 1) % all.len()];
+    }
+
+    fn add_sync_url(&mut self) {
+        // Add a placeholder URL with an incremented port
+        let base = self.sync_url().trim_end_matches('/').to_string();
+        let new_url = if let Some(pos) = base.rfind(':') {
+            if let Ok(port) = base[pos + 1..].parse::<u16>() {
+                format!("{}:{}", &base[..pos], port + 1)
+            } else {
+                format!("{}:3001", base)
+            }
+        } else {
+            format!("{}:3001", base)
+        };
+        if !self.sync_urls.contains(&new_url) {
+            self.sync_urls.push(new_url);
+            self.sync_url_index = self.sync_urls.len() - 1;
+        }
+    }
+
+    fn remove_sync_url(&mut self) {
+        if self.sync_urls.len() > 1 {
+            self.sync_urls.remove(self.sync_url_index);
+            if self.sync_url_index >= self.sync_urls.len() {
+                self.sync_url_index = self.sync_urls.len() - 1;
+            }
+        }
+    }
+
+    fn next_sync_url(&mut self) {
+        if !self.sync_urls.is_empty() {
+            self.sync_url_index = (self.sync_url_index + 1) % self.sync_urls.len();
+        }
+    }
+
+    fn prev_sync_url(&mut self) {
+        if !self.sync_urls.is_empty() {
+            self.sync_url_index = (self.sync_url_index + self.sync_urls.len() - 1) % self.sync_urls.len();
         }
     }
 }
