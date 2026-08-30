@@ -32,6 +32,12 @@ fn main() {
     }
 
     fs::write(&output, contents).expect("failed to write demo/shared/app-version.generated.mjs");
+
+    // Auto-stage the generated file so version bumps don't forget it.
+    let _ = Command::new("git")
+        .args(["add", "demo/shared/app-version.generated.mjs"])
+        .current_dir(&manifest_dir)
+        .output();
 }
 
 fn _git_previous_short_hash(manifest_dir: &PathBuf) -> Option<String> {
