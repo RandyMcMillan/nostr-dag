@@ -82,16 +82,15 @@ export class GitP2PTransport {
         kinds: [PIP_MANIFEST_KIND, PIP_SLICE_KIND],
         limit: 0,
       };
-      this.relaySubs = this.relays.map((url) => {
-        const sub = this.relayPool.sub([url], filter);
-        sub.on('event', (event) => {
+      const sub = this.relayPool.subscribeMany(this.relays, filter, {
+        onevent: (event) => {
           this.handleNostrEvent(event);
-        });
-        sub.on('eose', () => {
-          this.onLog('trace', `git-p2p relay EOSE ${url}`);
-        });
-        return { url, sub };
+        },
+        oneose: () => {
+          this.onLog('trace', 'git-p2p relay EOSE');
+        },
       });
+      this.relaySubs = [sub];
       this.onLog('info', `git-p2p relay listener started on ${this.relays.length} relays`);
     } catch (e) {
       this.onLog('warn', `git-p2p relay listener failed: ${e.message}`);
@@ -284,8 +283,8 @@ export class GitP2PTransport {
   stop() {
     this.started = false;
     if (this.relayPool) {
-      this.relaySubs.forEach(({ sub }) => {
-        try { sub.unsub(); } catch {}
+      this.relaySubs.forEach((sub) => {
+        try { sub.close(); } catch {}
       });
       this.relayPool.close(this.relays);
       this.relayPool = null;
