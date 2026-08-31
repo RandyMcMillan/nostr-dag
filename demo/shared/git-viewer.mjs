@@ -2,6 +2,7 @@ import { resolveHref } from './page-path.js';
 import { APP_VERSION } from './app-version.mjs';
 
 const DEFAULT_REPO_CACHE_KEY = `nostr-dag-git-repo-cache-${APP_VERSION}`;
+const DEFAULT_REF_CACHE_KEY = 'nostr-dag-git-refs-cache-v1';
 
 export function escapeHtml(value) {
   return String(value)
@@ -33,6 +34,25 @@ export function loadRepoCache(storageKey = DEFAULT_REPO_CACHE_KEY) {
 export function saveRepoCache(cache, storageKey = DEFAULT_REPO_CACHE_KEY) {
   try {
     window.localStorage.setItem(storageKey, JSON.stringify(cache));
+  } catch {
+    // Best-effort only.
+  }
+}
+
+export function loadRefCache() {
+  try {
+    const raw = window.localStorage.getItem(DEFAULT_REF_CACHE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+export function saveRefCache(cache) {
+  try {
+    window.localStorage.setItem(DEFAULT_REF_CACHE_KEY, JSON.stringify(cache));
   } catch {
     // Best-effort only.
   }

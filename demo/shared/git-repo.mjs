@@ -1,4 +1,4 @@
-import { loadRepoCache, saveRepoCache, emptyRepoData, cacheRepoData } from './git-viewer.mjs';
+import { loadRepoCache, saveRepoCache, emptyRepoData, cacheRepoData, loadRefCache, saveRefCache } from './git-viewer.mjs';
 
 /**
  * Unified in-memory + localStorage state for a single git repository.
@@ -26,15 +26,55 @@ export class GitRepo {
   loadCache() {
     const cache = loadRepoCache();
     const cached = cache[this.name];
-    if (cached) {
-      this.data = { ...emptyRepoData(), ...cached };
+    const refCache = loadRefCache();
+    const refs = refCache[this.name];
+    if (cached || refs) {
+      this.data = { ...emptyRepoData(), ...cached, ...refs };
     }
     return this;
   }
 
-  /** Save current git data to localStorage with tag/branch merge logic. */
+  /** Save current git data to localStorage with tag/branch merge logic.
+   *  Tags/branches/serverRefs are stored in an unversioned cache so they
+   *  survive APP_VERSION bumps; everything else goes to the versioned cache.
+   */
   saveCache() {
-    cacheRepoData(this.name, this.data);
+    // Persist refs to unversioned cache so they survive app version bumps.
+    const refCache = loadRefCache();
+    const existingRefs = refCache[this.name] || {};
+    const mergedTags = [...new Set([
+      ...(this.data.tags || []),
+      ...(existingRefs.tags || []),
+    ])].sort((a, b) => a.localeCompare(b));
+    const mergedTagMap = { ...(existingRefs.tagMap || {}), ...(this.data.tagMap || {}) };
+    const mergedBranches = [...new Set([
+      ...(this.data.branches || []),
+      ...(existingRefs.branches || []),
+    ])].sort((a, b) => a.localeCompare(b));
+    const mergedServerRefs = [...(existingRefs.serverRefs || []), ...(this.data.serverRefs || [])];
+    const seenRef = new Set();
+    const dedupedServerRefs = [];
+    for (const ref of mergedServerRefs) {
+      const key = `${ref?.ref || ''}|${ref?.oid || ''}`;
+      if (seenRef.has(key)) continue;
+      seenRef.add(key);
+      dedupedServerRefs.push(ref);
+    }
+    refCache[this.name] = {
+      tags: mergedTags,
+      tagMap: mergedTagMap,
+      branches: mergedBranches,
+      serverRefs: dedupedServerRefs,
+    };
+    saveRefCache(refCache);
+
+    // Persist non-ref data to the versioned cache.
+    const dataOnly = { ...this.data };
+    delete dataOnly.tags;
+    delete dataOnly.tagMap;
+    delete dataOnly.branches;
+    delete dataOnly.serverRefs;
+    cacheRepoData(this.name, dataOnly);
   }
 
   /** True if the repo has cached tags or branches. */
