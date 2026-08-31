@@ -116,8 +116,10 @@
         footer.log('git', `proxy switched: ${previousProxy || 'none'} → none (all exhausted)`, 'warn');
       }
       activeProxy = null;
-      footer.log('git', `${contextLabel} all proxies exhausted`, 'warn');
-      throw lastError;
+      footer.log('git', `${contextLabel} all proxies exhausted — CORS proxies blocked or unavailable`, 'warn');
+      const enhanced = new Error(`${lastError.message} (CORS proxy blocked — run nostr-dag-server locally or wait for P2P peer)`);
+      enhanced.cause = lastError;
+      throw enhanced;
     }
 
     function warmFavicon(url) {
