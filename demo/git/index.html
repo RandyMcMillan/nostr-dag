@@ -191,6 +191,7 @@
       statusEl.title = text;
       const level = state === 'unavailable' ? 'warn' : state === 'checking' ? 'debug' : 'info';
       footer.log('git', text, level, state);
+      footer.setState(state, text);
     }
 
     function setRepoStatus(repoName, text) {

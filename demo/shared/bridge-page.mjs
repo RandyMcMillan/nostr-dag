@@ -353,6 +353,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
       bridgeStatusEl.innerHTML = `<span class="status-dot"></span>`;
       bridgeStatusEl.title = text;
       window.__sharedFooter?.log('bridge', text, state === 'available' ? 'info' : state, state);
+      window.__sharedFooter?.setState(state, text);
     }
 
     function escapeHtml(value) {
