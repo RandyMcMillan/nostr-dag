@@ -3,6 +3,7 @@ function normalizeState(text, fallback = 'idle') {
   if (!value) return fallback;
   if (value.includes('unavailable') || value.includes('failed') || value.includes('error')) return 'unavailable';
   if (
+    value.includes('checking') ||
     value.includes('loading') ||
     value.includes('starting') ||
     value.includes('cloning') ||
@@ -792,6 +793,9 @@ export function createLoggerFooter(root, options = {}) {
   function setState(state, text) {
     const nextState = state || normalizeState(text);
     if (currentState === 'available' && (nextState === 'checking' || nextState === 'idle')) {
+      return;
+    }
+    if (currentState === 'checking' && nextState === 'idle') {
       return;
     }
     currentState = nextState;
