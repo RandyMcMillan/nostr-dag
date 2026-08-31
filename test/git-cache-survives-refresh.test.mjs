@@ -7,8 +7,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright-core';
+import { APP_VERSION } from '../demo/shared/app-version.generated.mjs';
 
 const BASE = process.env.BASE_URL || 'http://127.0.0.1:3000';
+const CACHE_KEY = `nostr-dag-git-repo-cache-${APP_VERSION}`;
 
 test('git repo cache survives browser refresh', { timeout: 30_000 }, async (t) => {
   let browser;
@@ -27,7 +29,7 @@ test('git repo cache survives browser refresh', { timeout: 30_000 }, async (t) =
 
     // Load page and inject fake cache
     await page.goto(`${BASE}/git/`, { waitUntil: 'load', timeout: 15_000 });
-    await page.evaluate(() => {
+    await page.evaluate((key) => {
       const cache = {
         'nostr-dag': {
           tags: ['v0.13.0', 'v0.18.3', 'v0.19.0'],
@@ -42,8 +44,8 @@ test('git repo cache survives browser refresh', { timeout: 30_000 }, async (t) =
           tagMap: { 'v0.13.0': 'abc123', 'v0.18.3': 'abc123', 'v0.19.0': 'abc123' },
         },
       };
-      localStorage.setItem('nostr-dag-git-repo-cache-0.19.4', JSON.stringify(cache));
-    });
+      localStorage.setItem(key, JSON.stringify(cache));
+    }, CACHE_KEY);
 
     // Refresh and check dropdown is populated immediately
     await page.reload({ waitUntil: 'load' });

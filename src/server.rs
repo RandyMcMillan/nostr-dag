@@ -127,6 +127,7 @@ impl PeerStore {
         // /peers endpoint always has a bootstrap reference.
         entries.retain(|_, entry| {
             entry.source.as_deref() == Some("well-known")
+                || entry.source.as_deref() == Some("localhost")
                 || now.saturating_sub(entry.updated_at) < PEER_TTL_MS
         });
         let pruned = before.saturating_sub(entries.len());
