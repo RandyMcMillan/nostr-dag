@@ -72,6 +72,11 @@ export class GitRepo {
       tagsList: data.tags || [],
       selectedBranch,
       selectedTag,
+      toolbar: {
+        refreshId: this.name,
+        primaryHref: this.url,
+        primaryLabel: 'Open upstream',
+      },
     };
   }
 

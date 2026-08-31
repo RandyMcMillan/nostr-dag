@@ -44,6 +44,7 @@
     import { createGitProgressReporter } from '../shared/git-progress.mjs';
     import { cloneWithSingleBranchFallback } from '../shared/git-clone.mjs';
     import { bootstrapGitChrome, GIT_REPOS, isSafariMobile, probeRemoteHost } from '../shared/git-page.mjs';
+    import { createGitRepos } from '../shared/git-repo.mjs';
     import {
       buildSelectOptions,
       cacheRepoData,
@@ -72,6 +73,7 @@
     import { createBundleHttpClient } from '../shared/git-bundle-http.mjs';
 
     const fs = new LightningFS('git-viewer');
+    const gitRepos = createGitRepos(GIT_REPOS);
     const repoHealth = new Map();
     const repoPing = new Map();
     const repoSource = new Map();
@@ -186,10 +188,14 @@
 
     function setRepoStatus(repoName, text) {
       repoState.set(repoName, text);
+      const r = gitRepos.find((gr) => gr.name === repoName);
+      if (r) r.status = text;
     }
 
     function setRepoHealth(repoName, state) {
       repoHealth.set(repoName, state);
+      const r = gitRepos.find((gr) => gr.name === repoName);
+      if (r) r.health = state;
     }
 
     function getRepoHealth(repoName) {
@@ -198,6 +204,8 @@
 
     function setRepoPing(repoName, ms) {
       repoPing.set(repoName, ms);
+      const r = gitRepos.find((gr) => gr.name === repoName);
+      if (r) r.ping = ms;
     }
 
     function getRepoPing(repoName) {
@@ -211,40 +219,23 @@
       return 'health-idle';
     }
 
-    function createRepoCardModel(repo, data) {
-      const iconUrl = `${new URL(repo.url).origin}/favicon.ico`;
-      const selectedBranch = data.branches.includes(data.selectedRef) ? data.selectedRef : (data.branches[0] || '');
-      const selectedTag = data.tags.includes(data.selectedRef) ? data.selectedRef : '';
-      const p2pAvailable = window.__gitViewerP2pTransport?.hasRepo(repo.url) || false;
-
+    function createRepoCardModel(gitRepo) {
+      const model = gitRepo.toCardModel();
+      const p2pAvailable = window.__gitViewerP2pTransport?.hasRepo(gitRepo.url) || false;
       return {
-        repo,
-        iconUrl,
-        status: repoState.get(repo.name) || 'idle',
-        ping: getRepoPing(repo.name),
+        ...model,
         p2pAvailable,
-        source: repoSource.get(repo.name) || null,
         proxy: activeProxy,
-        ref: data.ref || 'n/a',
-        latest: data.latest || 'n/a',
-        latestHtml: renderLatestSummary(data.latest || 'n/a'),
-        selectedRef: data.selectedRef || data.ref || 'n/a',
-        branches: data.branches || [],
-        tagsList: data.tags || [],
-        selectedBranch,
-        selectedTag,
         toolbar: {
-          refreshId: repo.name,
-          primaryHref: repo.url,
-          primaryLabel: 'Open upstream',
-          secondaryHref: repoSelectionHref(repo, {
-            branch: selectedBranch || null,
-            tag: selectedTag || null,
+          ...model.toolbar,
+          secondaryHref: repoSelectionHref(model.repo, {
+            branch: model.selectedBranch || null,
+            tag: model.selectedTag || null,
           }),
           secondaryLabel: 'View repo',
-          commitsHref: repoCommitsHref(repo, {
-            branch: selectedBranch || null,
-            tag: selectedTag || null,
+          commitsHref: repoCommitsHref(model.repo, {
+            branch: model.selectedBranch || null,
+            tag: model.selectedTag || null,
           }),
         },
       };
@@ -291,7 +282,11 @@
     }
 
     function repoCard(repo, data) {
-      return renderRepoCard(createRepoCardModel(repo, data));
+      const gitRepo = gitRepos.find((gr) => gr.name === repo.name);
+      if (gitRepo) {
+        gitRepo.data = { ...gitRepo.data, ...data };
+      }
+      return renderRepoCard(createRepoCardModel(gitRepo || new (function(){ this.name=repo.name; this.url=repo.url; this.dir=repo.dir; this.data=data||emptyRepoData(); this.status='idle'; this.health='idle'; this.ping=null; this.source=null; this.proxy=null; })()));
     }
 
     function estimateRecentCommitLimit(fileCount) {
