@@ -108,6 +108,20 @@ const merge=(h,x)=>{const o=new Headers(h);for(const[k,v]of Object.entries(x))o.
 
 (From <https://gist.githubusercontent.com/RandyMcMillan/cbe978f175e69a499898a6786430040d/raw/8ea88a09dfc925cda7a83e28e92059266e7ab67b/isomorphic-git-cors-proxy.js>)
 
+## UI indicators
+
+Each repo card shows a **source pill** that tells you how the repo was fetched:
+
+| Pill | Meaning |
+|------|---------|
+| `proxy` | Fetched through a CORS proxy (localhost or public fallback). |
+| `proxy • <url>` | The specific proxy URL that succeeded. |
+| `p2p` | Fetched from a libp2p peer bundle (NIP-PIP). |
+| `local` | Using a locally cached clone with no network fetch. |
+
+A green **p2p** dot next to the status means a libp2p peer has advertised the
+repo and the viewer can try to fetch it via the peer-to-peer path.
+
 ## Long-term direction: NIP-PIP decentralisation
 
 The goal is to remove the dependency on public CORS proxies entirely.  A native
