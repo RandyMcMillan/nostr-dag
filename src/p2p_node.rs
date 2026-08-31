@@ -88,7 +88,8 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
                 .add_directive("p2p_node=info".parse()?)
-                .add_directive("nostr_dag=info".parse()?),
+                .add_directive("nostr_dag=info".parse()?)
+                .add_directive("nostr_relay_pool::relay::inner=warn".parse()?),
         )
         .try_init();
 
