@@ -150,6 +150,12 @@
     });
     const refreshBtn = document.getElementById('refreshBtn');
 
+    /**
+     * Process 1: P2P Transport Bootstrap
+     * Trigger: scheduleAfterPaint() on page load
+     * Network: Yes (connects to Nostr relays for bundle discovery)
+     * Scope: Global — sets up libp2p node and GitP2PTransport for all repos
+     */
     async function initGitP2P() {
       try {
         if (isSafariMobile()) {
@@ -583,6 +589,12 @@
       await rmrf(dir);
     }
 
+    /**
+     * Process 7 (inside ensureRepo): P2P Bundle Request
+     * Trigger: Called by refreshList/refreshDetail/refreshOneRepo for each repo
+     * Network: Yes — tries libp2p bundle first, falls back to CORS proxy clone/fetch
+     * Scope: Per repo — may clone from bundle, clone from proxy, or reuse cached clone
+     */
     async function ensureRepo(repo, route = null, { skipP2P = false, fetchAll = false } = {}) {
       const url = repo.url;
       const dir = repo.dir;
@@ -1296,6 +1308,12 @@
       });
     }
 
+    /**
+     * Process 6 (manual): Single Repo Refresh
+     * Trigger: User clicks per-card refresh button (data-refresh-repo)
+     * Network: Yes — forces fetchAll refs for one repo
+     * Scope: One repo only
+     */
     async function refreshOneRepo(repoName, { force = false, skipNetwork = false, fetchAll = false } = {}) {
       const repo = repos.find((entry) => entry.name === repoName);
       if (!repo) return;
@@ -1343,6 +1361,13 @@
       }
     }
 
+    /**
+     * Processes 3 & 4: List Refresh (cache-only + background network)
+     * Trigger: refresh({ skipNetwork }) on boot, or manual "Refresh repos" button
+     * Network: Depends on skipNetwork flag. When false, hits CORS proxy for all repos.
+     * Scope: All repos — 3 concurrent workers (CONCURRENCY = 3) process the full list.
+     * Note: This runs unconditionally even when user is on a detail view of one repo.
+     */
     async function refreshList({ force = false, skipNetwork = false, fetchAll = false } = {}) {
       try {
         const route = getRouteContext(repos);
@@ -1438,6 +1463,12 @@
       }
     }
 
+    /**
+     * Process 5: Detail Refresh
+     * Trigger: Route change to ?repo=foo&view=... or detail page load
+     * Network: Yes — calls ensureRepo + readRepo for the single visible repo
+     * Scope: One repo only
+     */
     async function refreshDetail(route, { skipNetwork = false } = {}) {
       if (!route.repo) {
         renderApp();
@@ -1474,6 +1505,11 @@
       }
     }
 
+    /**
+     * Refresh dispatcher — routes to refreshDetail or refreshList based on current URL.
+     * Trigger: Boot sequence (twice: skipNetwork=true immediate, skipNetwork=false after 3s)
+     *          and manual refresh button clicks.
+     */
     async function refresh({ skipNetwork = false } = {}) {
       const route = getRouteContext(repos);
       footer.log('git', `refresh dispatch repo=${route.repoName || 'none'} view=${route.view || 'list'} skipNetwork=${skipNetwork}`, 'debug');
@@ -1495,16 +1531,16 @@
         void refreshList({ fetchAll: true });
       }
     });
-    // Render from cache immediately so branches/tags appear without waiting for network.
+    // Process 2: Immediate Cache Render — synchronous, no network.
     const cachedValues = repos.map((repo) => {
       const gr = gitRepos.find((g) => g.name === repo.name);
       return gr?.data || emptyRepoData();
     });
     renderApp(cachedValues);
-    // First refresh: use local clone + cache only (no network) for instant UI.
+    // Process 3: First refresh from local clone + cache only (no network).
     void refresh({ skipNetwork: true });
-    // After a short delay, do a background refresh that hits the network
-    // to pick up any new tags/branches published since the last visit.
+    // Process 4: Background network refresh after 3s delay.
+    // WARNING: This unconditionally refreshes ALL repos even when on a detail view.
     setTimeout(() => refresh({ skipNetwork: false }), 3000);
   </script>
 </body>
