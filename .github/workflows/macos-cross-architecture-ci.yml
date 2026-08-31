@@ -40,22 +40,22 @@ on:
       macos_26_large:
         description: 'Include macos-26-large'
         required: false
-        default: true
+        default: false
         type: boolean
       macos_26_xlarge:
         description: 'Include macos-26-xlarge'
         required: false
-        default: true
+        default: false
         type: boolean
       macos_15_large:
         description: 'Include macos-15-large'
         required: false
-        default: true
+        default: false
         type: boolean
       macos_15_xlarge:
         description: 'Include macos-15-xlarge'
         required: false
-        default: true
+        default: false
         type: boolean
       enable_debug:
         description: 'Enable verbose logging / debug outputs'
