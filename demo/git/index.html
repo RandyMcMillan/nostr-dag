@@ -618,6 +618,7 @@
       const dir = repo.dir;
       const ensureStart = performance.now();
       footer.log('git', `ensureRepo start ${repo.name} skipP2P=${skipP2P} fetchAll=${fetchAll}`, 'debug');
+      let exists = false;
       try {
         await ensureDir(fs, '/repos');
 
@@ -639,7 +640,7 @@
           }
         }
 
-        const exists = await pathExists(fs, dir);
+        exists = await pathExists(fs, dir);
         let isValid = false;
         if (exists) {
           try {
