@@ -914,9 +914,10 @@ pub fn build_nip_pip_publication(
     relay_hints: &[String],
     threshold: usize,
     path: Option<&str>,
+    rtt_started_at_ms: Option<i64>,
 ) -> Result<NipPipPublication, NipPipPublishError> {
     let (manifest_event, slice_events) =
-        encode_payload_as_transfer_events_chained(keys, root_id, payload, threshold, None, path)?;
+        encode_payload_as_transfer_events_chained(keys, root_id, payload, threshold, rtt_started_at_ms, path)?;
     let manifest_message =
         encode_bridge_message(&manifest_event, "nostr->libp2p", relay_hints)?;
 
@@ -971,7 +972,8 @@ async fn publish_pip_payload(
         runtime_keys.public_key(),
         native_now_ms()
     );
-    match build_nip_pip_publication(runtime_keys, &root_id, payload, &[], 32768, path) {
+    let rtt_start = native_now_ms();
+    match build_nip_pip_publication(runtime_keys, &root_id, payload, &[], 32768, path, Some(rtt_start)) {
         Ok(publication) => {
             let NipPipPublication {
                 root_id,
@@ -1711,6 +1713,7 @@ mod tests {
             b"hello nip-pip network",
             &[],
             8,
+            None,
             None,
         )
         .unwrap();
