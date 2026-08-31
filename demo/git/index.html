@@ -25,7 +25,7 @@
   <header id="sharedHeader"></header>
   <main class="page-content">
 
-  <div class="panel">
+  <div class="panel" id="repoPanel">
     <div class="row">
       <button id="refreshBtn" type="button">Refresh repos</button>
       <span id="status" class="status status-idle" title="Starting..."><span class="status-dot"></span></span>
@@ -149,6 +149,7 @@
       footer.log('git', `unhandled rejection: ${event.reason?.message || event.reason}`, 'error', 'unavailable');
     });
     const refreshBtn = document.getElementById('refreshBtn');
+    const repoPanel = document.getElementById('repoPanel');
 
     /**
      * Process 1a: P2P Transport Bootstrap (original, preserved)
@@ -1247,6 +1248,7 @@
     function renderApp(results = null) {
       const route = getRouteContext(repos);
       footer.log('git', `renderApp repo=${route.repoName || 'none'} view=${route.view || 'list'}`, 'debug');
+      if (repoPanel) repoPanel.style.display = route.repo ? 'none' : '';
       if (route.repo) {
         const gr = gitRepos.find((g) => g.name === route.repo.name);
         const data = results && !Array.isArray(results) ? results : (gr?.data || emptyRepoData());
