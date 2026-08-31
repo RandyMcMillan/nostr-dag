@@ -44,7 +44,7 @@
     import { createGitProgressReporter } from '../shared/git-progress.mjs';
     import { cloneWithSingleBranchFallback } from '../shared/git-clone.mjs';
     import { bootstrapGitChrome, GIT_REPOS, isSafariMobile, probeRemoteHost } from '../shared/git-page.mjs';
-    import { createGitRepos } from '../shared/git-repo.mjs';
+    import { createGitRepos, GitRepo } from '../shared/git-repo.mjs';
     import {
       buildSelectOptions,
       cacheRepoData,
@@ -285,8 +285,12 @@
       const gitRepo = gitRepos.find((gr) => gr.name === repo.name);
       if (gitRepo) {
         gitRepo.data = { ...gitRepo.data, ...data };
+        return renderRepoCard(createRepoCardModel(gitRepo));
       }
-      return renderRepoCard(createRepoCardModel(gitRepo || new (function(){ this.name=repo.name; this.url=repo.url; this.dir=repo.dir; this.data=data||emptyRepoData(); this.status='idle'; this.health='idle'; this.ping=null; this.source=null; this.proxy=null; })()));
+      // Defensive fallback — should never happen because gitRepos is created from GIT_REPOS.
+      const fallback = new GitRepo(repo);
+      if (data) fallback.data = { ...fallback.data, ...data };
+      return renderRepoCard(createRepoCardModel(fallback));
     }
 
     function estimateRecentCommitLimit(fileCount) {
