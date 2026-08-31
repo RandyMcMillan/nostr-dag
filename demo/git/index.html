@@ -1346,7 +1346,7 @@
     async function refreshList({ force = false, skipNetwork = false, fetchAll = false } = {}) {
       try {
         const route = getRouteContext(repos);
-        const hasCachedData = gitRepos.some((gr) => gr.hasCachedCommits);
+        const hasCachedData = gitRepos.some((gr) => gr.hasCachedCommits || gr.hasCachedRefs);
         // Show green immediately when cached data exists; background refresh updates cards.
         setStatus(hasCachedData ? 'ready (refreshing)' : 'loading repos...', hasCachedData ? 'available' : 'checking');
         footer.log('git', `refreshing ${repos.length} repos force=${force} fetchAll=${fetchAll} skipNetwork=${skipNetwork}`, 'debug');
