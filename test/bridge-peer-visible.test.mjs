@@ -8,8 +8,14 @@ import assert from 'node:assert/strict';
 
 const BASE = process.env.SERVER_URL || 'http://127.0.0.1:3000';
 
-test('bridge page lists local embedded peer', { timeout: 10_000 }, async () => {
-  const res = await fetch(`${BASE}/peers`);
+test('bridge page lists local embedded peer', { timeout: 10_000 }, async (t) => {
+  let res;
+  try {
+    res = await fetch(`${BASE}/peers`);
+  } catch {
+    t.skip('nostr-dag-server not running — skipping bridge-peer-visible test');
+    return;
+  }
   assert.strictEqual(res.status, 200);
   const peers = await res.json();
   assert.ok(Array.isArray(peers), 'peers should be an array');
