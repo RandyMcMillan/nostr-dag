@@ -357,6 +357,7 @@ function createStaticServer(bareRepoBundleBytes = null, bareRepoRelayUrls = []) 
         window.__p2pPeerId = node.peerId.toString();
         window.__p2pPeerIdMatchesExpected = window.__p2pPeerId === window.__expectedPeerId;
         window.__p2pReady = true;
+        await node.services.pubsub.subscribe('nostr-dag-bridge');
         node.services.pubsub.addEventListener('message', (evt) => {
           const text = new TextDecoder().decode(evt.detail.data);
           window.__p2pReceived.push(text);

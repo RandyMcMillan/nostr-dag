@@ -82,7 +82,7 @@ test('git page renders repo cards with tags in Chromium', { timeout: 120_000 }, 
     // in a headless test and are not code defects.
     const criticalErrors = errors.filter((e) => {
       if (e.includes('Source map') || e.includes('.map')) return false;
-      if (/restricted:|blocked:|not authorized|connection timed out|invalid:|replaced:|publish timed out/i.test(e)) return false;
+      if (/restricted:|blocked:|not authorized|connection timed out|invalid:|replaced:|publish timed out|pow:/i.test(e)) return false;
       return true;
     });
     assert.strictEqual(criticalErrors.length, 0, `no critical errors expected, got: ${criticalErrors.join('; ')}`);
