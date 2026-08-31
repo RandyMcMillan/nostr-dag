@@ -65,6 +65,9 @@ jobs:
           cp demo/shared/*.js demo/shared/*.mjs site/shared/
           mkdir -p site/vendor
           cp demo/vendor/* site/vendor/
+          cp demo/.nojekyll site/.nojekyll
+          mkdir -p site/.well-known
+          cp demo/.well-known/nostr.json site/.well-known/nostr.json
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
