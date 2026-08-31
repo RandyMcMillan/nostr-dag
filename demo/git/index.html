@@ -158,6 +158,9 @@
      */
     async function initGitP2P() {
       try {
+        // TEMP DISABLED for troubleshooting /git/ page without P2P.
+        footer.log('libp2p', 'P2P bootstrap disabled (troubleshoot mode)', 'info', 'idle');
+        return;
         if (isSafariMobile()) {
           footer.log('libp2p', 'skipping libp2p bootstrap on Safari mobile', 'info', 'idle');
           return;
@@ -604,9 +607,10 @@
         await ensureDir(fs, '/repos');
 
         // Try libp2p bundle fetch first (always request; transport handles cache hits)
+        // TEMP DISABLED for troubleshooting /git/ page without P2P.
         let bundlePath = null;
         const transport = window.__gitViewerP2pTransport;
-        if (transport && !skipP2P) {
+        if (false && transport && !skipP2P) {
           try {
             setRepoStatus(repo.name, 'fetching p2p bundle...');
             footer.log('git', `${repo.name} requesting bundle via libp2p`, 'info');
