@@ -574,11 +574,11 @@
       await rmrf(dir);
     }
 
-    async function ensureRepo(repo, route = null, { skipP2P = false } = {}) {
+    async function ensureRepo(repo, route = null, { skipP2P = false, fetchAll = false } = {}) {
       const url = repo.url;
       const dir = repo.dir;
       const ensureStart = performance.now();
-      footer.log('git', `ensureRepo start ${repo.name} skipP2P=${skipP2P}`, 'debug');
+      footer.log('git', `ensureRepo start ${repo.name} skipP2P=${skipP2P} fetchAll=${fetchAll}`, 'debug');
       try {
         await ensureDir(fs, '/repos');
 
@@ -668,8 +668,8 @@
 
       const cache = loadRepoCache();
       const hasCachedRefs = cache[repo.name]?.tags?.length > 0 || cache[repo.name]?.branches?.length > 0;
-      if (!exists || !hasCachedRefs) {
-        setRepoStatus(repo.name, 'fetching tags...');
+      if (!exists || !hasCachedRefs || fetchAll) {
+        setRepoStatus(repo.name, fetchAll ? 'syncing all refs...' : 'fetching tags...');
         const fetchStart = performance.now();
         footer.log('git', `${repo.name} fetching tags${route ? ` (${progressContextLabel(route)})` : ''}`, 'debug');
         await fetchRepoRefs(repo, route, (progress) => {
@@ -1220,7 +1220,7 @@
 
       reposEl.querySelectorAll('[data-refresh-repo]').forEach((button) => {
         button.addEventListener('click', () => {
-          void refreshOneRepo(button.getAttribute('data-refresh-repo'), { force: true });
+          void refreshOneRepo(button.getAttribute('data-refresh-repo'), { fetchAll: true });
         });
       });
       reposEl.querySelectorAll('[data-view-repo]').forEach((button) => {
@@ -1280,11 +1280,11 @@
       });
     }
 
-    async function refreshOneRepo(repoName, { force = false, skipNetwork = false } = {}) {
+    async function refreshOneRepo(repoName, { force = false, skipNetwork = false, fetchAll = false } = {}) {
       const repo = repos.find((entry) => entry.name === repoName);
       if (!repo) return;
       const route = getRouteContext(repos).repo?.name === repo.name ? getRouteContext(repos) : null;
-      footer.log('git', `refreshOneRepo start ${repo.name} force=${force} skipNetwork=${skipNetwork} route=${route ? 'yes' : 'no'}`, 'debug');
+      footer.log('git', `refreshOneRepo start ${repo.name} force=${force} fetchAll=${fetchAll} skipNetwork=${skipNetwork} route=${route ? 'yes' : 'no'}`, 'debug');
       try {
         setRepoStatus(repo.name, 'refreshing...');
         if (route) setRepoHealth(repo.name, 'checking');
@@ -1295,7 +1295,7 @@
         }
         const probeStart = performance.now();
         const probe = route ? probeRemoteHost(repo).catch(() => ({ ok: false, durationMs: null })) : null;
-        await ensureRepo(repo, route, { skipP2P: force });
+        await ensureRepo(repo, route, { skipP2P: force, fetchAll });
         footer.log('git', `refreshOneRepo ensure done ${repo.name} proxy=${activeProxy || 'none'}`, 'debug');
         const data = await readRepo(repo, route, { skipNetwork });
         cacheRepoData(repo.name, data);
@@ -1323,14 +1323,14 @@
       }
     }
 
-    async function refreshList({ force = false, skipNetwork = false } = {}) {
+    async function refreshList({ force = false, skipNetwork = false, fetchAll = false } = {}) {
       try {
         const route = getRouteContext(repos);
         const cache = loadRepoCache();
         const hasCachedData = repos.some((repo) => cache[repo.name]?.commits?.length > 0);
         // Show green immediately when cached data exists; background refresh updates cards.
         setStatus(hasCachedData ? 'ready (refreshing)' : 'loading repos...', hasCachedData ? 'available' : 'checking');
-        footer.log('git', `refreshing ${repos.length} repos force=${force} skipNetwork=${skipNetwork}`, 'debug');
+        footer.log('git', `refreshing ${repos.length} repos force=${force} fetchAll=${fetchAll} skipNetwork=${skipNetwork}`, 'debug');
         repos.forEach((repo) => {
           setRepoStatus(repo.name, 'refreshing...');
           setRepoHealth(repo.name, 'checking');
@@ -1357,7 +1357,7 @@
               }
               setRepoPing(repo.name, null);
               const probe = probeRemoteHost(repo).catch(() => ({ ok: false, durationMs: null }));
-              await ensureRepo(repo, repoRoute, { skipP2P: force });
+              await ensureRepo(repo, repoRoute, { skipP2P: force, fetchAll });
               const data = await readRepo(repo, repoRoute, { skipNetwork });
               const probeOk = await probe;
               const probeMs = probeOk?.durationMs ?? null;
@@ -1462,9 +1462,9 @@
     refreshBtn.addEventListener('click', () => {
       const route = getRouteContext(repos);
       if (route.repo) {
-        void refreshOneRepo(route.repo.name, { force: true });
+        void refreshOneRepo(route.repo.name, { fetchAll: true });
       } else {
-        void refreshList({ force: true });
+        void refreshList({ fetchAll: true });
       }
     });
     // Render from cache immediately so branches/tags appear without waiting for network.
