@@ -84,13 +84,13 @@ fn detect_local_ip() -> Option<std::net::IpAddr> {
 #[cfg(feature = "p2p")]
 /// Run the native libp2p peer used by the `p2p-node` binary.
 pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    tracing_subscriber::fmt()
+    let _ = tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
                 .add_directive("p2p_node=info".parse()?)
                 .add_directive("nostr_dag=info".parse()?),
         )
-        .init();
+        .try_init();
 
     let local_key = deterministic_native_identity_keypair();
     let runtime_keys = deterministic_native_nostr_keys();

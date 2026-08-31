@@ -7,15 +7,13 @@
 use std::env;
 use std::io;
 use std::path::{Component, Path, PathBuf};
-use std::process::Stdio;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use tokio::fs;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::process::{Child, Command};
 use tokio::sync::{watch, Semaphore};
 use tokio::task::JoinSet;
 use tracing::{debug, error, info, trace};
@@ -170,143 +168,41 @@ pub async fn run_server(
     );
     let (shutdown_tx, shutdown_rx) = watch::channel(());
 
-    // Optionally start a full-stack native libp2p peer (p2p-node binary) so
-    // there is always another peer on the network with full protocol support.
-    // Enable with embed_p2p=true.
+    // Optionally start a full-stack native libp2p peer in-process so there is
+    // always another peer on the network with full protocol support.
+    // Enable with --p2p or P2P_ENABLE=1.
     #[cfg(feature = "p2p")]
-    let mut p2p_child: Option<Child> = None;
+    let mut p2p_task: Option<tokio::task::JoinHandle<()>> = None;
     #[cfg(feature = "p2p")]
     if embed_p2p {
-        if let Some(bin_path) = find_p2p_node_binary() {
-            info!(?bin_path, "spawning full-stack p2p-node peer");
-            let mut cmd = Command::new(&bin_path);
-            cmd.env_remove("P2P_ENABLE")
-                .env_remove("HOST")
-                .env_remove("PORT")
-                .stdout(Stdio::piped())
-                .stderr(Stdio::inherit());
-            if let Ok(relay) = env::var("P2P_RELAY") {
-                if !relay.trim().is_empty() {
-                    cmd.env("P2P_RELAY", relay);
-                }
+        info!("starting embedded full-stack p2p-node peer");
+        // Default repos to mirror via NIP-PIP so browsers can discover bundles
+        // without relying on public CORS proxies.
+        const DEFAULT_MIRROR_REPOS: &str = concat!(
+            "https://github.com/RandyMcMillan/nostr-dag,",
+            "https://github.com/isomorphic-git/isomorphic-git,",
+            "https://github.com/nbd-wtf/nostr-tools,",
+            "https://github.com/libp2p/js-libp2p,",
+            "https://github.com/ChainSafe/js-libp2p-noise,",
+            "https://github.com/ChainSafe/js-libp2p-yamux,",
+            "https://github.com/ChainSafe/discv5,",
+            "https://github.com/isomorphic-git/lightning-fs,",
+            "https://github.com/w-s-bitcoin/entropylab,",
+            "https://github.com/nostr-protocol/nips",
+        );
+        let mirror_repos = env::var("GIT_MIRROR_REPOS")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| DEFAULT_MIRROR_REPOS.to_string());
+        env::set_var("GIT_MIRROR_REPOS", mirror_repos);
+        p2p_task = Some(tokio::spawn(async move {
+            if let Err(e) = crate::run_native_p2p_node().await {
+                tracing::error!(?e, "embedded p2p-node exited with error");
             }
-            // Default repos to mirror via NIP-PIP so browsers can discover bundles
-            // without relying on public CORS proxies.
-            const DEFAULT_MIRROR_REPOS: &str = concat!(
-                "https://github.com/RandyMcMillan/nostr-dag,",
-                "https://github.com/isomorphic-git/isomorphic-git,",
-                "https://github.com/nbd-wtf/nostr-tools,",
-                "https://github.com/libp2p/js-libp2p,",
-                "https://github.com/ChainSafe/js-libp2p-noise,",
-                "https://github.com/ChainSafe/js-libp2p-yamux,",
-                "https://github.com/ChainSafe/discv5,",
-                "https://github.com/isomorphic-git/lightning-fs,",
-                "https://github.com/w-s-bitcoin/entropylab,",
-                "https://github.com/nostr-protocol/nips",
-            );
-            let mirror_repos = env::var("GIT_MIRROR_REPOS")
-                .ok()
-                .filter(|s| !s.trim().is_empty())
-                .unwrap_or_else(|| DEFAULT_MIRROR_REPOS.to_string());
-            cmd.env("GIT_MIRROR_REPOS", mirror_repos);
-            match cmd.spawn()
-            {
-                Ok(mut child) => {
-                    let peer_store_for_child = Arc::clone(&peer_store);
-                    if let Some(stdout) = child.stdout.take() {
-                        tokio::spawn(async move {
-                            let reader = BufReader::new(stdout);
-                            let mut lines = reader.lines();
-                            let mut peer_id = String::new();
-                            let mut peer_addrs: Vec<String> = Vec::new();
-                            while let Ok(Some(line)) = lines.next_line().await {
-                                let trimmed = line.trim();
-                                if let Some(id) = trimmed.strip_prefix("READY peer_id=") {
-                                    peer_id = id.split_whitespace().next().unwrap_or(id).to_string();
-                                    let entry = PeerEntry {
-                                        peer_id: peer_id.clone(),
-                                        kind: "native".to_string(),
-                                        path: "/".to_string(),
-                                        detail: Some(trimmed.to_string()),
-                                        source: Some("localhost".to_string()),
-                                        updated_at: now_ms(),
-                                    };
-                                    peer_store_for_child.upsert(entry);
-                                }
-                                if trimmed.starts_with("LISTENING ") {
-                                    if let Some(addr) = trimmed.strip_prefix("LISTENING ") {
-                                        if !peer_addrs.iter().any(|a| a == addr) {
-                                            peer_addrs.push(addr.to_string());
-                                        }
-                                    }
-                                    if !peer_id.is_empty() {
-                                        let entry = PeerEntry {
-                                            peer_id: peer_id.clone(),
-                                            kind: "native".to_string(),
-                                            path: "/".to_string(),
-                                            detail: Some(format!("addrs={}", peer_addrs.join(", "))),
-                                            source: Some("localhost".to_string()),
-                                            updated_at: now_ms(),
-                                        };
-                                        peer_store_for_child.upsert(entry);
-                                    }
-                                }
-                                // Parse remote peer discovery events from p2p-node stdout
-                                // and upsert them as distinct PeerEntry objects so the /peers
-                                // endpoint (and db-viewer) can see real gossipsub/mdns/identify peers.
-                                if let Some(discovered) = parse_peer_discovery(trimmed) {
-                                    peer_store_for_child.upsert(discovered);
-                                }
-
-                                let is_peer_line = trimmed.starts_with("READY ")
-                                    || trimmed.starts_with("LISTENING ")
-                                    || trimmed.starts_with("DIAL ")
-                                    || trimmed.starts_with("STATUS ")
-                                    || trimmed.starts_with("BOOTSTRAP ")
-                                    || trimmed.starts_with("DETECTED ")
-                                    || trimmed.starts_with("IDENTIFIED ")
-                                    || trimmed.starts_with("SUBSCRIBED ")
-                                    || trimmed.starts_with("CONNECTION ")
-                                    || trimmed.starts_with("DISCONNECTED ")
-                                    || trimmed.starts_with("PEER_EXTERNAL_ADDR ")
-                                    || trimmed.starts_with("PUBLIC_ADDR ")
-                                    || trimmed.starts_with("HOLE_PUNCH ")
-                                    || trimmed.starts_with("RELAY ")
-                                    || trimmed.starts_with("MIRROR ")
-                                    || trimmed.starts_with("PIP ")
-                                    || trimmed.starts_with("PRESENCE ")
-                                    || trimmed.starts_with("NOSTR ");
-                                if is_peer_line {
-                                    println!("[peer] {trimmed}");
-                                    // Refresh the local peer timestamp so it isn't pruned
-                                    // while the p2p-node is still alive.
-                                    if !peer_id.is_empty() {
-                                        peer_store_for_child.upsert(PeerEntry {
-                                            peer_id: peer_id.clone(),
-                                            kind: "native".to_string(),
-                                            path: "/".to_string(),
-                                            detail: Some(trimmed.to_string()),
-                                            source: Some("localhost".to_string()),
-                                            updated_at: now_ms(),
-                                        });
-                                    }
-                                }
-                                debug!(target: "p2p-node", "{trimmed}");
-                            }
-                        });
-                    }
-                    p2p_child = Some(child);
-                }
-                Err(e) => {
-                    tracing::warn!(?e, ?bin_path, "failed to spawn p2p-node binary");
-                }
-            }
-        } else {
-            tracing::warn!("p2p-node binary not found; set P2P_ENABLE=1 after building the p2p-node target");
-        }
+        }));
     } else {
         #[cfg(feature = "p2p")]
-        println!("[peer] P2P feature enabled but P2P_ENABLE=1 not set; peer not started");
+        println!("[peer] P2P feature enabled but embed_p2p=false; peer not started");
     }
 
     let addr = format!("{host}:{port}");
@@ -360,10 +256,10 @@ pub async fn run_server(
     }
 
     #[cfg(feature = "p2p")]
-    if let Some(mut child) = p2p_child {
-        info!("terminating p2p-node peer");
-        let _ = child.start_kill();
-        let _ = child.wait().await;
+    if let Some(task) = p2p_task {
+        info!("aborting embedded p2p-node peer");
+        task.abort();
+        let _ = task.await;
     }
 
     info!("shutdown complete");
@@ -946,89 +842,6 @@ fn extract_nostr_pubkey(text: &str) -> Option<String> {
     }
 }
 
-/// Parse structured peer-discovery lines emitted by the p2p-node binary.
-/// Lines like `DETECTED wasm-topic peer peer=12D3... addr=/ip4/...` or
-/// `IDENTIFIED wasm-topic peer peer=12D3... addrs=/ip4/... | /ip4/...`
-/// are turned into `PeerEntry` objects so the server's `/peers` endpoint
-/// can surface real gossipsub / mDNS / identify peers to db-viewer.
-#[cfg(feature = "p2p")]
-fn parse_peer_discovery(line: &str) -> Option<PeerEntry> {
-    if line.starts_with("DETECTED ") {
-        // DETECTED wasm-topic peer peer={id} addr={addr}
-        // DETECTED native-topic peer peer={id} addr={addr}
-        let kind = if line.contains("wasm-topic") {
-            "wasm"
-        } else {
-            "native"
-        };
-        let peer_id = extract_after(line, "peer=")?;
-        let addr = extract_after(line, "addr=")?;
-        return Some(PeerEntry {
-            peer_id: peer_id.to_string(),
-            kind: kind.to_string(),
-            path: addr.to_string(),
-            detail: Some(line.to_string()),
-            source: Some("gossipsub".to_string()),
-            updated_at: now_ms(),
-        });
-    }
-
-    if line.starts_with("IDENTIFIED ") {
-        // IDENTIFIED wasm-topic peer peer={id} addrs={addr1} | {addr2}
-        let kind = if line.contains("wasm-topic") { "wasm" } else { "native" };
-        let peer_id = extract_after(line, "peer=")?;
-        let addrs = extract_after(line, "addrs=")?;
-        let first_addr = addrs.split(" | ").next().unwrap_or(addrs);
-        return Some(PeerEntry {
-            peer_id: peer_id.to_string(),
-            kind: kind.to_string(),
-            path: first_addr.to_string(),
-            detail: Some(addrs.to_string()),
-            source: Some("identify".to_string()),
-            updated_at: now_ms(),
-        });
-    }
-
-    if line.starts_with("PEER_EXTERNAL_ADDR ") {
-        // PEER_EXTERNAL_ADDR peer={id} addr={addr}
-        let peer_id = extract_after(line, "peer=")?;
-        let addr = extract_after(line, "addr=")?;
-        return Some(PeerEntry {
-            peer_id: peer_id.to_string(),
-            kind: "native".to_string(),
-            path: addr.to_string(),
-            detail: Some(line.to_string()),
-            source: Some("autonat".to_string()),
-            updated_at: now_ms(),
-        });
-    }
-
-    if line.starts_with("SUBSCRIBED ") {
-        // SUBSCRIBED peer={id} topic_peers={count}
-        let peer_id = extract_after(line, "peer=")?;
-        return Some(PeerEntry {
-            peer_id: peer_id.to_string(),
-            kind: "native".to_string(),
-            path: "/".to_string(),
-            detail: Some(line.to_string()),
-            source: Some("gossipsub".to_string()),
-            updated_at: now_ms(),
-        });
-    }
-
-    None
-}
-
-/// Helper: extract the value after `prefix` up to the next whitespace.
-#[cfg(feature = "p2p")]
-fn extract_after<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
-    let start = text.find(prefix)? + prefix.len();
-    let rest = &text[start..];
-    let end = rest.find(' ').unwrap_or(rest.len());
-    let value = &rest[..end];
-    if value.is_empty() { None } else { Some(value) }
-}
-
 // ---------------------------------------------------------------------------
 // Event store handlers
 // ---------------------------------------------------------------------------
@@ -1254,23 +1067,6 @@ fn is_disconnect_error(err: &io::Error) -> bool {
         err.kind(),
         io::ErrorKind::BrokenPipe | io::ErrorKind::ConnectionReset | io::ErrorKind::UnexpectedEof
     )
-}
-
-/// Locate the `p2p-node` binary in the same directory as the current executable
-/// (e.g. `target/debug/` or `target/release/`).
-fn find_p2p_node_binary() -> Option<PathBuf> {
-    let exe = std::env::current_exe().ok()?;
-    let dir = exe.parent()?;
-    let candidate = dir.join(if cfg!(windows) { "p2p-node.exe" } else { "p2p-node" });
-    if candidate.is_file() {
-        return Some(candidate);
-    }
-    // Fallback: check one level up (debug/release sibling)
-    let sibling = dir.parent()?.join(if dir.file_name()? == "debug" { "release" } else { "debug" }).join(if cfg!(windows) { "p2p-node.exe" } else { "p2p-node" });
-    if sibling.is_file() {
-        return Some(sibling);
-    }
-    None
 }
 
 async fn route_path(site_dir: &str, path: &str) -> Result<(Vec<u8>, &'static str), RouteError> {
