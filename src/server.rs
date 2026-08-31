@@ -123,7 +123,12 @@ impl PeerStore {
         let mut entries = self.entries.lock().expect("peer store poisoned");
         let now = now_ms();
         let before = entries.len();
-        entries.retain(|_, entry| now.saturating_sub(entry.updated_at) < PEER_TTL_MS);
+        // Never prune well-known peers (e.g. gh-pages deployment) so the
+        // /peers endpoint always has a bootstrap reference.
+        entries.retain(|_, entry| {
+            entry.source.as_deref() == Some("well-known")
+                || now.saturating_sub(entry.updated_at) < PEER_TTL_MS
+        });
         let pruned = before.saturating_sub(entries.len());
         if pruned > 0 {
             tracing::debug!("pruned {} stale peer(s)", pruned);
@@ -195,6 +200,23 @@ pub async fn run_server(
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(|| DEFAULT_MIRROR_REPOS.to_string());
         env::set_var("GIT_MIRROR_REPOS", mirror_repos);
+        // Seed the peer store with the local embedded peer so /peers and
+        // db-viewer always show it even before gossipsub discovers anyone.
+        #[cfg(feature = "p2p")]
+        {
+            let local_peer_id = crate::p2p::deterministic_native_identity_keypair()
+                .public()
+                .to_peer_id()
+                .to_string();
+            peer_store.upsert(PeerEntry {
+                peer_id: local_peer_id.clone(),
+                kind: "native".to_string(),
+                path: "/".to_string(),
+                detail: Some(format!("embedded peer {local_peer_id}")),
+                source: Some("localhost".to_string()),
+                updated_at: now_ms(),
+            });
+        }
         p2p_task = Some(tokio::spawn(async move {
             if let Err(e) = crate::run_native_p2p_node().await {
                 tracing::error!(?e, "embedded p2p-node exited with error");
