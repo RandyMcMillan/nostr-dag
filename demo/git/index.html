@@ -862,8 +862,10 @@
     }
 
     function renderRepoList(results = null) {
-      const cache = loadRepoCache();
-      const data = results || repos.map((repo) => cache[repo.name] || emptyRepoData());
+      const data = results || repos.map((repo) => {
+        const gr = gitRepos.find((g) => g.name === repo.name);
+        return gr?.data || emptyRepoData();
+      });
       reposEl.innerHTML = repos.map((repo, i) => repoCard(repo, data[i])).join('');
     }
 
@@ -1199,8 +1201,8 @@
       const route = getRouteContext(repos);
       footer.log('git', `renderApp repo=${route.repoName || 'none'} view=${route.view || 'list'}`, 'debug');
       if (route.repo) {
-        const cache = loadRepoCache();
-        const data = results && !Array.isArray(results) ? results : (cache[route.repo.name] || emptyRepoData());
+        const gr = gitRepos.find((g) => g.name === route.repo.name);
+        const data = results && !Array.isArray(results) ? results : (gr?.data || emptyRepoData());
         reposEl.className = '';
         reposEl.innerHTML = route.view === 'commit'
           ? renderCommitDetail(route.repo, data, route)
@@ -1293,7 +1295,11 @@
         await ensureRepo(repo, route, { skipP2P: force, fetchAll });
         footer.log('git', `refreshOneRepo ensure done ${repo.name} proxy=${activeProxy || 'none'}`, 'debug');
         const data = await readRepo(repo, route, { skipNetwork });
-        cacheRepoData(repo.name, data);
+        const gitRepo = gitRepos.find((gr) => gr.name === repo.name);
+        if (gitRepo) {
+          gitRepo.data = data;
+          gitRepo.saveCache();
+        }
         footer.log('git', `refreshOneRepo read done ${repo.name} tags=${data.tags.length}`, 'debug');
         if (route) {
           const probeOk = await probe;
@@ -1304,8 +1310,8 @@
           footer.log('git', `probe ${repo.name} ${probeOk?.ok ? 'ok' : 'fail'} ping=${probeMs ?? 'n/a'} ms gitOk=${gitOk}`, 'debug');
         }
         renderApp(repos.map((entry) => {
-          const cache = loadRepoCache();
-          return entry.name === repo.name ? data : (cache[entry.name] || emptyRepoData());
+          const gr = gitRepos.find((g) => g.name === entry.name);
+          return entry.name === repo.name ? data : (gr?.data || emptyRepoData());
         }));
         setRepoStatus(repo.name, 'ready');
         footer.log('git', `refreshOneRepo complete ${repo.name}`, 'debug');
@@ -1321,8 +1327,7 @@
     async function refreshList({ force = false, skipNetwork = false, fetchAll = false } = {}) {
       try {
         const route = getRouteContext(repos);
-        const cache = loadRepoCache();
-        const hasCachedData = repos.some((repo) => cache[repo.name]?.commits?.length > 0);
+        const hasCachedData = gitRepos.some((gr) => gr.hasCachedCommits);
         // Show green immediately when cached data exists; background refresh updates cards.
         setStatus(hasCachedData ? 'ready (refreshing)' : 'loading repos...', hasCachedData ? 'available' : 'checking');
         footer.log('git', `refreshing ${repos.length} repos force=${force} fetchAll=${fetchAll} skipNetwork=${skipNetwork}`, 'debug');
@@ -1338,7 +1343,6 @@
         const dataByRepo = new Map();
 
         // Process repos concurrently so the list status turns green quickly.
-        // localStorage cache writes are batched at the end to avoid RMW races.
         const CONCURRENCY = 3;
         const queue = orderedRepos.slice();
         async function worker() {
@@ -1362,12 +1366,20 @@
               setRepoStatus(repo.name, 'ready');
               footer.log('git', `ready ${repo.name} tags=${data.tags.length}`, 'info', 'available');
               dataByRepo.set(repo.name, data);
+              const gitRepo = gitRepos.find((gr) => gr.name === repo.name);
+              if (gitRepo) {
+                gitRepo.data = data;
+                gitRepo.saveCache();
+              }
               // Incrementally update the list view and status as each repo finishes.
               if (dataByRepo.size > 0) {
                 setStatus(`${dataByRepo.size}/${repos.length} repos ready`, 'available');
               }
               if (!route.repo) {
-                const incrementalValues = repos.map((r) => dataByRepo.get(r.name) || cache[r.name] || emptyRepoData());
+                const incrementalValues = repos.map((r) => {
+                  const gr = gitRepos.find((g) => g.name === r.name);
+                  return dataByRepo.get(r.name) || gr?.data || emptyRepoData();
+                });
                 renderApp(incrementalValues);
               }
               if (repoRoute) {
@@ -1384,15 +1396,13 @@
         }
         await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
 
-        // Batch cache write to avoid localStorage read-modify-write races.
-        for (const [repoName, data] of dataByRepo) {
-          cacheRepoData(repoName, data);
-        }
-        // Re-load the cache so the in-memory variable reflects the merged data
-        // that cacheRepoData persisted (tags/serverRefs accumulate across refreshes).
-        const mergedCache = loadRepoCache();
+        // Reload from localStorage so merged tags/branches/serverRefs are reflected.
+        gitRepos.forEach((gr) => gr.loadCache());
 
-        const values = repos.map((repo) => dataByRepo.get(repo.name) || mergedCache[repo.name] || emptyRepoData());
+        const values = repos.map((repo) => {
+          const gr = gitRepos.find((g) => g.name === repo.name);
+          return dataByRepo.get(repo.name) || gr?.data || emptyRepoData();
+        });
         renderApp(values);
         const readyCount = dataByRepo.size;
         const statusSummary = repos.map((repo) => {
@@ -1423,7 +1433,11 @@
         await ensureRepo(route.repo, route);
         footer.log('git', `refreshDetail ensure done ${route.repo.name}`, 'debug');
         const data = await readRepo(route.repo, route, { skipNetwork });
-        cacheRepoData(route.repo.name, data);
+        const gitRepo = gitRepos.find((gr) => gr.name === route.repo.name);
+        if (gitRepo) {
+          gitRepo.data = data;
+          gitRepo.saveCache();
+        }
         footer.log('git', `refreshDetail read done ${route.repo.name} tags=${data.tags.length}`, 'debug');
         const available = await probe;
         const probeMs = available?.durationMs ?? null;
@@ -1463,8 +1477,10 @@
       }
     });
     // Render from cache immediately so branches/tags appear without waiting for network.
-    const cache = loadRepoCache();
-    const cachedValues = repos.map((repo) => cache[repo.name] || emptyRepoData());
+    const cachedValues = repos.map((repo) => {
+      const gr = gitRepos.find((g) => g.name === repo.name);
+      return gr?.data || emptyRepoData();
+    });
     renderApp(cachedValues);
     // First refresh: use local clone + cache only (no network) for instant UI.
     void refresh({ skipNetwork: true });

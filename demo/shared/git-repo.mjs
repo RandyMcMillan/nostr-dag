@@ -1,4 +1,4 @@
-import { loadRepoCache, saveRepoCache, emptyRepoData } from './git-viewer.mjs';
+import { loadRepoCache, saveRepoCache, emptyRepoData, cacheRepoData } from './git-viewer.mjs';
 
 /**
  * Unified in-memory + localStorage state for a single git repository.
@@ -32,11 +32,9 @@ export class GitRepo {
     return this;
   }
 
-  /** Save current git data to localStorage. */
+  /** Save current git data to localStorage with tag/branch merge logic. */
   saveCache() {
-    const cache = loadRepoCache();
-    cache[this.name] = this.data;
-    saveRepoCache(cache);
+    cacheRepoData(this.name, this.data);
   }
 
   /** True if the repo has cached tags or branches. */
