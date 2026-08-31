@@ -151,26 +151,17 @@
     const refreshBtn = document.getElementById('refreshBtn');
 
     /**
-     * Process 1: Git Transport Bootstrap (P2P or proxy-only)
+     * Process 1a: P2P Transport Bootstrap (original, preserved)
      * Trigger: scheduleAfterPaint() on page load
-     * Network: Yes when P2P enabled (relays). No when proxy-only.
-     * Scope: Global — sets up transport for all repos
-     *
-     * Toggle P2P via URL ?p2p=1 or localStorage 'git-p2p-enabled'.
-     * Default is proxy-only (no libp2p) for fast cold start.
+     * Network: Yes (connects to Nostr relays for bundle discovery)
+     * Scope: Global — sets up libp2p node and GitP2PTransport for all repos
      */
-    async function initGitTransport() {
-      const p2pEnabled = new URL(window.location.href).searchParams.get('p2p') === '1'
-        || window.localStorage.getItem('git-p2p-enabled') === '1';
-
-      if (!p2pEnabled || isSafariMobile()) {
-        window.__gitViewerP2pTransport = null;
-        networkTime.attachNode(null);
-        footer.log('git', 'proxy-only mode (no P2P). Add ?p2p=1 to enable libp2p.', 'info', 'available');
-        return;
-      }
-
+    async function initGitP2P() {
       try {
+        if (isSafariMobile()) {
+          footer.log('libp2p', 'skipping libp2p bootstrap on Safari mobile', 'info', 'idle');
+          return;
+        }
         const { createSharedLibp2pStack } = await import('../shared/libp2p-stack.mjs');
         const { node } = await createSharedLibp2pStack({
           onLog(level, text, state) {
@@ -194,13 +185,28 @@
         footer.log('libp2p', `node ready: ${node.peerId.toString()}`, 'info', 'available');
       } catch (e) {
         footer.log('libp2p', `bootstrap failed: ${e.message}`, 'error', 'unavailable');
-        window.__gitViewerP2pTransport = null;
       }
     }
-    // Delay transport bootstrap until after the first frame so initial layout and
+
+    /**
+     * Process 1b: Non-P2P Transport Bootstrap (proxy-only)
+     * Trigger: call instead of initGitP2P when troubleshooting or on slow networks
+     * Network: No — uses CORS proxy only, no libp2p, no relay connections
+     * Scope: Global — clears P2P transport so ensureRepo skips bundle fetch
+     */
+    async function initGitTransport() {
+      window.__gitViewerP2pTransport = null;
+      window.__gitViewerP2pNode = null;
+      networkTime.attachNode(null);
+      footer.log('git', 'proxy-only mode (no P2P)', 'info', 'available');
+    }
+
+    // Delay libp2p bootstrap until after the first frame so initial layout and
     // header controls stay responsive even on slower/mobile browsers.
     scheduleAfterPaint(() => {
+      // Toggle: use initGitTransport() for proxy-only, initGitP2P() for full P2P
       void initGitTransport();
+      // void initGitP2P();
     });
 
     function setStatus(text, state = 'idle') {
