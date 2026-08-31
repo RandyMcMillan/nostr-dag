@@ -4,7 +4,6 @@
 //! to contain the WASM build output and `index.html`, and it prints
 //! `SERVER_URL=...` on startup.
 
-use std::env;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -21,9 +20,6 @@ use tracing::{debug, error, info, trace};
 use crate::store::EventStore;
 use crate::FAVICON_ICO;
 
-const DEFAULT_HOST: &str = "127.0.0.1";
-const DEFAULT_PORT: u16 = 3000;
-const DEFAULT_SITE_DIR: &str = "site";
 const LOGGER_ROUTE_PREFIX: &str = "/logger";
 const LOGGER_MAX_ENTRIES: usize = 10_000;
 const PEERS_ROUTE_PREFIX: &str = "/peers";
@@ -31,8 +27,6 @@ const NIP11_ROUTE_PREFIX: &str = "/nip11";
 const NIP11_MAX_CONCURRENT: usize = 8;
 /// Route prefix for the event store REST API.
 const EVENTS_ROUTE_PREFIX: &str = "/events";
-/// Default SQLite database file placed next to the server working directory.
-const DEFAULT_DB_PATH: &str = "nostr-dag.db";
 /// Public GitHub Pages deployment of the bridge (WASM peer).
 const GH_PAGES_BRIDGE_URL: &str = "https://randymcmillan.github.io/nostr-dag/bridge/";
 
@@ -143,7 +137,7 @@ pub async fn run_server(
     port: u16,
     site_dir: &str,
     db_path: &str,
-    embed_p2p: bool,
+    _embed_p2p: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let site_dir = if std::path::Path::new(site_dir).is_dir() {
         site_dir.to_string()
@@ -180,7 +174,7 @@ pub async fn run_server(
     #[cfg(feature = "p2p")]
     let mut p2p_task: Option<tokio::task::JoinHandle<()>> = None;
     #[cfg(feature = "p2p")]
-    if embed_p2p {
+    if _embed_p2p {
         info!("starting embedded full-stack p2p-node peer");
         // Default repos to mirror via NIP-PIP so browsers can discover bundles
         // without relying on public CORS proxies.
@@ -196,11 +190,11 @@ pub async fn run_server(
             "https://github.com/w-s-bitcoin/entropylab,",
             "https://github.com/nostr-protocol/nips",
         );
-        let mirror_repos = env::var("GIT_MIRROR_REPOS")
+        let mirror_repos = std::env::var("GIT_MIRROR_REPOS")
             .ok()
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(|| DEFAULT_MIRROR_REPOS.to_string());
-        env::set_var("GIT_MIRROR_REPOS", mirror_repos);
+        std::env::set_var("GIT_MIRROR_REPOS", mirror_repos);
         // Seed the peer store with the local embedded peer so /peers and
         // db-viewer always show it even before gossipsub discovers anyone.
         #[cfg(feature = "p2p")]
