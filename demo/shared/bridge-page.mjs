@@ -1,19 +1,24 @@
 // Bridge page logic extracted from demo/bridge/index.html.
-import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
-    import { finalizeEvent, generateSecretKey, getPublicKey, verifyEvent } from 'https://esm.sh/nostr-tools@2.10.4/pure';
-    import { scheduleAfterPaint, yieldToBrowser } from './async-lifecycle.mjs';
-    import { APP_NAME, APP_VERSION } from './app-version.mjs';
-    import { bootstrapDemoPageChrome } from './page-shell.mjs';
-    import { resolveHref } from './page-path.js';
-    import { measureRelayPing } from './relay-ping.mjs';
-    import { createSharedLibp2pStack, deterministicPeerIdFromSeed } from './libp2p-stack.mjs';
-    import { getNetworkUnixTime } from './network-time.mjs';
-    import { BRIDGE_PROTOCOL, BRIDGE_PROTOCOL_VERSION, buildBridgeEnvelope, collectBridgeRelayHints, decodeBridgeMessage } from './bridge-protocol.mjs';
-    import { createListContainerController } from './list-container.mjs';
-    import { createPeersListController } from './peers-list.mjs';
-    import { extractBridgeRoundTripStartMs } from './bridge-roundtrip.mjs';
-    import { createRelaysListController } from './relays-list.mjs';
-    import { neventEncode } from '../vendor/nostr-tools.mjs';
+import {
+  SimplePool,
+  finalizeEvent,
+  generateSecretKey,
+  getPublicKey,
+  verifyEvent,
+  neventEncode,
+} from '../vendor/nostr-tools.mjs';
+import { scheduleAfterPaint, yieldToBrowser } from './async-lifecycle.mjs';
+import { APP_NAME, APP_VERSION } from './app-version.mjs';
+import { bootstrapDemoPageChrome } from './page-shell.mjs';
+import { resolveHref } from './page-path.js';
+import { measureRelayPing } from './relay-ping.mjs';
+import { createSharedLibp2pStack, deterministicPeerIdFromSeed } from './libp2p-stack.mjs';
+import { getNetworkUnixTime } from './network-time.mjs';
+import { BRIDGE_PROTOCOL, BRIDGE_PROTOCOL_VERSION, buildBridgeEnvelope, collectBridgeRelayHints, decodeBridgeMessage } from './bridge-protocol.mjs';
+import { createListContainerController } from './list-container.mjs';
+import { createPeersListController } from './peers-list.mjs';
+import { extractBridgeRoundTripStartMs } from './bridge-roundtrip.mjs';
+import { createRelaysListController } from './relays-list.mjs';
     import { getRecentItems } from './bridge-recent-query.mjs';
     import { persistBridgeCacheState, restoreBridgeCacheState } from './bridge-cache.mjs';
     import {
