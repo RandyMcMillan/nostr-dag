@@ -151,20 +151,26 @@
     const refreshBtn = document.getElementById('refreshBtn');
 
     /**
-     * Process 1: P2P Transport Bootstrap
+     * Process 1: Git Transport Bootstrap (P2P or proxy-only)
      * Trigger: scheduleAfterPaint() on page load
-     * Network: Yes (connects to Nostr relays for bundle discovery)
-     * Scope: Global — sets up libp2p node and GitP2PTransport for all repos
+     * Network: Yes when P2P enabled (relays). No when proxy-only.
+     * Scope: Global — sets up transport for all repos
+     *
+     * Toggle P2P via URL ?p2p=1 or localStorage 'git-p2p-enabled'.
+     * Default is proxy-only (no libp2p) for fast cold start.
      */
-    async function initGitP2P() {
-      try {
-        // TEMP DISABLED for troubleshooting /git/ page without P2P.
-        footer.log('libp2p', 'P2P bootstrap disabled (troubleshoot mode)', 'info', 'idle');
+    async function initGitTransport() {
+      const p2pEnabled = new URL(window.location.href).searchParams.get('p2p') === '1'
+        || window.localStorage.getItem('git-p2p-enabled') === '1';
+
+      if (!p2pEnabled || isSafariMobile()) {
+        window.__gitViewerP2pTransport = null;
+        networkTime.attachNode(null);
+        footer.log('git', 'proxy-only mode (no P2P). Add ?p2p=1 to enable libp2p.', 'info', 'available');
         return;
-        if (isSafariMobile()) {
-          footer.log('libp2p', 'skipping libp2p bootstrap on Safari mobile', 'info', 'idle');
-          return;
-        }
+      }
+
+      try {
         const { createSharedLibp2pStack } = await import('../shared/libp2p-stack.mjs');
         const { node } = await createSharedLibp2pStack({
           onLog(level, text, state) {
@@ -188,12 +194,13 @@
         footer.log('libp2p', `node ready: ${node.peerId.toString()}`, 'info', 'available');
       } catch (e) {
         footer.log('libp2p', `bootstrap failed: ${e.message}`, 'error', 'unavailable');
+        window.__gitViewerP2pTransport = null;
       }
     }
-    // Delay libp2p bootstrap until after the first frame so initial layout and
+    // Delay transport bootstrap until after the first frame so initial layout and
     // header controls stay responsive even on slower/mobile browsers.
     scheduleAfterPaint(() => {
-      void initGitP2P();
+      void initGitTransport();
     });
 
     function setStatus(text, state = 'idle') {
@@ -606,11 +613,10 @@
       try {
         await ensureDir(fs, '/repos');
 
-        // Try libp2p bundle fetch first (always request; transport handles cache hits)
-        // TEMP DISABLED for troubleshooting /git/ page without P2P.
+        // Try libp2p bundle fetch first (only when P2P transport is active)
         let bundlePath = null;
         const transport = window.__gitViewerP2pTransport;
-        if (false && transport && !skipP2P) {
+        if (transport && !skipP2P) {
           try {
             setRepoStatus(repo.name, 'fetching p2p bundle...');
             footer.log('git', `${repo.name} requesting bundle via libp2p`, 'info');
