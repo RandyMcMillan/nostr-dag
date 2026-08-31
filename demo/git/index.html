@@ -754,15 +754,15 @@
       footer.log('git', `readRepo start ${repo.name} skipNetwork=${skipNetwork}`, 'debug');
       const localBranches = await git.listBranches({ fs, dir: repo.dir }).catch(() => []);
       const remoteBranches = await git.listBranches({ fs, dir: repo.dir, remote: 'origin' }).catch(() => []);
-      const cachedBranches = mergedCached?.branches || [];
-      const branches = [...new Set([...localBranches, ...remoteBranches, ...cachedBranches])];
-      footer.log('git', `${repo.name} listBranches done in ${Math.round(performance.now() - readStart)} ms`, 'trace');
       const cache = loadRepoCache();
       const refCache = loadRefCache();
       const cached = cache[repo.name];
       const refs = refCache[repo.name];
       // Merge versioned cache with unversioned ref cache so tags/branches survive bumps.
       const mergedCached = { ...cached, ...refs };
+      const cachedBranches = mergedCached?.branches || [];
+      const branches = [...new Set([...localBranches, ...remoteBranches, ...cachedBranches])];
+      footer.log('git', `${repo.name} listBranches done in ${Math.round(performance.now() - readStart)} ms`, 'trace');
       const hasCachedRefs = mergedCached && (mergedCached.tags?.length > 0 || mergedCached.branches?.length > 0);
       let serverRefs = [];
       if (!skipNetwork || !hasCachedRefs) {
