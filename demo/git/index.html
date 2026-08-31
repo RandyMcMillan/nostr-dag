@@ -79,6 +79,7 @@
     const repoPing = new Map();
     const repoSource = new Map();
     const faviconCache = new Map();
+    const refreshingRepos = new Set();
 
     // Proxy chain for git smart-HTTP requests.
     // Public CORS proxies have become unreliable (Cloudflare blocks, API keys,
@@ -1165,10 +1166,11 @@
                   <span class="pill">Ref: <span class="mono">${currentRef}</span></span>
                   <span class="pill">Files: ${data.files.length}</span>
                   <span class="pill">Commits: ${commitCount}</span>
+                  <span class="pill" style="opacity:.8;">${escapeHtml(repoState.get(repo.name) || 'idle')}</span>
                 </div>
               </div>
               <div class="actions">
-                <button type="button" data-refresh-repo="${repo.name}">Refresh</button>
+                <button type="button" data-refresh-repo="${repo.name}" ${refreshingRepos.has(repo.name) ? 'disabled' : ''}>${refreshingRepos.has(repo.name) ? 'Refreshing...' : 'Refresh'}</button>
                 <a class="button" href="./">Back to repos</a>
                 <a class="button" href="${repo.url}" target="_blank" rel="noreferrer noopener">Open upstream</a>
               </div>
@@ -1360,9 +1362,13 @@
       if (!repo) return;
       const route = getRouteContext(repos).repo?.name === repo.name ? getRouteContext(repos) : null;
       footer.log('git', `refreshOneRepo start ${repo.name} force=${force} fetchAll=${fetchAll} skipNetwork=${skipNetwork} route=${route ? 'yes' : 'no'}`, 'debug');
+      refreshingRepos.add(repo.name);
       try {
         setRepoStatus(repo.name, 'refreshing...');
-        if (route) setRepoHealth(repo.name, 'checking');
+        if (route) {
+          setRepoHealth(repo.name, 'checking');
+          renderApp();
+        }
         setRepoPing(repo.name, null);
         if (force) {
           footer.log('git', `${repo.name} force=true → wiping local clone`, 'info');
@@ -1399,6 +1405,9 @@
         setRepoStatus(repo.name, `refresh failed: ${e.message}`);
         footer.log('git', `refreshOneRepo catch ${repo.name}: ${e.message}`, 'error', 'unavailable');
         footer.log('git', `stack: ${e.stack || 'no stack'}`, 'trace');
+      } finally {
+        refreshingRepos.delete(repo.name);
+        if (route) renderApp();
       }
     }
 
