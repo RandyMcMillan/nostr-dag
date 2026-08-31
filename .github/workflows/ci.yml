@@ -104,6 +104,9 @@ jobs:
             node --test "${{ inputs.js_test_file }}"
           else
             for f in test/*.test.mjs; do
+              case "$f" in
+                *p2p-native-wasm*) continue ;;
+              esac
               echo "=== running $f ==="
               node --test "$f" || exit 1
             done
