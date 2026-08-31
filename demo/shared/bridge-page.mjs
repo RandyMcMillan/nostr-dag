@@ -2,6 +2,7 @@
 import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
     import { finalizeEvent, generateSecretKey, getPublicKey, verifyEvent } from 'https://esm.sh/nostr-tools@2.10.4/pure';
     import { scheduleAfterPaint, yieldToBrowser } from './async-lifecycle.mjs';
+    import { APP_NAME, APP_VERSION } from './app-version.mjs';
     import { bootstrapDemoPageChrome } from './page-shell.mjs';
     import { resolveHref } from './page-path.js';
     import { measureRelayPing } from './relay-ping.mjs';
@@ -1881,6 +1882,7 @@ import { SimplePool } from 'https://esm.sh/nostr-tools@2.10.4/pool';
         const measuredCount = measuredRelayCount(relaysSnapshot);
         const statusCount = measuredCount > 0 ? `${measuredCount} measured` : `${relaysSnapshot.length} known`;
         setStatus('bridge ready', 'available');
+        document.title = `${APP_NAME}@${APP_VERSION} / ${topic}`;
         window.__sharedFooter?.log('bridge', `bridge ready on topic ${topic}`, 'info', 'available');
         window.__sharedFooter?.log('bridge', `relay snapshot known=${relaysSnapshot.length} measured=${measuredCount}`, 'debug', 'available');
         for (const relay of relaysSnapshot) {
