@@ -1498,7 +1498,7 @@
         setRepoHealth(route.repo.name, 'checking');
         renderApp();
         const probe = probeRemoteHost(route.repo).catch(() => ({ ok: false, durationMs: null }));
-        await ensureRepo(route.repo, route);
+        await ensureRepo(route.repo, route, { fetchAll: !skipNetwork });
         footer.log('git', `refreshDetail ensure done ${route.repo.name}`, 'debug');
         const data = await readRepo(route.repo, route, { skipNetwork });
         const gitRepo = gitRepos.find((gr) => gr.name === route.repo.name);
@@ -1558,7 +1558,8 @@
     // Process 3: First refresh from local clone + cache only (no network).
     void refresh({ skipNetwork: true });
     // Process 4: Background network refresh after 3s delay.
-    // WARNING: This unconditionally refreshes ALL repos even when on a detail view.
+    // refresh() routes to refreshDetail (single repo) when on a detail view,
+    // or refreshList (all repos) when on the list view.
     setTimeout(() => refresh({ skipNetwork: false }), 3000);
   </script>
 </body>
