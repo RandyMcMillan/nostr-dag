@@ -639,7 +639,16 @@
         }
 
         const exists = await pathExists(fs, dir);
-        if (!exists) {
+        let isValid = false;
+        if (exists) {
+          try {
+            await git.resolveRef({ fs, dir, ref: 'HEAD' });
+            isValid = true;
+          } catch (e) {
+            footer.log('git', `${repo.name} existing clone invalid (${e.message}) — will re-clone`, 'warn');
+          }
+        }
+        if (!isValid) {
           setRepoStatus(repo.name, 'cloning...');
           footer.log('git', `${repo.name} cloning${route ? ` (${progressContextLabel(route)})` : ''}`, 'debug');
           await ensureDir(fs, dir);
@@ -753,8 +762,14 @@
     async function readRepo(repo, route = null, { skipNetwork = false } = {}) {
       const readStart = performance.now();
       footer.log('git', `readRepo start ${repo.name} skipNetwork=${skipNetwork}`, 'debug');
-      const localBranches = await git.listBranches({ fs, dir: repo.dir }).catch(() => []);
-      const remoteBranches = await git.listBranches({ fs, dir: repo.dir, remote: 'origin' }).catch(() => []);
+      const localBranches = await git.listBranches({ fs, dir: repo.dir }).catch((e) => {
+        footer.log('git', `${repo.name} listBranches failed: ${e.message}`, 'warn');
+        return [];
+      });
+      const remoteBranches = await git.listBranches({ fs, dir: repo.dir, remote: 'origin' }).catch((e) => {
+        footer.log('git', `${repo.name} listBranches(remote) failed: ${e.message}`, 'warn');
+        return [];
+      });
       const cache = loadRepoCache();
       const refCache = loadRefCache();
       const cached = cache[repo.name];
@@ -784,6 +799,9 @@
         footer.log('git', `${repo.name} listTags failed: ${e.message}`, 'warn');
         return [];
       });
+      if (branches.length === 0 && localTags.length === 0) {
+        footer.log('git', `${repo.name} local clone appears empty or invalid (no branches/tags)`, 'warn');
+      }
       const cachedTags = mergedCached?.tags || [];
       const remoteTags = remoteTagNames(serverRefs);
       const tags = [...new Set([
@@ -1161,6 +1179,11 @@
             </div>
           </div>
 
+          ${data.branches.length === 0 && data.tags.length === 0 ? `
+            <div class="repo-toolbar" style="background:#3a1f1f;color:#ff9999;padding:8px 12px;border-radius:6px;">
+              <span class="small">No branches or tags found — local clone may be empty. Click Refresh to re-fetch.</span>
+            </div>
+          ` : ''}
           <div class="repo-toolbar">
             <select class="repo-select" data-branch-select="${repo.name}">
               ${buildSelectOptions(data.branches, branchSelected, 'Switch branch')}
