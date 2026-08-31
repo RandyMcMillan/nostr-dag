@@ -80,7 +80,7 @@ export class GitP2PTransport {
       this.nostrKeys = { sk, pk };
       const filter = {
         kinds: [PIP_MANIFEST_KIND, PIP_SLICE_KIND],
-        limit: 0,
+        limit: 100,
       };
       const sub = this.relayPool.subscribeMany(this.relays, [filter], {
         onevent: (event) => {
