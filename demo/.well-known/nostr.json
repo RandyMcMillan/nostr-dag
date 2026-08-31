@@ -1,19 +1,5 @@
 {
   "names": {
-    "nostr-dag": "2d724a13a80b6002607737ad1a99f3c0b148843707d59ac3bff08c7fce72ecce",
     "_": "2d724a13a80b6002607737ad1a99f3c0b148843707d59ac3bff08c7fce72ecce"
-  },
-  "relays": {
-    "2d724a13a80b6002607737ad1a99f3c0b148843707d59ac3bff08c7fce72ecce": [
-      "wss://nos.lol",
-      "wss://relay.nostr.com",
-      "wss://relay.nostr.band",
-      "wss://relay.primal.net",
-      "wss://nostr.wine",
-      "wss://top.testrelay.top",
-      "wss://relay.pocketnostr.com",
-      "wss://basspistol.org",
-      "wss://relay.ngit.dev"
-    ]
   }
 }

@@ -98,6 +98,8 @@ site: wasm
 	mkdir -p site
 	cp demo/index.html site/index.html
 	cp demo/shared/favicon.ico site/favicon.ico
+	mkdir -p site/.well-known
+	cp demo/.well-known/nostr.json site/.well-known/nostr.json
 	mkdir -p site/shared
 	cp demo/shared/favicon.ico site/shared/favicon.ico
 	cp demo/shared/page.css site/shared/
