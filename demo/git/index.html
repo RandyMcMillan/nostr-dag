@@ -168,7 +168,7 @@
         });
         window.__gitViewerP2pNode = node;
         networkTime.attachNode(node);
-        const p2pTransport = createGitP2PTransport({
+        const p2pTransport = await createGitP2PTransport({
           node,
           relays: DEFAULT_RELAYS,
           onLog(level, text) {

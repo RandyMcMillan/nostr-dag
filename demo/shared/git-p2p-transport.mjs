@@ -49,7 +49,7 @@ export class GitP2PTransport {
     this.relays = relays;
   }
 
-  start() {
+  async start() {
     if (this.started) return;
     this.started = true;
 
@@ -66,12 +66,12 @@ export class GitP2PTransport {
     }
 
     // Relay listener (for GH Pages mixed-content fallback).
-    this.startRelayListener();
+    await this.startRelayListener();
 
     this.onLog('info', 'git-p2p transport started');
   }
 
-  startRelayListener() {
+  async startRelayListener() {
     if (!this.relays || this.relays.length === 0) return;
     try {
       this.relayPool = new SimplePool();
@@ -82,6 +82,20 @@ export class GitP2PTransport {
         kinds: [PIP_MANIFEST_KIND, PIP_SLICE_KIND],
         limit: 100,
       };
+
+      // Query recent events immediately so manifests are available even if the
+      // native peer published them before the page loaded.
+      try {
+        const recentEvents = await this.relayPool.querySync(this.relays, filter, { maxWait: 5000 });
+        for (const event of recentEvents) {
+          this.handleNostrEvent(event);
+        }
+        this.onLog('debug', `git-p2p relay query returned ${recentEvents.length} events`);
+      } catch (e) {
+        this.onLog('trace', `git-p2p relay query failed: ${e.message}`);
+      }
+
+      // Keep a live subscription for new events.
       const sub = this.relayPool.subscribeMany(this.relays, [filter], {
         onevent: (event) => {
           this.handleNostrEvent(event);
@@ -292,9 +306,9 @@ export class GitP2PTransport {
   }
 }
 
-export function createGitP2PTransport(options) {
+export async function createGitP2PTransport(options) {
   const transport = new GitP2PTransport(options);
-  transport.start();
+  await transport.start();
   return transport;
 }
 
