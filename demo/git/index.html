@@ -154,6 +154,21 @@
     const refreshBtn = document.getElementById('refreshBtn');
     const repoPanel = document.getElementById('repoPanel');
 
+    /** Sort version tags newest-first (v0.20.0 before v0.2.0). */
+    function compareSemverDesc(a, b) {
+      const sa = String(a).replace(/^v/i, '');
+      const sb = String(b).replace(/^v/i, '');
+      const pa = sa.split('.').map(Number);
+      const pb = sb.split('.').map(Number);
+      const len = Math.max(pa.length, pb.length);
+      for (let i = 0; i < len; i++) {
+        const na = pa[i] || 0;
+        const nb = pb[i] || 0;
+        if (na !== nb) return nb - na;
+      }
+      return String(b).localeCompare(String(a));
+    }
+
     /**
      * Process 1a: P2P Transport Bootstrap (original, preserved)
      * Trigger: scheduleAfterPaint() on page load
@@ -813,7 +828,7 @@
         ...remoteTags,
         ...cachedTags,
       ])];
-      tags.sort((a, b) => a.localeCompare(b));
+      tags.sort(compareSemverDesc);
       // Build tagMap from server refs so consumers can resolve tag -> commit.
       const tagMap = {};
       for (const entry of serverRefs) {
