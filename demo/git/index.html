@@ -54,6 +54,7 @@
       ensureDir,
       escapeHtml,
       getRouteContext,
+      loadRefCache,
       loadRepoCache,
       pathExists,
       renderLatestSummary,
@@ -725,11 +726,16 @@
       footer.log('git', `readRepo start ${repo.name} skipNetwork=${skipNetwork}`, 'debug');
       const localBranches = await git.listBranches({ fs, dir: repo.dir }).catch(() => []);
       const remoteBranches = await git.listBranches({ fs, dir: repo.dir, remote: 'origin' }).catch(() => []);
-      const branches = [...new Set([...localBranches, ...remoteBranches])];
+      const cachedBranches = mergedCached?.branches || [];
+      const branches = [...new Set([...localBranches, ...remoteBranches, ...cachedBranches])];
       footer.log('git', `${repo.name} listBranches done in ${Math.round(performance.now() - readStart)} ms`, 'trace');
       const cache = loadRepoCache();
+      const refCache = loadRefCache();
       const cached = cache[repo.name];
-      const hasCachedRefs = cached && (cached.tags?.length > 0 || cached.branches?.length > 0);
+      const refs = refCache[repo.name];
+      // Merge versioned cache with unversioned ref cache so tags/branches survive bumps.
+      const mergedCached = { ...cached, ...refs };
+      const hasCachedRefs = mergedCached && (mergedCached.tags?.length > 0 || mergedCached.branches?.length > 0);
       let serverRefs = [];
       if (!skipNetwork || !hasCachedRefs) {
         serverRefs = await tryWithCorsProxies(
@@ -742,14 +748,14 @@
         });
         footer.log('git', `${repo.name} listServerRefs done refs=${serverRefs.length} in ${Math.round(performance.now() - readStart)} ms`, 'trace');
       } else {
-        serverRefs = cached.serverRefs || [];
+        serverRefs = mergedCached.serverRefs || [];
         footer.log('git', `${repo.name} using cached serverRefs (${serverRefs.length})`, 'info');
       }
       const localTags = await git.listTags({ fs, dir: repo.dir }).catch((e) => {
         footer.log('git', `${repo.name} listTags failed: ${e.message}`, 'warn');
         return [];
       });
-      const cachedTags = cached?.tags || [];
+      const cachedTags = mergedCached?.tags || [];
       const remoteTags = remoteTagNames(serverRefs);
       const tags = [...new Set([
         ...localTags,
