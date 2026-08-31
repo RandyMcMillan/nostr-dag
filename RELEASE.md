@@ -1,61 +1,56 @@
 # Release Process
 
-This document describes how to cut a new version of `nostr-dag`.
+This document describes how to cut a new release of `nostr-dag`.
 
-## 1. Version Bump
+## Steps
 
-Update the version in `Cargo.toml`:
+1. **Bump version in `Cargo.toml`**
+   ```bash
+   # Edit version = "x.y.z" in Cargo.toml
+   ```
 
-```toml
-[package]
-version = "X.Y.Z"
-```
+2. **Build to regenerate version file**
+   ```bash
+   cargo build
+   ```
+   This updates `demo/shared/app-version.generated.mjs` via `build.rs`.
 
-Also regenerate the JS version module so the web UI stays in sync:
+3. **Stage the generated version file**
+   ```bash
+   git add demo/shared/app-version.generated.mjs Cargo.toml
+   ```
+   `build.rs` auto-stages `app-version.generated.mjs` on successful builds, but
+   verify it is included so the GitHub Pages deployment reports the correct
+   version.
 
-```bash
-make version  # or ./scripts/generate-version.mjs
-```
+4. **Commit**
+   ```bash
+   git commit -m "chore(release): bump version to x.y.z"
+   ```
 
-## 2. Update CHANGELOG
+5. **Tag**
+   ```bash
+   git tag -a vx.y.z -m "Release vx.y.z"
+   ```
 
-Summarise the user-visible changes since the last tag:
+6. **Push**
+   ```bash
+   git push origin master --follow-tags
+   ```
 
-- Rust crate changes
-- Web UI changes (`demo/`)
-- Protocol changes (NIP-PIP, bridge, libp2p)
-- Breaking changes
+7. **Verify CI**
+   - Check GitHub Actions for green builds.
+   - Check GitHub Pages deployment shows the new version.
 
-## 3. Run Full Test Suite
+## Versioning
 
-```bash
-make test-all
-```
+We follow [SemVer](https://semver.org/):
+- **MAJOR** — breaking protocol or API changes
+- **MINOR** — new features, backward compatible
+- **PATCH** — bug fixes, backward compatible
 
-This runs:
-- `cargo test --lib`
-- `cargo test --features p2p,wasm`
-- `node --test test/*.test.mjs`
+## Hotfixes
 
-All tests must pass before tagging.
-
-## 4. Tag the Release
-
-```bash
-git add -A
-git commit -m "release: vX.Y.Z"
-git tag -a vX.Y.Z -m "nostr-dag vX.Y.Z"
-git push origin master --tags
-```
-
-## 5. Verify CI and GitHub Pages
-
-- Check <https://github.com/RandyMcMillan/nostr-dag/actions> for green CI.
-- Verify the GitHub Pages deployment at <https://randymcmillan.github.io/nostr-dag/>.
-- Spot-check `/git/`, `/bridge/`, and `/dag/` endpoints.
-
-## 6. Post-Release Checks
-
-- Confirm `cargo publish --dry-run` passes (if publishing to crates.io).
-- Verify the deterministic libp2p peer ID appears on the Bridge peers list.
-- Ensure the fallback CORS proxy is reachable from GH Pages.
+For urgent fixes on an already-tagged release:
+1. Branch from the tag: `git checkout -b hotfix/vx.y.z+1 vx.y.z`
+2. Apply fix, bump patch version, commit, tag, and push.
