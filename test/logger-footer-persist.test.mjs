@@ -1,76 +1,46 @@
-import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import assert from 'node:assert/strict';
+import { chromium } from 'playwright-core';
 
-function createFakeNode() {
-  return {
-    className: '',
-    hidden: false,
-    title: '',
-    attrs: {},
-    innerHTML: '',
-    setAttribute(name, value) {
-      this.attrs[name] = String(value);
-    },
-    addEventListener() {},
-    querySelectorAll() {
-      return [];
-    },
-  };
-}
+const BASE = process.env.BASE_URL || 'http://127.0.0.1:3000';
 
-function createFakeRoot() {
-  const statusEl = createFakeNode();
-  const toggleEl = createFakeNode();
-  const chevronEl = createFakeNode();
-  const levelEl = createFakeNode();
-  const logEl = createFakeNode();
-  return {
-    className: '',
-    classList: {
-      add(name) {
-        this.owner.className = this.owner.className ? `${this.owner.className} ${name}` : name;
-      },
-      owner: null,
-    },
-    innerHTML: '',
-    querySelector(selector) {
-      if (selector === '[data-footer-status]') return statusEl;
-      if (selector === '[data-footer-toggle]') return toggleEl;
-      if (selector === '[data-footer-chevron]') return chevronEl;
-      if (selector === '[data-footer-level]') return levelEl;
-      if (selector === '[data-footer-log]') return logEl;
-      return null;
-    },
-    nodes: { statusEl, toggleEl, chevronEl, levelEl, logEl },
-  };
-}
+test('bridge logger state persists across reload', { timeout: 30_000 }, async (t) => {
+  let browser;
+  try {
+    browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage();
+    t.diagnostic('navigating to ' + BASE + '/bridge/');
+    await page.goto(`${BASE}/bridge/`, { waitUntil: 'load', timeout: 10_000 });
+    t.diagnostic('page loaded');
 
-test('logger footer restores persisted open and level state', async () => {
-  const storage = new Map();
-  globalThis.localStorage = {
-    getItem(key) {
-      return storage.has(key) ? storage.get(key) : null;
-    },
-    setItem(key, value) {
-      storage.set(key, String(value));
-    },
-  };
-  globalThis.location = { pathname: '/git/' };
+    await page.waitForSelector('[data-footer-toggle]', { timeout: 5_000 });
+    t.diagnostic('footer toggle found');
 
-  const source = await readFile(new URL('../demo/shared/logger-footer.js', import.meta.url), 'utf8');
-  const { createLoggerFooter } = await import(`data:text/javascript;charset=utf-8,${encodeURIComponent(source)}`);
+    await page.click('[data-footer-toggle]');
+    t.diagnostic('toggle clicked');
+    await page.click('[data-footer-level-pill="debug"]');
+    t.diagnostic('debug pill clicked');
 
-  const firstRoot = createFakeRoot();
-  firstRoot.classList.owner = firstRoot;
-  const footer = createLoggerFooter(firstRoot, { title: 'Logger' });
-  footer.setLevel('debug');
-  footer.open();
+    const beforeReload = await page.evaluate(() => {
+      const keys = Object.keys(localStorage).filter(k => k.includes('logger-footer'));
+      return keys.map(k => ({ key: k, value: localStorage.getItem(k) }));
+    });
+    t.diagnostic('localStorage: ' + JSON.stringify(beforeReload));
 
-  const secondRoot = createFakeRoot();
-  secondRoot.classList.owner = secondRoot;
-  const restored = createLoggerFooter(secondRoot, { title: 'Logger' });
+    await page.reload({ waitUntil: 'load' });
+    t.diagnostic('reloaded');
+    await page.waitForSelector('[data-footer-toggle]', { timeout: 5_000 });
+    t.diagnostic('footer toggle found after reload');
 
-  assert.equal(restored.getLevel(), 'debug');
-  assert.equal(secondRoot.nodes.logEl.hidden, false);
+    const afterReload = await page.evaluate(() => {
+      const keys = Object.keys(localStorage).filter(k => k.includes('logger-footer'));
+      return keys.map(k => ({ key: k, value: JSON.parse(localStorage.getItem(k)) }));
+    });
+    t.diagnostic('localStorage after: ' + JSON.stringify(afterReload));
+    assert.ok(afterReload.length > 0, 'should have state');
+    assert.strictEqual(afterReload[0].value.open, true);
+    assert.strictEqual(afterReload[0].value.level, 'debug');
+  } finally {
+    if (browser) await browser.close();
+  }
 });

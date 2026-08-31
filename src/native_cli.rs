@@ -65,7 +65,11 @@ pub async fn run_federation() -> Result<(), Box<dyn std::error::Error>> {
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
                 .add_directive("federation=info".parse()?)
-                .add_directive("nostr_relay_pool=warn".parse()?),
+                .add_directive("nostr_relay_pool=warn".parse()?)
+                // Suppress non-actionable "Invalid format" errors from the local demo relay.
+                // The nostr-relay-builder crate sends JSON responses that nostr_relay_pool
+                // logs as errors even though the subscription succeeds.
+                .add_directive("nostr_relay_pool::relay::inner=off".parse()?),
         )
         .init();
 
