@@ -882,7 +882,7 @@
           ...remoteTagNames(retryServerRefs),
           ...cachedTags,
         ])];
-        retryTags.sort((a, b) => a.localeCompare(b));
+        retryTags.sort(compareSemverDesc);
         for (const candidate of refCandidatesForRoute(route, branches, retryTags)) {
           if (!candidate) continue;
           try {
