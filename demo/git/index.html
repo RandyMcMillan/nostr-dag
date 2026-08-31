@@ -233,6 +233,7 @@
         ...model,
         p2pAvailable,
         proxy: activeProxy,
+        source: repoSource.get(gitRepo.name) || model.source,
         toolbar: {
           ...model.toolbar,
           secondaryHref: repoSelectionHref(model.repo, {
