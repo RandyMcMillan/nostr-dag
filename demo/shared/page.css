@@ -1369,16 +1369,8 @@ button:hover, a.button:hover { background:var(--button-hover); }
     /* 2. Commit hash */
     .blame-head { padding:10px 12px; background:var(--status-bg); color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.04em; border-bottom:1px solid var(--border); }
     /* 3. Line */
-    .blame-head > :nth-child(3) { padding-left:2ch; }
     .blame-row { padding:8px 12px; border-top:1px solid var(--border); }
-    /* 4. Time */
-    .blame-head > :nth-child(4) { padding-left:5ch; }
-    .blame-row > :nth-child(3) { transform:translateX(-4ch); }
-    .blame-row > :nth-child(4) { transform:translateX(-1ch); }
-    .blame-row > :nth-child(5) { transform:translateX(-5ch); }
     .blame-row:first-child { border-top:0; }
-    /* 5. Content */
-    .blame-head > :nth-child(5) { padding-left:9ch; }
     .blame-hash, .blame-lno, .blame-time, .blame-text { min-width:0; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size:12px; line-height:1.45; }
     .blame-hash { color:var(--accent); white-space:nowrap; }
     .blame-lno { color:var(--muted); text-align:right; white-space:nowrap; }
