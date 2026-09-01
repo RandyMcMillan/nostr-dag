@@ -535,6 +535,34 @@ export async function createSharedLibp2pStack({
   emitLog(onLog, "info", `node started: ${node.peerId.toString()}`, "available");
   emitLog(onLog, "debug", `peer id stable: ${node.peerId.toString()}`, "available");
 
+  // Dial the local native node so the browser joins its gossipsub mesh.
+  // Without this connection the browser only talks to public bootstrap peers
+  // which do not subscribe to our app topic and therefore never relay queries.
+  try {
+    const res = await fetch("/peers", { cache: "no-store" });
+    if (res.ok) {
+      const peerList = await res.json();
+      for (const peer of peerList) {
+        if (peer.kind !== "native" || peer.source !== "localhost") continue;
+        const peerAddrs = parsePeerAddrs(peer.detail);
+        for (const addr of peerAddrs) {
+          if (addr.includes("/ws") || addr.includes("/wss") || addr.includes("/webrtc")) {
+            const suffix = `/p2p/${peer.peer_id}`;
+            const dialAddr = addr.endsWith(suffix) ? addr : `${addr}${suffix}`;
+            try {
+              await node.dial(multiaddr(dialAddr));
+              emitLog(onLog, "info", `dialed native node: ${dialAddr}`, "available");
+            } catch (dialErr) {
+              emitLog(onLog, "debug", `native dial skipped (${dialAddr}): ${dialErr?.message || dialErr}`, "checking");
+            }
+          }
+        }
+      }
+    }
+  } catch {
+    // best effort only
+  }
+
   return {
     node,
     bootstrapPeers: peers,
