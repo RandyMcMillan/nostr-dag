@@ -1,7 +1,7 @@
 const STORAGE_KEY = 'nostr-dag.network-time.v2';
 const NETWORK_TIME_PROTOCOL = 'nostr-dag-network-time';
 const NETWORK_TIME_VERSION = 1;
-const NETWORK_TIME_TOPIC = 'nostr-dag-bridge';
+const DEFAULT_NETWORK_TIME_TOPIC = 'nostr-dag-bridge';
 const SYNC_INTERVAL_MS = 5_000;
 const RETRY_DELAY_MS = 2_000;
 const QUERY_WAIT_MS = 1_200;
@@ -24,6 +24,7 @@ const state = globalThis.__nostrDagNetworkTimeState || {
   tickTimer: null,
   pendingRequests: new Map(),
   requestCounter: 0,
+  topic: DEFAULT_NETWORK_TIME_TOPIC,
   // Persistent sliding window of recent peer samples for damped consensus.
   peerSamples: [],
   // Tracks whether we have already attached the visibility listener so that
@@ -59,6 +60,7 @@ function persistState() {
       lastSyncAt: state.lastSyncAt,
       lastSampleCount: state.lastSampleCount,
       lastAccuracyMs: state.lastAccuracyMs,
+      topic: state.topic,
     }));
   } catch {
     // best effort only
@@ -75,6 +77,7 @@ function restoreState() {
     if (Number.isFinite(Number(parsed?.lastSyncAt))) state.lastSyncAt = Number(parsed.lastSyncAt);
     if (Number.isFinite(Number(parsed?.lastSampleCount))) state.lastSampleCount = Number(parsed.lastSampleCount);
     if (Number.isFinite(Number(parsed?.lastAccuracyMs))) state.lastAccuracyMs = Number(parsed.lastAccuracyMs);
+    if (typeof parsed?.topic === 'string' && parsed.topic.trim()) state.topic = parsed.topic;
   } catch {
     // ignore corrupt cache
   }
@@ -222,7 +225,7 @@ async function publishNetworkTimeMessage(payload) {
   logEvent(`[pubsub] publish type=${payload.type} id=${payload.request_id || 'n/a'}`);
   try {
     await state.node.services.pubsub.publish(
-      NETWORK_TIME_TOPIC,
+      state.topic,
       encoder.encode(JSON.stringify(payload)),
     );
   } catch (e) {
@@ -268,6 +271,7 @@ async function handleNetworkTimeMessage(event) {
 
   // Store every sample forever, keyed by peer for per-peer history.
   state.peerSamples.push({ responderPeerId, deltaMs, rttMs, receivedAtMs });
+  state.lastSampleCount = state.peerSamples.length;
 
   const peerShort = responderPeerId.slice(0, 16);
   logEvent(`[response] peer=${peerShort}… req=${payload.request_id} localConsensus=${localConsensusTime} peerTime=${serverTimeMs} delta=${formatDeltaMs(deltaMs)} rtt=${Math.round(rttMs)}ms window=${state.peerSamples.length}`);
@@ -400,7 +404,7 @@ export function initSharedNetworkTime({ headerApi = null } = {}) {
         void handleNetworkTimeMessage(event);
       });
 
-      Promise.resolve(node.services.pubsub.subscribe(NETWORK_TIME_TOPIC)).then(() => {
+      Promise.resolve(node.services.pubsub.subscribe(state.topic)).then(() => {
         logEvent('[attach] topic subscribed');
         if (state._peerListenerNode !== node) {
           state._peerListenerNode = node;
@@ -429,6 +433,7 @@ export function initSharedNetworkTime({ headerApi = null } = {}) {
         lastSyncAt: state.lastSyncAt,
         lastSampleCount: state.lastSampleCount,
         lastAccuracyMs: state.lastAccuracyMs,
+        topic: state.topic,
       };
     },
     resetState() {
@@ -446,6 +451,29 @@ export function initSharedNetworkTime({ headerApi = null } = {}) {
       }
       updateHeader();
       logEvent('[reset] state cleared');
+    },
+    async setTopic(newTopic) {
+      const oldTopic = state.topic;
+      if (!newTopic || typeof newTopic !== 'string' || newTopic === oldTopic) return;
+      state.topic = newTopic;
+      logEvent(`[topic] changed from "${oldTopic}" to "${newTopic}"`);
+      if (state.node?.services?.pubsub?.unsubscribe) {
+        try {
+          await state.node.services.pubsub.unsubscribe(oldTopic);
+          logEvent(`[topic] unsubscribed from "${oldTopic}"`);
+        } catch (e) {
+          logEvent(`[topic] unsubscribe failed: ${e.message || e}`);
+        }
+      }
+      if (state.node?.services?.pubsub?.subscribe) {
+        try {
+          await state.node.services.pubsub.subscribe(newTopic);
+          logEvent(`[topic] subscribed to "${newTopic}"`);
+        } catch (e) {
+          logEvent(`[topic] subscribe failed: ${e.message || e}`);
+        }
+      }
+      void syncNetworkTime();
     },
   };
 }
