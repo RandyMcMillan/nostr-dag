@@ -7,7 +7,37 @@ DAG-based optimistic consensus for Nostr, with libp2p bridging, a Git viewer, NI
 `nostr-dag` is a Rust library and browser application that implements DAG-based optimistic consensus over Nostr events.
 A set of federation keypairs mutually acknowledge events (Kind 21000) referencing their parents; an event becomes
 "canonical" once a majority of participants have acked it.  The project has grown well beyond the original hackathon
-sketch into a multi-layer system:
+sketch into a multi-layer system.
+
+`nostr-dag` is a protocol extension and software framework designed to structure Nostr events into explicit Directed Acyclic Graphs (DAGs).
+
+While Nostr traditionally relies on simple event structures (such as direct replies or linear threads), nostr-dag enforces deterministic multi-parent linking and dependency tracking directly within event tags.
+
+### Key Technical Integrations & Mechanics
+
+- **Parent-Child Event Graphing:** Events explicitly list parent event IDs (via custom tags or explicit parent selections in the UI), building a strict single-direction, non-cyclical topology.
+
+- **Domain-Specific Event Kinds:** Custom event kinds model complex state transitions beyond social posts:
+  - **Repository & Code Collaboration:** 30617 (Repo Announcement), 30618 (Repo State), 1618 (Pull Request), 1621 (Issue).
+  - **DAG State & Consensus:** 39078 (Transfer Manifest), 39079 (Transfer Slice), 39080 (Quorum Attest), 39081 (Quorum Seal), 21000 (Ack).
+
+- **Deterministic Execution & Ordering:** By running graph-traversal logic over events, clients can topologically sort state changes to resolve dependencies, merge concurrent updates, and establish deterministic ordering without needing a centralized server.
+
+### Primary Technical Benefits
+
+- **Censorship-Resistant State Synchronization:** Enables distributed databases, git-like version control systems, and collaborative applications over simple, decentralized Nostr relays.
+
+- **Conflict-Free & Asynchronous Operations:** Handles offline-first operations and parallel state changes gracefully. Concurrent edits branching off a common parent event can be merged downstream through DAG seals and attestation events.
+
+- **Verifiable Audit Trails:** Every node/event in the DAG is cryptographically signed using Nostr public keys (npub), rendering the historical integrity of the DAG tamper-proof and verifiable by any observer.
+
+### Core Developer Use Cases
+
+- **Decentralized Code Collaboration:** Building decentralized alternatives to GitHub (e.g., NIP-34 style git sequences) where code commits, pull requests, and branch state transitions form explicit DAG structures across Nostr relays.
+
+- **Distributed State Machines & Quorum Consensus:** Implementing off-chain micro-consensus networks using quorum attestations (39080) and seals (39081) for distributed ledger or app-state management.
+
+- **Threaded & Graph-Based Messaging Protocols:** Constructing multi-path conversations, complex task workflows, and project management applications where nodes represent tasks, dependencies, or concurrent threads.
 
 - **Consensus engine** (`src/dag.rs`) — buffers events with missing parents, tracks `seen_by`, caches depth, and
   derives canonical order by `(depth, event_id)`.
