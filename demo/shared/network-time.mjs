@@ -199,19 +199,20 @@ export function computeConsensusOffset(samples = []) {
  * we move only a fraction of the way toward the target each round.
  */
 function recalibrateOffset() {
-  if (state.peerSamples.length < MIN_SAMPLES_FOR_RECALIBRATION) {
+  const recentSamples = state.peerSamples.slice(-SAMPLE_WINDOW);
+  if (recentSamples.length < MIN_SAMPLES_FOR_RECALIBRATION) {
     state.status = state.lastSyncAt ? 'available' : 'unavailable';
-    logEvent(`[consensus] need ${MIN_SAMPLES_FOR_RECALIBRATION}+ peers for consensus — have ${state.peerSamples.length} samples, offset=${formatDeltaMs(state.offsetMs)}`);
+    logEvent(`[consensus] need ${MIN_SAMPLES_FOR_RECALIBRATION}+ recent samples for consensus — total=${state.peerSamples.length} recent=${recentSamples.length} offset=${formatDeltaMs(state.offsetMs)}`);
     return;
   }
-  const medianDelta = computeConsensusOffset(state.peerSamples);
+  const medianDelta = computeConsensusOffset(recentSamples);
   const beforeOffset = state.offsetMs;
   state.offsetMs += Math.round(medianDelta * DAMPING_FACTOR);
   state.lastSyncAt = Date.now();
   state.lastSampleCount = state.peerSamples.length;
-  state.lastAccuracyMs = median(state.peerSamples.map((s) => s.rttMs / 2));
+  state.lastAccuracyMs = median(recentSamples.map((s) => s.rttMs / 2));
   state.status = 'available';
-  logEvent(`[consensus] medianDelta=${formatDeltaMs(medianDelta)} before=${formatDeltaMs(beforeOffset)} after=${formatDeltaMs(state.offsetMs)} samples=${state.peerSamples.length} accuracy=${Math.round(state.lastAccuracyMs)}ms`);
+  logEvent(`[consensus] medianDelta=${formatDeltaMs(medianDelta)} before=${formatDeltaMs(beforeOffset)} after=${formatDeltaMs(state.offsetMs)} total=${state.peerSamples.length} recent=${recentSamples.length} accuracy=${Math.round(state.lastAccuracyMs)}ms`);
   persistState();
 }
 
@@ -255,11 +256,8 @@ async function handleNetworkTimeMessage(event) {
   // Track that this pending request got a response
   pending.responses.push({ responderPeerId, deltaMs, rttMs });
 
-  // Add to persistent sliding window, evicting oldest if full.
+  // Store every sample forever, keyed by peer for per-peer history.
   state.peerSamples.push({ responderPeerId, deltaMs, rttMs, receivedAtMs });
-  if (state.peerSamples.length > SAMPLE_WINDOW) {
-    state.peerSamples.shift();
-  }
 
   const peerShort = responderPeerId.slice(0, 16);
   logEvent(`[response] peer=${peerShort}… req=${payload.request_id} localConsensus=${localConsensusTime} peerTime=${serverTimeMs} delta=${formatDeltaMs(deltaMs)} rtt=${Math.round(rttMs)}ms window=${state.peerSamples.length}`);
