@@ -28,6 +28,11 @@ export function createSharedHeader(root, options = {}) {
   const logoHref = options.logoHref || '#';
   const iconHref = options.iconHref || './shared/favicon.ico';
   const navItems = Array.isArray(options.navItems) ? options.navItems : [];
+  const networkTimeHref = options.networkTimeHref || '';
+
+  const networkTimeLabel = networkTimeHref
+    ? `<a class="header-subbar-label" href="${escapeHtml(networkTimeHref)}">network time</a>`
+    : '<span class="header-subbar-label">network time</span>';
 
   root.classList.add('sticky-header');
   root.innerHTML = `
@@ -55,7 +60,7 @@ export function createSharedHeader(root, options = {}) {
     </div>
     <!-- Network time sub-header: rendered asynchronously, initially hidden until first update -->
     <div class="header-subbar header-subbar--hidden" data-network-time role="status" aria-live="polite" title="Network time syncing">
-      <span class="header-subbar-label">network time</span>
+      ${networkTimeLabel}
       <span class="header-subbar-value" data-network-time-value>syncing…</span>
       <span class="header-subbar-status" data-network-time-status></span>
     </div>

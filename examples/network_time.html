@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Network Time — nostr-dag</title>
+  <link rel="icon" href="../demo/shared/favicon.ico" />
+  <link rel="stylesheet" href="../demo/shared/page.css" />
+  <style>
+    :root {
+      --ok: #2e7d32;
+      --warn: #f9a825;
+      --error: #c62828;
+      --info: #1565c0;
+      --bg: #ffffff;
+      --fg: #111111;
+      --muted: #666666;
+      --border: #e0e0e0;
+      --panel: #f5f5f5;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0d0d0d;
+        --fg: #e0e0e0;
+        --muted: #999999;
+        --border: #333333;
+        --panel: #1a1a1a;
+      }
+    }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      margin: 0;
+      padding: 16px;
+      line-height: 1.5;
+    }
+    h1 { font-size: 1.4rem; margin: 0 0 8px; }
+    .subtitle { color: var(--muted); font-size: 0.9rem; margin-bottom: 16px; }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+      max-width: 720px;
+      margin: 0 auto;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .panel h2 { font-size: 1rem; margin: 0 0 10px; }
+    .row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+    .status { font-weight: 600; }
+    .status.ok { color: var(--ok); }
+    .status.warn { color: var(--warn); }
+    .status.error { color: var(--error); }
+    .mono { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.9rem; word-break: break-all; }
+    .small { font-size: 0.85rem; }
+    .muted { color: var(--muted); }
+    button {
+      background: var(--info);
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 14px;
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    #log {
+      max-height: 240px;
+      overflow-y: auto;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      font-size: 0.8rem;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .time-display {
+      font-size: 1.6rem;
+      font-weight: 700;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      padding: 12px;
+      border-radius: 8px;
+      text-align: center;
+      background: var(--bg);
+      border: 1px solid var(--border);
+    }
+  </style>
+</head>
+<body>
+  <div style="max-width:720px;margin:0 auto;">
+    <header class="row" style="justify-content:space-between;margin-bottom:12px;">
+      <div>
+        <h1>Network Time</h1>
+        <div class="subtitle">P2P consensus clock synced via libp2p</div>
+      </div>
+      <a href="../demo/index.html" style="text-decoration:none;font-size:1.6rem;">⬅</a>
+    </header>
+
+    <div class="grid">
+      <div class="panel">
+        <h2>Consensus Clock</h2>
+        <div id="timeDisplay" class="time-display status-checking">syncing…</div>
+        <div class="row" style="margin-top:10px;">
+          <span class="muted">Offset:</span>
+          <span id="offsetDisplay" class="mono">—</span>
+        </div>
+        <div class="row">
+          <span class="muted">Samples:</span>
+          <span id="sampleDisplay">0</span>
+        </div>
+        <div class="row">
+          <span class="muted">Status:</span>
+          <span id="statusDisplay" class="status">checking</span>
+        </div>
+        <div class="row" style="margin-top:10px;">
+          <button id="syncBtn" type="button">Force Sync</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>About</h2>
+        <p class="small">
+          This page displays the network time offset calculated from peer samples
+          using Cristian's Algorithm. The median offset across all samples is
+          applied to the local clock to produce a consensus time.
+        </p>
+        <p class="small">
+          For the full interactive demo with peer sampling and Byzantine-resistant
+          consensus logic, see
+          <a href="./byz-time-consensus.html">Byzantine Time Consensus</a>.
+        </p>
+      </div>
+
+      <div class="panel">
+        <h2>Log</h2>
+        <div id="log">Waiting for sync…</div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initSharedNetworkTime } from '../demo/shared/network-time.mjs';
+
+    const timeDisplay = document.getElementById('timeDisplay');
+    const offsetDisplay = document.getElementById('offsetDisplay');
+    const sampleDisplay = document.getElementById('sampleDisplay');
+    const statusDisplay = document.getElementById('statusDisplay');
+    const syncBtn = document.getElementById('syncBtn');
+    const logEl = document.getElementById('log');
+    const logs = [];
+
+    function log(text) {
+      logs.push(`[${new Date().toLocaleTimeString()}] ${text}`);
+      logEl.textContent = logs.slice(-40).join('\n');
+    }
+
+    function updateDisplay(state) {
+      const consensusTime = Date.now() + (state.offsetMs || 0);
+      timeDisplay.textContent = new Date(consensusTime).toISOString().replace('T', ' ').replace('Z', ' UTC');
+      timeDisplay.className = `time-display status-${state.status}`;
+      offsetDisplay.textContent = `${state.offsetMs > 0 ? '+' : ''}${state.offsetMs} ms`;
+      sampleDisplay.textContent = String(state.lastSampleCount || 0);
+      statusDisplay.textContent = state.status;
+      statusDisplay.className = `status status-${state.status}`;
+    }
+
+    // Create a minimal header API stub so network-time can update us.
+    const headerApi = {
+      setNetworkTime({ text, title, state }) {
+        updateDisplay({ offsetMs: 0, status: state, lastSampleCount: 0 });
+        log(text);
+      },
+    };
+
+    const networkTime = initSharedNetworkTime({ headerApi });
+
+    // Poll the network time state and refresh the display.
+    function refresh() {
+      const state = networkTime.getState?.() || {};
+      updateDisplay(state);
+    }
+    refresh();
+    setInterval(refresh, 1000);
+
+    syncBtn.addEventListener('click', () => {
+      syncBtn.disabled = true;
+      log('Manual sync requested…');
+      networkTime.forceSync?.().then(() => {
+        refresh();
+        syncBtn.disabled = false;
+        log('Manual sync complete');
+      }).catch((e) => {
+        syncBtn.disabled = false;
+        log(`Sync failed: ${e.message}`);
+      });
+    });
+  </script>
+</body>
+</html>
