@@ -30,6 +30,7 @@ const state = globalThis.__nostrDagNetworkTimeState || {
   // re-calling initSharedNetworkTime() (e.g. hot-module reload) does not
   // register a second handler.
   visibilityListenerAttached: false,
+  _peerListenerNode: null,
 };
 
 globalThis.__nostrDagNetworkTimeState = state;
@@ -394,23 +395,29 @@ export function initSharedNetworkTime({ headerApi = null } = {}) {
       state.node = node;
       state.localPeerId = node?.peerId?.toString?.() || '';
       logEvent(`[attach] peerId=${state.localPeerId}`);
-      node.services.pubsub.subscribe(NETWORK_TIME_TOPIC);
+
       node.services.pubsub.addEventListener('message', (event) => {
         void handleNetworkTimeMessage(event);
       });
-      if (!state._peerListenersAttached) {
-        state._peerListenersAttached = true;
-        node.addEventListener('peer:connect', () => {
-          logEvent('[peer:connect] peer joined, waiting 1s for mesh graft then syncing');
-          globalThis.setTimeout(() => void syncNetworkTime(), 1_000);
-        });
-        node.addEventListener('peer:disconnect', () => {
-          logEvent('[peer:disconnect] peer left, syncing');
-          void syncNetworkTime();
-        });
-      }
-      scheduleSyncLoop();
-      void syncNetworkTime();
+
+      Promise.resolve(node.services.pubsub.subscribe(NETWORK_TIME_TOPIC)).then(() => {
+        logEvent('[attach] topic subscribed');
+        if (state._peerListenerNode !== node) {
+          state._peerListenerNode = node;
+          node.addEventListener('peer:connect', () => {
+            logEvent('[peer:connect] peer joined, waiting 1s for mesh graft then syncing');
+            globalThis.setTimeout(() => void syncNetworkTime(), 1_000);
+          });
+          node.addEventListener('peer:disconnect', () => {
+            logEvent('[peer:disconnect] peer left, syncing');
+            void syncNetworkTime();
+          });
+        }
+        scheduleSyncLoop();
+        void syncNetworkTime();
+      }).catch((e) => {
+        logEvent(`[attach] subscribe failed: ${e.message || e}`);
+      });
     },
     syncNow(options) {
       return syncNetworkTime(options);
