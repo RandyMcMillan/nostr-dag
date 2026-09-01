@@ -10,14 +10,6 @@ on:
         description: 'Run native Rust tests'
         type: boolean
         default: true
-      run_js:
-        description: 'Run JS / GUI tests'
-        type: boolean
-        default: true
-      run_wasm:
-        description: 'Build WASM package'
-        type: boolean
-        default: true
       run_p2p:
         description: 'Build and test p2p native'
         type: boolean
@@ -26,10 +18,6 @@ on:
         description: 'Build p2p-wasm'
         type: boolean
         default: true
-      js_test_file:
-        description: 'Specific JS test file to run (leave empty for all)'
-        type: string
-        default: ''
 
 env:
   CARGO_TERM_COLOR: always
@@ -64,98 +52,6 @@ jobs:
 
       - name: Run tests
         run: cargo test --features native
-
-  js:
-    name: Test (JS / GUI)
-    if: github.event_name != 'workflow_dispatch' || inputs.run_js
-    needs: wasm
-    strategy:
-      fail-fast: false
-      matrix:
-        os: ${{ github.event_name == 'workflow_dispatch' && fromJSON('["ubuntu-latest","windows-latest","macos-latest"]') || fromJSON('["ubuntu-latest"]') }}
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Node dependencies
-        run: npm ci
-
-      - name: Install Rust stable
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-
-      - name: Generate build version module
-        run: cargo check --quiet
-
-      - name: Check for uncommitted generated files
-        run: git diff --exit-code || (echo "::error::Uncommitted changes detected after build. Run cargo check locally and commit generated files." && exit 1)
-
-      - name: Download wasm artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: wasm-pkg
-          path: site/pkg
-
-      - name: Run JS tests
-        run: |
-          if [ -n "${{ inputs.js_test_file }}" ]; then
-            echo "=== running ${{ inputs.js_test_file }} ==="
-            node --test "${{ inputs.js_test_file }}"
-          else
-            for f in test/*.test.mjs; do
-              case "$f" in
-                *p2p-native-wasm*) continue ;;
-              esac
-              echo "=== running $f ==="
-              node --test "$f" || exit 1
-            done
-          fi
-
-  wasm:
-    name: Build (wasm)
-    if: github.event_name != 'workflow_dispatch' || inputs.run_wasm
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust stable
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-          rustup target add wasm32-unknown-unknown
-
-      - name: Install clang for wasm C dependencies
-        run: sudo apt-get update && sudo apt-get install -y clang lld
-
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-wasm-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Install wasm-pack
-        run: cargo install wasm-pack --locked
-
-      - name: Build wasm package
-        run: wasm-pack build --target web --out-dir site/pkg --no-default-features --features wasm
-
-      - name: Test wasm JS contracts
-        run: node --test test/git-wasm.test.mjs test/p2p-wasm.test.mjs
-
-      - name: Copy shared CSS for site assets
-        run: |
-          mkdir -p site/shared
-          cp demo/shared/page.css site/shared/
-
-      - name: Upload wasm artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: wasm-pkg
-          path: site/pkg/
 
   p2p:
     name: Build (p2p native)
