@@ -18,7 +18,21 @@ import { chromium } from 'playwright-core';
 
 const BASE = process.env.BASE_URL || 'http://127.0.0.1:3000';
 
+async function serverHealthy() {
+  try {
+    const res = await fetch(`${BASE}/`, { method: 'HEAD', signal: AbortSignal.timeout(2000) });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 test('git page renders repo cards with tags in Chromium', { timeout: 120_000 }, async (t) => {
+  if (!(await serverHealthy())) {
+    t.skip('server not running — start nostr-dag-server to run this test');
+    return;
+  }
+
   let browser;
   try {
     try {
