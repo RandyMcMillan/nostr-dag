@@ -103,8 +103,8 @@ button:hover, a.button:hover { background:var(--button-hover); }
   min-width:0;
 }
 .brand-icon {
-  width:24px;
-  height:24px;
+  width:32px;
+  height:32px;
   display:block;
   flex:0 0 auto;
 }
@@ -901,6 +901,7 @@ button:hover, a.button:hover { background:var(--button-hover); }
   .header-actions { gap:.5rem; }
   .header-network-time { padding:8px 10px; }
   .header-brand > a { font-size:1.25rem; }
+  .logo-text { display:none; }
   .nav-links { gap:.4rem; width:max-content; flex-wrap:nowrap; flex-shrink:0; margin-left:auto; white-space:nowrap; }
   .panel { padding:12px; }
   .row { gap:8px; }
@@ -1065,7 +1066,7 @@ button:hover, a.button:hover { background:var(--button-hover); }
     .header-container { display:flex; justify-content:space-between; align-items:center; max-width:1200px; margin:0 auto; padding:0.9rem 1.5rem; gap:1rem; }
     .header-brand { display:flex; align-items:center; gap:10px; min-width:0; flex:0 1 auto; }
     .header-brand > a { font-size:1.45rem; font-weight:800; color:var(--accent); text-decoration:none; display:inline-flex; align-items:center; gap:8px; line-height:1.1; white-space:nowrap; min-width:0; }
-    .brand-icon { width:24px; height:24px; display:block; flex:0 0 auto; }
+    .brand-icon { width:32px; height:32px; display:block; flex:0 0 auto; }
     .logo-text { display:inline-block; min-width:0; }
     .header-subtitle { margin:0; font-size:12px; line-height:1.3; max-width:56ch; color:var(--muted); }
     .header-nav { display:flex; align-items:center; justify-content:space-between; gap:1rem; min-width:0; width:100%; }
@@ -1108,6 +1109,7 @@ button:hover, a.button:hover { background:var(--button-hover); }
     .form-row input, .form-row select { width:100%; }
     @media (max-width: 640px) {
       .header-container { gap:.75rem; padding:.85rem 1rem; }
+      .logo-text { display:none; }
       .nav-links { gap:.4rem; width:max-content; flex-wrap:nowrap; flex-shrink:0; white-space:nowrap; }
       .panel { padding:12px; }
       .row { gap:8px; }
@@ -1297,6 +1299,7 @@ button:hover, a.button:hover { background:var(--button-hover); }
   }
   @media (max-width: 640px) {
     .header-container { gap:.5rem; }
+    .logo-text { display:none; }
     .nav-links { gap:.75rem; }
     .panel, .repo-sidebar-card, .repo-hero { padding:12px; }
     .row { gap:8px; }
@@ -1402,6 +1405,7 @@ button:hover, a.button:hover { background:var(--button-hover); }
     }
     @media (max-width: 640px) {
       .header-container { gap:.5rem; }
+      .logo-text { display:none; }
       .nav-links { gap:.75rem; }
       .panel, .repo-hero, .repo-sidebar-card { padding:12px; }
       .row { gap:8px; }

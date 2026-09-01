@@ -789,14 +789,16 @@
       }
       // Fetch all refs and tags without depth limit so older tags (e.g. v0.13.0)
       // are not silently omitted by a shallow fetch.
-      footer.log('git', `${repo.name} fetch-all start (all=true, tags=true, force=true, prune=true)`, 'trace');
+      const preFetchTags = await git.listTags({ fs, dir: repo.dir }).catch(() => []);
+      footer.log('git', `${repo.name} fetch-all start (all=true, tags=true, force=true, prune=true) preFetchTags=[${preFetchTags.join(', ')}]`, 'trace');
       await tryWithCorsProxies(
         (opts) => git.fetch({ fs, http, dir: repo.dir, url: repo.url, all: true, tags: true, force: true, prune: true, onProgress, ...opts }),
         {},
         `${repo.name} fetch-all`,
       );
       const postFetchTags = await git.listTags({ fs, dir: repo.dir }).catch(() => []);
-      footer.log('git', `${repo.name} fetch-all done tags=[${postFetchTags.join(', ')}]`, 'trace');
+      const newTags = postFetchTags.filter((t) => !preFetchTags.includes(t));
+      footer.log('git', `${repo.name} fetch-all done preFetchTags=${preFetchTags.length} postFetchTags=${postFetchTags.length} newTags=[${newTags.join(', ')}] all=[${postFetchTags.join(', ')}]`, 'trace');
     }
 
     async function readRepo(repo, route = null, { skipNetwork = false } = {}) {
@@ -846,7 +848,8 @@
       const cachedTags = mergedCached?.tags || [];
       footer.log('git', `${repo.name} cachedTags=[${cachedTags.join(', ')}]`, 'trace');
       const remoteTags = remoteTagNames(serverRefs);
-      footer.log('git', `${repo.name} remoteTags=[${remoteTags.join(', ')}]`, 'trace');
+      const serverTagRefs = serverRefs.filter((r) => String(r?.ref || '').startsWith('refs/tags/'));
+      footer.log('git', `${repo.name} remoteTags=[${remoteTags.join(', ')}] serverTagRefs=${serverTagRefs.length}/${serverRefs.length}`, 'trace');
       const tags = [...new Set([
         ...localTags,
         ...remoteTags,
