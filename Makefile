@@ -58,13 +58,14 @@ test-js:
 		sleep 1; \
 	done; \
 	if [ -z "$$SERVER_URL" ]; then echo "Server failed to start"; kill $$SERVER_PID 2>/dev/null; rm -f /tmp/nostr-dag-server.$$.log; exit 1; fi; \
-	echo "Server ready at $$SERVER_URL"; \
+	TEST_URL=$$(echo "$$SERVER_URL" | sed 's/0\.0\.0\.0/127.0.0.1/'); \
+	echo "Server ready at $$SERVER_URL (tests use $$TEST_URL)"; \
 	for f in test/*.test.mjs; do \
 		case "$$f" in \
 			*p2p-native-wasm*) continue ;; \
 		esac; \
 		echo "=== running $$f ==="; \
-		SERVER_URL=$$SERVER_URL NODE_OPTIONS=--trace-uncaught node --test "$$f" || { kill $$SERVER_PID 2>/dev/null; rm -f /tmp/nostr-dag-server.$$.log; exit 1; }; \
+		SERVER_URL=$$TEST_URL NODE_OPTIONS=--trace-uncaught node --test "$$f" || { kill $$SERVER_PID 2>/dev/null; rm -f /tmp/nostr-dag-server.$$.log; exit 1; }; \
 	done; \
 	kill $$SERVER_PID 2>/dev/null; \
 	rm -f /tmp/nostr-dag-server.$$.log; \
