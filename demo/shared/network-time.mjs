@@ -149,13 +149,33 @@ function checkTopicPeers() {
   if (!pubsub?.getPeers) return;
   try {
     const peers = pubsub.getPeers(state.topic) || [];
+    const current = new Set();
     for (const peerId of peers) {
       const id = typeof peerId === 'string' ? peerId : peerId?.toString?.() || '';
-      if (!id || state._knownTopicPeers.has(id)) continue;
+      if (id) current.add(id);
+    }
+
+    // Peers that left
+    for (const id of state._knownTopicPeers) {
+      if (current.has(id)) continue;
+      state._knownTopicPeers.delete(id);
+      if (typeof state.topicPeerHandler === 'function') {
+        try {
+          state.topicPeerHandler({ peerId: id, topic: state.topic, left: true });
+        } catch {
+          // ignore handler errors
+        }
+      }
+      logEvent(`[peer] left topic=${state.topic} peer=${id.slice(0, 16)}…`);
+    }
+
+    // Peers that joined
+    for (const id of current) {
+      if (state._knownTopicPeers.has(id)) continue;
       state._knownTopicPeers.add(id);
       if (typeof state.topicPeerHandler === 'function') {
         try {
-          state.topicPeerHandler({ peerId: id, topic: state.topic });
+          state.topicPeerHandler({ peerId: id, topic: state.topic, left: false });
         } catch {
           // ignore handler errors
         }
@@ -316,6 +336,13 @@ async function handleNetworkTimeMessage(event) {
   const peerShort = responderPeerId.slice(0, 16);
   logEvent(`[response] peer=${peerShort}… req=${payload.request_id} localConsensus=${localConsensusTime} peerTime=${serverTimeMs} delta=${formatDeltaMs(deltaMs)} rtt=${Math.round(rttMs)}ms window=${state.peerSamples.length}`);
   logEvent(`[sample] peer=${peerShort}… delta=${formatDeltaMs(deltaMs)} rtt=${Math.round(rttMs)}ms`);
+  if (typeof state.topicLogHandler === 'function') {
+    state.topicLogHandler({
+      topic: state.topic,
+      data: `[sample] peer=${peerShort}… delta=${formatDeltaMs(deltaMs)} rtt=${Math.round(rttMs)}ms`,
+      from: responderPeerId,
+    });
+  }
 }
 
 export function getNetworkNowMs() {
