@@ -20,6 +20,21 @@ export function buildSelectOptions(items, selectedValue, placeholder) {
   return `<option value="">${placeholder}</option>${options}`;
 }
 
+/** Sort version strings newest-first (v0.20.0 before v0.2.0). */
+export function compareSemverDesc(a, b) {
+  const sa = String(a).replace(/^v/i, '');
+  const sb = String(b).replace(/^v/i, '');
+  const pa = sa.split('.').map(Number);
+  const pb = sb.split('.').map(Number);
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i++) {
+    const na = pa[i] || 0;
+    const nb = pb[i] || 0;
+    if (na !== nb) return nb - na;
+  }
+  return String(b).localeCompare(String(a));
+}
+
 export function loadRepoCache(storageKey = DEFAULT_REPO_CACHE_KEY) {
   try {
     const raw = window.localStorage.getItem(storageKey);
