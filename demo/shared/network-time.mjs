@@ -2,7 +2,8 @@ const STORAGE_KEY = 'nostr-dag.network-time.v2';
 const NETWORK_TIME_PROTOCOL = 'nostr-dag-network-time';
 const NETWORK_TIME_VERSION = 1;
 const NETWORK_TIME_TOPIC = 'nostr-dag-bridge';
-const SYNC_INTERVAL_MS = 30_000;
+const SYNC_INTERVAL_MS = 5_000;
+const RETRY_DELAY_MS = 2_000;
 const QUERY_WAIT_MS = 1_200;
 const SAMPLE_WINDOW = 10;
 const DAMPING_FACTOR = 0.1;
@@ -251,6 +252,9 @@ async function handleNetworkTimeMessage(event) {
   const rttMs = Math.max(0, receivedAtMs - pending.sentAtMs);
   const responderPeerId = payload.responder_peer_id || 'unknown';
 
+  // Track that this pending request got a response
+  pending.responses.push({ responderPeerId, deltaMs, rttMs });
+
   // Add to persistent sliding window, evicting oldest if full.
   state.peerSamples.push({ responderPeerId, deltaMs, rttMs, receivedAtMs });
   if (state.peerSamples.length > SAMPLE_WINDOW) {
@@ -318,9 +322,14 @@ export async function syncNetworkTime({ waitMs = QUERY_WAIT_MS } = {}) {
     state.pendingRequests.delete(requestId);
   }
 
+  if (pending.responses.length === 0) {
+    logEvent(`[sync] query=${requestId} ZERO RESPONSES — scheduling retry in ${RETRY_DELAY_MS}ms`);
+    globalThis.setTimeout(() => void syncNetworkTime(), RETRY_DELAY_MS);
+  }
+
   recalibrateOffset();
   updateHeader();
-  logEvent(`[sync] query=${requestId} done offset=${formatDeltaMs(state.offsetMs)} samples=${state.peerSamples.length}`);
+  logEvent(`[sync] query=${requestId} done responses=${pending.responses.length} offset=${formatDeltaMs(state.offsetMs)} samples=${state.peerSamples.length}`);
   return {
     offsetMs: state.offsetMs,
     status: state.status,
