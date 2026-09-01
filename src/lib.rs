@@ -9,6 +9,7 @@ mod event;
 pub mod native_cli;
 pub mod nip34;
 pub mod quorum;
+pub mod rbsr;
 #[cfg(feature = "native")]
 pub mod store;
 
