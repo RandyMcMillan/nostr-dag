@@ -86,7 +86,7 @@ function updateHeader() {
   const sampleText = state.lastSampleCount ? `${state.lastSampleCount} peer${state.lastSampleCount === 1 ? '' : 's'}` : 'local clock';
   const deltaText = formatDeltaMs(state.offsetMs);
   headerApi.setNetworkTime({
-    text: `${formatUtcTime(getNetworkNowMs())} (${deltaText})`,
+    text: `${formatUtcTime(getNetworkNowMs())} (${deltaText}) · ${sampleText}`,
     title: `Network time ${state.status} · ${sampleText} · accuracy ${accuracyText} · delta ${deltaText} · last sync ${syncText}`,
     state: state.status,
   });
