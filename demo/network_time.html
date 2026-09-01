@@ -197,6 +197,11 @@
     </div>
 
     <div class="log-panel">
+      <h2>Topic Log — <span id="topicLogLabel" class="muted">nostr-dag-bridge</span></h2>
+      <div id="topicLog" style="max-height:120px;">Waiting for topic messages…</div>
+    </div>
+
+    <div class="log-panel">
       <h2>Log</h2>
       <div id="log">Waiting for sync…</div>
     </div>
@@ -218,6 +223,21 @@
     const startNodeBtn = document.getElementById('startNodeBtn');
     const logEl = document.getElementById('log');
     const logs = [];
+    const topicLogEl = document.getElementById('topicLog');
+    const topicLogLabelEl = document.getElementById('topicLogLabel');
+    const topicLogs = [];
+
+    function logTopic({ topic, data, from }) {
+      const shortFrom = from ? from.slice(0, 12) + '…' : 'unknown';
+      const preview = data.length > 120 ? data.slice(0, 120) + '…' : data;
+      topicLogs.push(`[${new Date().toLocaleTimeString()}] [${topic}] ${shortFrom}: ${preview}`);
+      topicLogEl.textContent = topicLogs.slice(-40).join('\n');
+    }
+
+    function clearTopicLog() {
+      topicLogs.length = 0;
+      topicLogEl.textContent = 'Waiting for topic messages…';
+    }
 
     const connectedPeers = new Set();
     const peerDetails = new Map();
@@ -276,6 +296,9 @@
       }
     }
 
+    const topicInput = document.getElementById('topicInput');
+    const applyTopicBtn = document.getElementById('applyTopicBtn');
+
     let networkTime = null;
     const headerApi = {
       setNetworkTime({ text, title, state }) {
@@ -328,12 +351,12 @@
       log('Network time state reset');
     });
 
-    const topicInput = document.getElementById('topicInput');
-    const applyTopicBtn = document.getElementById('applyTopicBtn');
     if (topicInput && applyTopicBtn && networkTime?.setTopic) {
       applyTopicBtn.addEventListener('click', () => {
         const newTopic = topicInput.value.trim();
         if (!newTopic) return;
+        clearTopicLog();
+        if (topicLogLabelEl) topicLogLabelEl.textContent = newTopic;
         log(`Changing topic to "${newTopic}"…`);
         networkTime.setTopic(newTopic).then(() => {
           log(`Topic changed to "${newTopic}"`);
@@ -378,6 +401,7 @@
         });
 
         networkTime.attachNode(node);
+        networkTime.onTopicMessage(logTopic);
         nodeStarted = true;
         updateNodeDisplay();
         log(`Node started: ${node.peerId.toString()}`);
