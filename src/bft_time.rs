@@ -68,23 +68,34 @@ impl BFTClock {
     }
 }
 
-//make into a test
-fn bft_time_test() {
-    let mut gnostr_clock = BFTClock::new(10);
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    println!("Initial Network Time: {}", gnostr_clock.network_now());
+    #[test]
+    fn bft_time_converges_with_damped_median() {
+        let mut clock = BFTClock::new(10);
+        let base = clock.network_now();
 
-    // Simulate receiving gossip from peers with slightly different clocks
-    let peer_clocks = vec![
-        gnostr_clock.network_now() + 500,  // Peer A is fast
-        gnostr_clock.network_now() + 1200, // Peer B is very fast (Byzantine?)
-        gnostr_clock.network_now() - 300,  // Peer C is slow
-    ];
+        // Feed 2 samples — window has < 3 items, no recalibration yet.
+        clock.update_with_peer_sample(base + 500);
+        clock.update_with_peer_sample(base + 1200);
+        assert_eq!(clock.local_offset, 0, "no recalibration until 3 samples");
 
-    for (i, p_time) in peer_clocks.iter().enumerate() {
-        println!("Receiving Sample from Peer {}...", i);
-        gnostr_clock.update_with_peer_sample(*p_time);
+        // Third sample triggers the first recalibration.
+        // Median of [500, 1200, -300] sorted = [-300, 500, 1200] → 500.
+        // Damping: offset = 0 + 500*0.1 = 50.
+        clock.update_with_peer_sample(base - 300);
+        assert_eq!(clock.local_offset, 50, "first recalibration applies 10% of median");
+
+        // After the window is warm, every new sample triggers recalibration.
+        // Feed the same set again; median stays 500, so each sample adds 50.
+        clock.update_with_peer_sample(base + 500);  // +50 → 100
+        clock.update_with_peer_sample(base + 1200); // +50 → 150
+        clock.update_with_peer_sample(base - 300);  // +50 → 200
+        assert_eq!(clock.local_offset, 200, "three more damped steps add 150ms");
+
+        // network_now should reflect the accumulated offset
+        assert!(clock.network_now() >= base + 200, "network time should be ahead of base by offset");
     }
-
-    println!("Final Synced Network Time: {}", gnostr_clock.network_now());
 }
