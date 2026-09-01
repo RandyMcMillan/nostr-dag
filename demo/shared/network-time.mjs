@@ -98,7 +98,12 @@ function updateHeader() {
   const deltaText = formatDeltaMs(state.offsetMs);
   const localNow = Date.now();
   const consensusNow = getNetworkNowMs();
-  logEvent(`[tick] local=${localNow} consensus=${consensusNow} delta=${deltaText} status=${state.status} samples=${state.peerSamples.length} sync=${syncText}`);
+  const peerList = state.peerSamples.map((s) => s.responderPeerId.slice(0, 12)).join(',');
+  const tickKey = `${state.offsetMs}|${state.status}|${state.peerSamples.length}|${peerList}`;
+  if (state._lastTickKey !== tickKey) {
+    state._lastTickKey = tickKey;
+    logEvent(`[tick] local=${localNow} consensus=${consensusNow} delta=${deltaText} status=${state.status} samples=${state.peerSamples.length} peers=[${peerList}] sync=${syncText}`);
+  }
   if (!headerApi?.setNetworkTime) return;
   headerApi.setNetworkTime({
     text: `${formatUtcTime(consensusNow)} (${deltaText}) · ${sampleText}`,
@@ -258,7 +263,9 @@ async function handleNetworkTimeMessage(event) {
     state.peerSamples.shift();
   }
 
-  logEvent(`[response] peer=${responderPeerId.slice(0, 16)}… req=${payload.request_id} localSent=${pending.sentAtMs} localRecv=${receivedAtMs} peerTime=${serverTimeMs} offset=${formatDeltaMs(offsetMs)} rtt=${Math.round(rttMs)}ms window=${state.peerSamples.length}`);
+  const peerShort = responderPeerId.slice(0, 16);
+  logEvent(`[response] peer=${peerShort}… req=${payload.request_id} localSent=${pending.sentAtMs} localRecv=${receivedAtMs} peerTime=${serverTimeMs} offset=${formatDeltaMs(offsetMs)} rtt=${Math.round(rttMs)}ms window=${state.peerSamples.length}`);
+  logEvent(`[sample] peer=${peerShort}… offset=${formatDeltaMs(offsetMs)} rtt=${Math.round(rttMs)}ms`);
 }
 
 export function getNetworkNowMs() {
