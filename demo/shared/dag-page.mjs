@@ -43,7 +43,7 @@ export function bootstrapDagChrome({
       title: 'Logger',
       initialState: 'idle',
       initialTitle: 'starting...',
-      initialLevel: 'info',
+      initialLevel: 'none',
     },
     footerMode: 'after-paint',
   });
