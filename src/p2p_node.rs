@@ -418,6 +418,22 @@ pub async fn run_native_p2p_node(
         }
     });
 
+    let time_sync_cmd_tx = cmd_tx.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(30));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            interval.tick().await;
+            if time_sync_cmd_tx.send(NodeCommand::SyncNetworkTime).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    let mut pending_time_requests: std::collections::HashMap<String, (i64, Vec<TimeSample>)> = std::collections::HashMap::new();
+    let mut time_request_counter: u64 = 0;
+    let mut consensus_offset_ms: i64 = 0;
+
     loop {
         tokio::select! {
             command = cmd_rx.recv() => {
@@ -532,6 +548,38 @@ pub async fn run_native_p2p_node(
                                 .count(),
                             external_addrs.len(),
                         );
+                    }
+                    Some(NodeCommand::SyncNetworkTime) => {
+                        time_request_counter += 1;
+                        let request_id = format!("{}-{}", native_now_ms(), time_request_counter);
+                        let sent_at_ms = native_now_ms();
+                        let query = build_native_time_query(&request_id, &local_peer_id.to_string(), sent_at_ms);
+                        pending_time_requests.insert(request_id.clone(), (sent_at_ms, Vec::new()));
+                        if let Err(err) = swarm.behaviour_mut().gossipsub.publish(
+                            IdentTopic::new(NOSTR_DAG_TOPIC),
+                            query.into_bytes(),
+                        ) {
+                            debug!(?err, "network-time query publish failed");
+                        } else {
+                            safe_println!("TIME_QUERY request_id={} peers={}", request_id, subscribed_topic_peers.len());
+                        }
+                        // Spawn a task to finalize consensus after the collection window.
+                        let cmd_tx = cmd_tx.clone();
+                        let rid = request_id.clone();
+                        tokio::spawn(async move {
+                            tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+                            let _ = cmd_tx.send(NodeCommand::FinalizeNetworkTime(rid)).await;
+                        });
+                    }
+                    Some(NodeCommand::FinalizeNetworkTime(request_id)) => {
+                        if let Some((_, samples)) = pending_time_requests.remove(&request_id) {
+                            let offset = median_offset(&samples);
+                            consensus_offset_ms = offset;
+                            safe_println!("TIME_CONSENSUS request_id={} samples={} median_offset_ms={} consensus_offset_ms={}",
+                                request_id, samples.len(), offset, consensus_offset_ms);
+                        } else {
+                            safe_println!("TIME_CONSENSUS request_id={} expired_or_missing", request_id);
+                        }
                     }
                     Some(NodeCommand::Quit) => {
                         safe_println!("SHUTDOWN requested");
@@ -712,6 +760,32 @@ pub async fn run_native_p2p_node(
                                 );
                             }
 
+                            // Parse incoming network-time responses and accumulate samples.
+                            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) {
+                                if parsed.get("protocol").and_then(|v| v.as_str()) == Some(NETWORK_TIME_PROTOCOL)
+                                    && parsed.get("type").and_then(|v| v.as_str()) == Some("response")
+                                {
+                                    if let (Some(request_id), Some(server_time_ms), Some(responder_peer_id)) = (
+                                        parsed.get("request_id").and_then(|v| v.as_str()),
+                                        parsed.get("server_time_ms").and_then(|v| v.as_i64()),
+                                        parsed.get("responder_peer_id").and_then(|v| v.as_str()),
+                                    ) {
+                                        if let Some((sent_at_ms, samples)) = pending_time_requests.get_mut(request_id) {
+                                            let received_at_ms = native_now_ms();
+                                            let rtt_ms = received_at_ms.saturating_sub(*sent_at_ms);
+                                            let offset_ms = server_time_ms - ((*sent_at_ms + received_at_ms) / 2);
+                                            samples.push(TimeSample {
+                                                responder_peer_id: responder_peer_id.to_string(),
+                                                offset_ms,
+                                                rtt_ms,
+                                            });
+                                            safe_println!("TIME_RESPONSE request_id={} responder={} offset_ms={} rtt_ms={}",
+                                                request_id, responder_peer_id, offset_ms, rtt_ms);
+                                        }
+                                    }
+                                }
+                            }
+
                             // Handle on-demand bundle requests from browsers (PIP.md §15).
                             // When a browser publishes `{"protocol":"nostr-dag-bridge","direction":"request","path":"<url>"}`
                             // we look up the bundle in our local cache and re-publish it if found.
@@ -864,6 +938,10 @@ pub enum NodeCommand {
     PublishPipPayload(Vec<u8>, Option<String>),
     /// Relay-based bundle request: look up `url` in cache and publish if found.
     RelayBundleRequest(String),
+    /// Trigger a network-time consensus sync (publish query, collect responses).
+    SyncNetworkTime,
+    /// Finalize a network-time consensus round after the collection window.
+    FinalizeNetworkTime(String),
     Status,
     Quit,
 }
@@ -1487,6 +1565,42 @@ fn build_native_time_response(message: &str, local_peer_id: &str) -> Option<Stri
         "server_time_ms": native_now_ms(),
     }))
     .ok()
+}
+
+#[cfg(feature = "p2p")]
+fn build_native_time_query(request_id: &str, local_peer_id: &str, sent_at_ms: i64) -> String {
+    serde_json::json!({
+        "protocol": NETWORK_TIME_PROTOCOL,
+        "version": NETWORK_TIME_VERSION,
+        "type": "query",
+        "request_id": request_id,
+        "requester_peer_id": local_peer_id,
+        "sent_at_ms": sent_at_ms,
+    })
+    .to_string()
+}
+
+#[cfg(feature = "p2p")]
+#[derive(Debug, Clone)]
+struct TimeSample {
+    responder_peer_id: String,
+    offset_ms: i64,
+    rtt_ms: i64,
+}
+
+#[cfg(feature = "p2p")]
+fn median_offset(samples: &[TimeSample]) -> i64 {
+    if samples.is_empty() {
+        return 0;
+    }
+    let mut offsets: Vec<i64> = samples.iter().map(|s| s.offset_ms).collect();
+    offsets.sort_unstable();
+    let mid = offsets.len() / 2;
+    if offsets.len() % 2 == 1 {
+        offsets[mid]
+    } else {
+        (offsets[mid - 1] + offsets[mid]) / 2
+    }
 }
 
 #[cfg(feature = "p2p")]
