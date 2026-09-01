@@ -142,19 +142,18 @@
       console.warn('[dag] libp2p-stack import failed:', libp2pImportErr);
     }
     import {
-      buildAttestDraft,
-      buildIssueDraft,
-      buildPullRequestDraft,
-      buildRepositoryAnnouncementDraft,
-      buildRepositoryStateDraft,
-      buildSealDraft,
-      buildTransferManifestDraft,
-      buildTransferSliceDraft,
-      packetizePayload,
-      repositoryAddress,
-      sha256Hex,
-      utf8Bytes,
-    } from '../shared/nip34-quorum.mjs';
+      createParticipantProfile,
+      createParticipants,
+      buildMetadataEvent,
+      createNip34SequenceEvents as _createNip34SequenceEvents,
+      createQuorumSequenceEvents as _createQuorumSequenceEvents,
+      njumpUrlForEvent,
+      njumpProfileUrlForPubkey,
+      nostrProfileUrlForPubkey,
+      profileUrlsForPubkey,
+      pickRandomProfileUrl,
+      njumpProbeUrlForEvent,
+    } from '../shared/dag-quorum.mjs';
     import { createDagActionContext, wireButtons } from './dag-actions.mjs';
 
     import {
@@ -231,74 +230,6 @@
         await dagLibp2pNodePromise;
       }
       return dagLibp2pNode;
-    }
-
-    // Step 7: derive deterministic participant keys from stable names.
-    async function sha256Bytes(value) {
-      const encoded = new TextEncoder().encode(value);
-      const digest = await crypto.subtle.digest('SHA-256', encoded);
-      return new Uint8Array(digest);
-    }
-
-    // Step 7b: derive deterministic git-like commit ids for the real NIP-34 demo flow.
-    async function deterministicHex(value, bytes = 20) {
-      const digest = await sha256Bytes(value);
-      return [...digest]
-        .slice(0, bytes)
-        .map((byte) => byte.toString(16).padStart(2, '0'))
-        .join('');
-    }
-
-    // Step 8: normalize profile metadata into the shape the UI and relay
-    // events expect.
-    function createParticipantProfile({
-      name,
-      displayName,
-      about,
-      picture,
-      website,
-      alternateSource,
-      profileUrl,
-      quorumId,
-      quorumEventId = quorumId,
-    }) {
-      return {
-        name,
-        display_name: displayName,
-        about,
-        picture,
-        website,
-        profile_url: profileUrl,
-        alternate_source: alternateSource,
-        quorum_id: quorumId,
-        quorum_event_id: quorumEventId,
-      };
-    }
-
-    // Step 9: build public profile/event links used in the detail cards.
-    function njumpUrlForEvent(eventId) {
-      return `https://njump.me/${neventEncode({ id: eventId })}`;
-    }
-
-    function njumpProfileUrlForPubkey(pubkey) {
-      return `https://njump.me/${npubEncode(pubkey)}`;
-    }
-
-    function nostrProfileUrlForPubkey(pubkey) {
-      return `https://nostr.com/${npubEncode(pubkey)}`;
-    }
-
-    function profileUrlsForPubkey(pubkey) {
-      return [nostrProfileUrlForPubkey(pubkey), njumpProfileUrlForPubkey(pubkey)];
-    }
-
-    function pickRandomProfileUrl(pubkey) {
-      const urls = profileUrlsForPubkey(pubkey);
-      return Math.random() < 0.8 ? urls[0] : urls[1];
-    }
-
-    function njumpProbeUrlForEvent(eventId) {
-      return `https://njump.me/image/${neventEncode({ id: eventId })}?v=${Date.now()}`;
     }
 
     // Step 10: lazily probe njump so the UI can show optional deep links.
@@ -819,36 +750,16 @@
     // Step 18: seed the fixed five-participant quorum used by the demo.
     async function initParticipants() {
       window.__sharedFooter?.log('demo', 'initializing participants', 'debug', 'checking');
-      participants = await Promise.all(Array.from({ length: FED_COUNT }, async (_, i) => {
-        const name = PARTICIPANT_NAMES[i] || `participant${i + 1}`;
-        const keyLabel = PARTICIPANT_KEY_LABELS[i] || name;
-        // Keep the first two demo quorum members stable across reloads so the
-        // native and wasm peers can share the same deterministic identities.
-        const sk = await sha256Bytes(keyLabel);
-        const pk = getPublicKey(sk);
-        const displayName = PARTICIPANT_DISPLAY_NAMES[i] || `Participant ${i + 1}`;
-        const profile = createParticipantProfile({
-          name,
-          displayName,
-          about: `Member ${i + 1} of the nostr-dag quorum`,
-          picture: `https://api.dicebear.com/9.x/identicon/svg?seed=${encodeURIComponent(name)}`,
-          website: SITE_URL,
-          alternateSource: njumpProfileUrlForPubkey(pk),
-          profileUrl: nostrProfileUrlForPubkey(pk),
-          quorumId: QUORUM_ID,
-        });
-        return {
-          name,
-          displayName,
-          profile,
-          sk,
-          pk,
-          quorumId: QUORUM_ID,
-          picture: profile.picture,
-        };
-      }));
+      participants = await createParticipants({
+        fedCount: FED_COUNT,
+        participantNames: PARTICIPANT_NAMES,
+        participantDisplayNames: PARTICIPANT_DISPLAY_NAMES,
+        participantKeyLabels: PARTICIPANT_KEY_LABELS,
+        quorumId: QUORUM_ID,
+        siteUrl: SITE_URL,
+        log: window.__sharedFooter,
+      });
       discoveredParticipants.clear();
-      window.__sharedFooter?.log('demo', `initialized ${participants.length} participants`, 'info', 'available');
 
       authorEl.innerHTML = participants
         .map((p, i) => `<option value="${i}">${p.name} (${p.pk})</option>`)
@@ -887,32 +798,10 @@
     }
 
     function buildMetadataEvent(author, quorumEventId = author.quorumId) {
-      const baseProfile = author.profile || {};
-      const profile = createParticipantProfile({
-        name: baseProfile.name || author.name,
-        displayName: baseProfile.display_name || author.displayName,
-        about: `${baseProfile.about || author.about} quorum_event_id: ${quorumEventId}.`,
-        picture: baseProfile.picture || author.picture,
-        website: baseProfile.website || author.website,
-        alternateSource: baseProfile.alternate_source || author.profile?.alternate_source || njumpProfileUrlForPubkey(author.pk),
-        profileUrl: baseProfile.profile_url || author.profile?.profile_url || nostrProfileUrlForPubkey(author.pk),
-        quorumId: baseProfile.quorum_id || author.quorumId,
-        quorumEventId,
-      });
-      window.__sharedFooter?.log(
-        'demo',
-        `build metadata event for ${author.name} (${author.pk}) quorum_event_id ${quorumEventId}`,
-        'info',
-        'checking',
-      );
-      window.__sharedFooter?.log('demo', `metadata profile:\n${JSON.stringify(profile, null, 2)}`, 'info', 'checking');
-
+      const draft = buildMetadataEvent(author, quorumEventId, { log: window.__sharedFooter });
       const event = finalizeEvent({
-        kind: 0,
-        created_at: getNetworkUnixTime(),
-        tags: stampBridgeRoundTripTag([]),
-        content: JSON.stringify(profile),
-        pubkey: author.pk,
+        ...draft,
+        tags: stampBridgeRoundTripTag(draft.tags),
       }, author.sk);
       window.__sharedFooter?.log('demo', `metadata event built ${event.id}`, 'info', 'available');
       return event;
@@ -1127,186 +1016,26 @@
 
     // Step 19b: broadcast a real repository announcement/state/issue/PR chain instead of fake genesis notes.
     async function createNip34SequenceEvents() {
-      window.__sharedFooter?.log('demo', 'create NIP-34 sequence events', 'info', 'checking');
-      const [maintainer, stateAuthor, issueAuthor, prAuthor] = participants;
-      const createdAt = getNetworkUnixTime();
-      const repoId = 'nostr-dag-demo';
-      const repoRootCommit = await deterministicHex(`${repoId}:root`);
-      const mainCommit = await deterministicHex(`${repoId}:main`);
-      const featureCommit = await deterministicHex(`${repoId}:feature`);
-      const repoCloneUrl = `nostr://${npubEncode(maintainer.pk)}/${encodeURIComponent(repoId)}`;
-      const repoAddressTag = repositoryAddress(maintainer.pk, repoId);
-
-      const repoAnnouncement = signDraftEvent(maintainer, buildRepositoryAnnouncementDraft({
-        pubkey: maintainer.pk,
-        createdAt,
-        repoId,
-        name: 'nostr-dag demo repository',
-        description: 'Real NIP-34 repository announcement broadcast by the DAG demo.',
-        web: ['https://github.com/RandyMcMillan/nostr-dag'],
-        clone: [repoCloneUrl, 'https://github.com/RandyMcMillan/nostr-dag.git'],
-        relays: [...RELAYS],
-        earliestUniqueCommit: repoRootCommit,
-        maintainers: participants.map((participant) => participant.pk),
-        hashtags: ['nostr-dag', 'nip34', 'quorum'],
-      }));
-      window.__sharedFooter?.log('demo', `repo announcement event:\n${JSON.stringify(repoAnnouncement, null, 2)}`, 'info', 'checking');
-      insertEvent(repoAnnouncement);
-      await yieldToMainThread();
-
-      const repoState = signDraftEvent(stateAuthor, buildRepositoryStateDraft({
-        pubkey: stateAuthor.pk,
-        createdAt: createdAt + 1,
-        repoId,
-        refs: [
-          ['heads/main', mainCommit],
-          ['heads/quorum-demo', featureCommit],
-          ['tags/demo-v1', mainCommit],
-        ],
-        head: 'refs/heads/main',
-        parents: [repoAnnouncement.id],
-      }));
-      window.__sharedFooter?.log('demo', `repo state event:\n${JSON.stringify(repoState, null, 2)}`, 'info', 'checking');
-      insertEvent(repoState);
-      await yieldToMainThread();
-
-      const issue = signDraftEvent(issueAuthor, buildIssueDraft({
-        pubkey: issueAuthor.pk,
-        createdAt: createdAt + 2,
-        repoAddress: repoAddressTag,
-        repositoryOwner: maintainer.pk,
-        subject: 'Broadcast quorum-attested NIP-34 events',
-        labels: ['demo', 'quorum'],
-        content: 'Replace fake demo events with a real NIP-34 repository sequence and quorum attestations.',
-        parents: [repoState.id],
-      }));
-      window.__sharedFooter?.log('demo', `issue event:\n${JSON.stringify(issue, null, 2)}`, 'info', 'checking');
-      insertEvent(issue);
-      await yieldToMainThread();
-
-      const pullRequest = signDraftEvent(prAuthor, buildPullRequestDraft({
-        pubkey: prAuthor.pk,
-        createdAt: createdAt + 3,
-        repoAddress: repoAddressTag,
-        repositoryOwner: maintainer.pk,
-        repoRootCommit,
-        subject: 'Wire the demo to real NIP-34 quorum events',
-        labels: ['demo', 'quorum', 'nip34'],
-        headCommit: featureCommit,
-        clone: [repoCloneUrl],
-        branchName: 'quorum-demo',
-        mergeBase: mainCommit,
-        content: 'This PR event advertises the demo branch carrying the quorum-attested NIP-34 flow.',
-        parents: [issue.id],
-      }));
-      window.__sharedFooter?.log('demo', `pull request event:\n${JSON.stringify(pullRequest, null, 2)}`, 'info', 'checking');
-      insertEvent(pullRequest);
-
-      const protocolEvents = [repoAnnouncement, repoState, issue, pullRequest];
-      window.__sharedFooter?.log(
-        'demo',
-        `NIP-34 sequence ids: ${protocolEvents.map((event) => `${event.kind}:${event.id}`).join(', ')}`,
-        'info',
-        'available',
-      );
-      return {
-        repoId,
-        repoCloneUrl,
-        repoRootCommit,
-        protocolEvents,
-      };
+      return _createNip34SequenceEvents({
+        participants,
+        relays: RELAYS,
+        signDraftEvent,
+        insertEvent,
+        yieldToMainThread: yieldToBrowser,
+        log: window.__sharedFooter,
+      });
     }
 
     // Step 19c: run the real manifest → slice → attest → seal sequence over the latest NIP-34 payload.
     async function createQuorumSequenceEvents(repoSequence) {
-      window.__sharedFooter?.log('demo', 'create quorum sequence events', 'info', 'checking');
-      const [repoAnnouncement, repoState, issue, pullRequest] = repoSequence.protocolEvents;
-      const manifestAuthor = participants[participants.length - 1];
-      const createdAt = getNetworkUnixTime();
-      const payloadJson = JSON.stringify({
-        repository: {
-          repo_id: repoSequence.repoId,
-          clone_url: repoSequence.repoCloneUrl,
-          earliest_unique_commit: repoSequence.repoRootCommit,
-        },
-        events: [repoAnnouncement, repoState, issue, pullRequest],
+      return _createQuorumSequenceEvents({
+        repoSequence,
+        participants,
+        signDraftEvent,
+        insertEvent,
+        yieldToMainThread: yieldToBrowser,
+        log: window.__sharedFooter,
       });
-      const payloadBytes = utf8Bytes(payloadJson);
-      window.__sharedFooter?.log('demo', `quorum payload json:\n${payloadJson}`, 'info', 'checking');
-      const rootId = `nip34-quorum-${repoAnnouncement.id}`;
-      const digest = await sha256Hex(payloadBytes);
-      const sliceSize = Math.max(96, Math.ceil(payloadBytes.length / 3));
-      const slices = packetizePayload(rootId, payloadBytes, sliceSize);
-
-      const manifestEvent = signDraftEvent(manifestAuthor, buildTransferManifestDraft({
-        pubkey: manifestAuthor.pk,
-        createdAt,
-        rootId,
-        totalBytes: payloadBytes.length,
-        totalSlices: slices.length,
-        parents: [pullRequest.id],
-      }));
-      window.__sharedFooter?.log('demo', `manifest event:\n${JSON.stringify(manifestEvent, null, 2)}`, 'info', 'checking');
-      insertEvent(manifestEvent);
-      await yieldToMainThread();
-      window.__sharedFooter?.log('demo', `quorum manifest ${manifestEvent.id} with ${slices.length} slices pending`, 'info', 'checking');
-
-      const sliceEvents = [];
-      for (let i = 0; i < slices.length; i += 1) {
-        const sliceEvent = signDraftEvent(manifestAuthor, buildTransferSliceDraft({
-          pubkey: manifestAuthor.pk,
-          createdAt: createdAt + 1 + i,
-          manifestId: manifestEvent.id,
-          rootId,
-          seq: slices[i].seq,
-          totalSlices: slices[i].totalSlices,
-          data: slices[i].data,
-          parents: i === 0 ? [] : [sliceEvents[i - 1].id],
-        }));
-        sliceEvents.push(sliceEvent);
-        window.__sharedFooter?.log('demo', `slice event ${i + 1}/${slices.length}:\n${JSON.stringify(sliceEvent, null, 2)}`, 'info', 'checking');
-        insertEvent(sliceEvent);
-        window.__sharedFooter?.log('demo', `quorum slice ${i + 1}/${slices.length} ${sliceEvent.id}`, 'info', 'checking');
-        if (i % 2 === 1) await yieldToMainThread();
-      }
-
-      const attesters = participants.slice(0, 4);
-      const attestationEvents = [];
-      for (let i = 0; i < attesters.length; i += 1) {
-        const attestation = signDraftEvent(attesters[i], buildAttestDraft({
-          pubkey: attesters[i].pk,
-          createdAt: createdAt + slices.length + 1 + i,
-          rootId,
-          sha256: digest,
-          manifestId: manifestEvent.id,
-          sliceIds: sliceEvents.map((event) => event.id),
-          parents: [],
-        }));
-        attestationEvents.push(attestation);
-        window.__sharedFooter?.log('demo', `attestation event ${i + 1}/${attesters.length}:\n${JSON.stringify(attestation, null, 2)}`, 'info', 'checking');
-        insertEvent(attestation);
-        window.__sharedFooter?.log('demo', `quorum attest ${i + 1}/${attesters.length} ${attestation.id} by ${attesters[i].name}`, 'info', 'checking');
-        if (i % 2 === 1) await yieldToMainThread();
-      }
-
-      const sealEvent = signDraftEvent(manifestAuthor, buildSealDraft({
-        pubkey: manifestAuthor.pk,
-        createdAt: createdAt + slices.length + attestationEvents.length + 2,
-        rootId,
-        sha256: digest,
-        attestIds: attestationEvents.map((event) => event.id),
-        parents: [],
-      }));
-      window.__sharedFooter?.log('demo', `seal event:\n${JSON.stringify(sealEvent, null, 2)}`, 'info', 'checking');
-      insertEvent(sealEvent);
-      window.__sharedFooter?.log('demo', `quorum seal ${sealEvent.id} digest ${digest}`, 'info', 'available');
-
-      return {
-        manifestEvent,
-        sliceEvents,
-        attestationEvents,
-        sealEvent,
-      };
     }
 
     async function createEvent() {
