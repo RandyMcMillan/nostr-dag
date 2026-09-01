@@ -11,8 +11,7 @@
  * can be tested in Node without a browser or WASM runtime.
  */
 
-import { finalizeEvent, getPublicKey } from 'https://esm.sh/nostr-tools@2.10.4/pure';
-import { neventEncode, npubEncode } from 'https://esm.sh/nostr-tools@2.10.4/nip19';
+import { finalizeEvent, getPublicKey, neventEncode, npubEncode } from '../vendor/nostr-tools.mjs';
 import { getNetworkUnixTime } from './network-time.mjs';
 import { stampBridgeRoundTripTag } from './bridge-roundtrip.mjs';
 import {
