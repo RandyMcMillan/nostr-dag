@@ -1,2 +1,2 @@
 export const APP_NAME = 'nostr-dag';
-export const APP_VERSION = '0.20.2';
+export const APP_VERSION = '0.20.3';
