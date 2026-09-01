@@ -409,9 +409,12 @@ export async function createSharedLibp2pStack({
     },
   ];
 
-  // Build direct-peers list for gossipsub so the native server is always kept
-  // in the mesh (deterministic key => known peer id).
+  // Discover the local native node so the browser can join its gossipsub mesh.
+  // We fetch /peers before constructing the libp2p node so the native addresses
+  // can be injected into the bootstrap list — libp2p bootstrap dials immediately
+  // on start, which is more reliable than post-start manual dialing.
   let directPeers = [];
+  let nativeBootstrapAddrs = [];
   try {
     const res = await fetch("/peers", { cache: "no-store" });
     if (res.ok) {
@@ -427,6 +430,7 @@ export async function createSharedLibp2pStack({
           }
         }
         if (addrs.length) {
+          nativeBootstrapAddrs.push(...addrs);
           try {
             directPeers.push({
               id: peerIdFromString(peer.peer_id),
@@ -444,10 +448,18 @@ export async function createSharedLibp2pStack({
   if (directPeers.length) {
     emitLog(onLog, "debug", `gossipsub directPeers: ${directPeers.length}`, "checking");
   }
+  if (nativeBootstrapAddrs.length) {
+    emitLog(onLog, "info", `native bootstrap addrs: ${nativeBootstrapAddrs.length}`, "checking");
+  }
+
+  // Prepend native node addresses to the bootstrap list so libp2p dials them
+  // immediately on node start.
+  const allBootstrapPeers = [...nativeBootstrapAddrs, ...peers];
 
   let node = null;
   let lastError = null;
   const allowLocalDial = peers.some((addr) => /127\.0\.0\.1|localhost|::1/.test(addr))
+    || nativeBootstrapAddrs.some((addr) => /127\.0\.0\.1|localhost|::1/.test(addr))
     || ["localhost", "127.0.0.1", "::1"].includes(globalThis.location?.hostname || "");
   for (const config of configs) {
     try {
@@ -476,9 +488,9 @@ export async function createSharedLibp2pStack({
           },
         } : {}),
         ...(privateKey ? { privateKey } : {}),
-        peerDiscovery: peers.length ? [
+        peerDiscovery: allBootstrapPeers.length ? [
           bootstrap({
-            list: peers,
+            list: allBootstrapPeers,
             interval: 60_000,
             timeout: 3_000,
           }),
@@ -535,37 +547,9 @@ export async function createSharedLibp2pStack({
   emitLog(onLog, "info", `node started: ${node.peerId.toString()}`, "available");
   emitLog(onLog, "debug", `peer id stable: ${node.peerId.toString()}`, "available");
 
-  // Dial the local native node so the browser joins its gossipsub mesh.
-  // Without this connection the browser only talks to public bootstrap peers
-  // which do not subscribe to our app topic and therefore never relay queries.
-  try {
-    const res = await fetch("/peers", { cache: "no-store" });
-    if (res.ok) {
-      const peerList = await res.json();
-      for (const peer of peerList) {
-        if (peer.kind !== "native" || peer.source !== "localhost") continue;
-        const peerAddrs = parsePeerAddrs(peer.detail);
-        for (const addr of peerAddrs) {
-          if (addr.includes("/ws") || addr.includes("/wss") || addr.includes("/webrtc")) {
-            const suffix = `/p2p/${peer.peer_id}`;
-            const dialAddr = addr.endsWith(suffix) ? addr : `${addr}${suffix}`;
-            try {
-              await node.dial(multiaddr(dialAddr));
-              emitLog(onLog, "info", `dialed native node: ${dialAddr}`, "available");
-            } catch (dialErr) {
-              emitLog(onLog, "debug", `native dial skipped (${dialAddr}): ${dialErr?.message || dialErr}`, "checking");
-            }
-          }
-        }
-      }
-    }
-  } catch {
-    // best effort only
-  }
-
   return {
     node,
-    bootstrapPeers: peers,
+    bootstrapPeers: allBootstrapPeers,
   };
 }
 

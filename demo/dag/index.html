@@ -127,7 +127,7 @@
     import { scheduleAfterPaint, yieldToBrowser } from '../shared/async-lifecycle.mjs';
     import { stampBridgeRoundTripTag } from '../shared/bridge-roundtrip.mjs';
     import { serializeDagBridgeEnvelope } from '../shared/cross-protocol-broadcast.mjs';
-    import { getNetworkUnixTime } from '../shared/network-time.mjs';
+    import { getNetworkUnixTime, validateEventTimestamp } from '../shared/network-time.mjs';
     // libp2p-stack loads many modules from esm.sh; use dynamic import so a network
     // failure does not break the entire DAG page.
     let createSharedLibp2pStack = null;
@@ -718,6 +718,11 @@
       if (PROTOCOL_KINDS.includes(event.kind)) {
         window.__sharedFooter?.log('demo', `discovered ${kindLabel(event.kind)} ${event.id}`, 'trace', 'checking');
         if (!events.has(event.id)) {
+          const tsCheck = validateEventTimestamp(event.created_at);
+          if (!tsCheck.valid) {
+            window.__sharedFooter?.log('demo', `rejected ${kindLabel(event.kind)} ${event.id}: ${tsCheck.message}`, 'warn', 'checking');
+            return;
+          }
           try {
             insertEvent(event);
           } catch (e) {

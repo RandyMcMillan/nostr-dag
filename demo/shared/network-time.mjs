@@ -8,6 +8,12 @@ const QUERY_WAIT_MS = 1_200;
 const SAMPLE_WINDOW = 10;
 const DAMPING_FACTOR = 0.1;
 const MIN_SAMPLES_FOR_RECALIBRATION = 3;
+const SAMPLE_TTL_MS = 60_000;
+const PEER_INACTIVE_MS = 120_000;
+const RESPOND_PROBABILITY = 0.8;
+const RESPOND_JITTER_MAX_MS = 300;
+const RESPONSE_VALIDITY_MS = 5_000;
+const QUERY_STALENESS_THRESHOLD_MS = 10_000;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
@@ -31,6 +37,10 @@ const state = globalThis.__nostrDagNetworkTimeState || {
   _peerCheckTimer: null,
   // Persistent sliding window of recent peer samples for damped consensus.
   peerSamples: [],
+  // Per-peer trust scores for weighted median consensus.
+  peerScores: new Map(),
+  // Last time we received any sample from a given peer (for expiry).
+  lastPeerActivity: new Map(),
   // Tracks whether we have already attached the visibility listener so that
   // re-calling initSharedNetworkTime() (e.g. hot-module reload) does not
   // register a second handler.
@@ -230,6 +240,7 @@ export function buildNetworkTimeResponse(query, responderPeerId, nowMs) {
     responder_peer_id: responderPeerId || '',
     sent_at_ms: query.sent_at_ms,
     server_time_ms: nowMs,
+    expires_at_ms: nowMs + RESPONSE_VALIDITY_MS,
   };
 }
 
@@ -249,11 +260,38 @@ export function parseNetworkTimeMessage(text) {
   }
 }
 
+function weightedMedian(values, weights) {
+  if (!Array.isArray(values) || !values.length) return 0;
+  const paired = values
+    .map((v, i) => ({ value: Number(v), weight: Number(weights?.[i] ?? 1) }))
+    .filter((p) => Number.isFinite(p.value) && Number.isFinite(p.weight) && p.weight > 0)
+    .sort((a, b) => a.value - b.value);
+  if (!paired.length) return 0;
+  const totalWeight = paired.reduce((sum, p) => sum + p.weight, 0);
+  let cumulative = 0;
+  for (const p of paired) {
+    cumulative += p.weight;
+    if (cumulative >= totalWeight / 2) return p.value;
+  }
+  return paired[paired.length - 1].value;
+}
+
 export function computeConsensusOffset(samples = []) {
   return median(
     samples
       .map((sample) => Number(sample?.deltaMs ?? sample?.offsetMs))
       .filter((value) => Number.isFinite(value)),
+  );
+}
+
+function computeWeightedConsensusOffset(samples) {
+  const weights = samples.map((s) => {
+    const scoreEntry = state.peerScores.get(s.responderPeerId);
+    return scoreEntry?.score ?? 1;
+  });
+  return weightedMedian(
+    samples.map((s) => Number(s?.deltaMs ?? s?.offsetMs)).filter(Number.isFinite),
+    weights,
   );
 }
 
@@ -263,16 +301,39 @@ export function computeConsensusOffset(samples = []) {
  * we move only a fraction of the way toward the target each round.
  */
 function recalibrateOffset() {
+  const now = Date.now();
+
+  // 1. Evict stale samples
+  const beforeEviction = state.peerSamples.length;
+  state.peerSamples = state.peerSamples.filter((s) => now - (s.receivedAtMs || 0) < SAMPLE_TTL_MS);
+  if (state.peerSamples.length < beforeEviction) {
+    logEvent(`[ttl] evicted ${beforeEviction - state.peerSamples.length} stale sample(s)`);
+  }
+
+  // 2. Evict inactive peers from scores and activity maps
+  for (const [peerId, lastSeen] of state.lastPeerActivity.entries()) {
+    if (now - lastSeen > PEER_INACTIVE_MS) {
+      state.lastPeerActivity.delete(peerId);
+      state.peerScores.delete(peerId);
+      logEvent(`[ttl] peer ${peerId.slice(0, 16)}… inactive, dropped from scoring`);
+    }
+  }
+
   const recentSamples = state.peerSamples.slice(-SAMPLE_WINDOW);
   if (recentSamples.length < MIN_SAMPLES_FOR_RECALIBRATION) {
     state.status = state.lastSyncAt ? 'available' : 'unavailable';
     logEvent(`[consensus] need ${MIN_SAMPLES_FOR_RECALIBRATION}+ recent samples for consensus — total=${state.peerSamples.length} recent=${recentSamples.length} offset=${formatDeltaMs(state.offsetMs)}`);
     return;
   }
-  const medianDelta = computeConsensusOffset(recentSamples);
+
+  // 3. Use weighted median when peer scores exist, else plain median
+  const medianDelta = state.peerScores.size > 0
+    ? computeWeightedConsensusOffset(recentSamples)
+    : computeConsensusOffset(recentSamples);
+
   const beforeOffset = state.offsetMs;
   state.offsetMs += Math.round(medianDelta * DAMPING_FACTOR);
-  state.lastSyncAt = Date.now();
+  state.lastSyncAt = now;
   state.lastSampleCount = state.peerSamples.length;
   state.lastAccuracyMs = median(recentSamples.map((s) => s.rttMs / 2));
   state.status = 'available';
@@ -305,8 +366,30 @@ async function handleNetworkTimeMessage(event) {
   if (payload.type === 'query') {
     if (!state.node?.services?.pubsub?.publish) return;
     if (payload.requester_peer_id && payload.requester_peer_id === state.localPeerId) return;
+
+    // Staleness guard: reject queries that are too old or from the future.
+    const querySentAt = Number(payload.sent_at_ms);
+    const localConsensusTime = getNetworkNowMs();
+    if (Number.isFinite(querySentAt) && Math.abs(localConsensusTime - querySentAt) > QUERY_STALENESS_THRESHOLD_MS) {
+      logEvent(`[query] stale query ignored req=${payload.request_id} delta=${Math.round(localConsensusTime - querySentAt)}ms`);
+      return;
+    }
+
+    // Anti-flood: probabilistic response + jitter.
+    const topicPeers = state.node?.services?.pubsub?.getPeers?.(state.topic) || [];
+    if (topicPeers.length < 2) {
+      logEvent(`[query] skipped response (only ${topicPeers.length} topic peer)`);
+      return;
+    }
+    if (Math.random() > RESPOND_PROBABILITY) {
+      logEvent(`[query] probabilistic drop req=${payload.request_id}`);
+      return;
+    }
+    const jitter = Math.floor(Math.random() * RESPOND_JITTER_MAX_MS);
+    await new Promise((resolve) => globalThis.setTimeout(resolve, jitter));
+
     const response = buildNetworkTimeResponse(payload, state.localPeerId, Date.now());
-    logEvent(`[query] from=${payload.requester_peer_id || 'unknown'} req=${payload.request_id} localTime=${response.server_time_ms}`);
+    logEvent(`[query] from=${payload.requester_peer_id || 'unknown'} req=${payload.request_id} localTime=${response.server_time_ms} jitter=${jitter}ms`);
     await publishNetworkTimeMessage(response);
     return;
   }
@@ -315,6 +398,14 @@ async function handleNetworkTimeMessage(event) {
   if (!pending) return;
   if (payload.requester_peer_id && payload.requester_peer_id !== state.localPeerId) return;
   const receivedAtMs = Date.now();
+
+  // Replay / staleness guard: reject expired responses.
+  const expiresAtMs = Number(payload.expires_at_ms);
+  if (Number.isFinite(expiresAtMs) && receivedAtMs > expiresAtMs) {
+    logEvent(`[response] expired req=${payload.request_id} expired=${Math.round(receivedAtMs - expiresAtMs)}ms ago`);
+    return;
+  }
+
   const sentAtMs = Number(payload.sent_at_ms);
   const serverTimeMs = Number(payload.server_time_ms);
   if (!Number.isFinite(sentAtMs) || !Number.isFinite(serverTimeMs)) {
@@ -329,7 +420,24 @@ async function handleNetworkTimeMessage(event) {
   // Track that this pending request got a response
   pending.responses.push({ responderPeerId, deltaMs, rttMs });
 
-  // Store every sample forever, keyed by peer for per-peer history.
+  // Update peer activity timestamp
+  state.lastPeerActivity.set(responderPeerId, receivedAtMs);
+
+  // Update peer trust score based on deviation from current consensus
+  const accuracyMs = Number.isFinite(state.lastAccuracyMs) ? state.lastAccuracyMs : 500;
+  const absDelta = Math.abs(deltaMs);
+  let scoreDelta = 0;
+  if (absDelta <= accuracyMs * 2) scoreDelta = +1;
+  else if (absDelta <= accuracyMs * 5) scoreDelta = 0;
+  else scoreDelta = -2;
+  const prevScore = state.peerScores.get(responderPeerId) || { score: 1, samples: 0 };
+  const newScore = Math.max(0.1, prevScore.score + scoreDelta);
+  state.peerScores.set(responderPeerId, { score: newScore, samples: prevScore.samples + 1 });
+  if (scoreDelta !== 0) {
+    logEvent(`[score] peer=${responderPeerId.slice(0, 16)}… score=${newScore.toFixed(2)} delta=${scoreDelta > 0 ? '+' : ''}${scoreDelta} absDelta=${Math.round(absDelta)}ms`);
+  }
+
+  // Store sample with timestamp for TTL eviction
   state.peerSamples.push({ responderPeerId, deltaMs, rttMs, receivedAtMs });
   state.lastSampleCount = state.peerSamples.length;
 
@@ -351,6 +459,29 @@ export function getNetworkNowMs() {
 
 export function getNetworkUnixTime() {
   return Math.floor(getNetworkNowMs() / 1000);
+}
+
+/**
+ * Validate a Nostr event timestamp against the current consensus time.
+ * Returns { valid: boolean, delta: number, message: string }.
+ * When consensus is unavailable, always returns valid=true (best-effort).
+ */
+export function validateEventTimestamp(createdAtUnix, toleranceSec = 60) {
+  const snap = state;
+  if (snap.status !== 'available') {
+    return { valid: true, delta: 0, message: 'consensus unavailable, skipping validation' };
+  }
+  const consensusUnix = getNetworkUnixTime();
+  const delta = createdAtUnix - consensusUnix;
+  const absDelta = Math.abs(delta);
+  if (absDelta <= toleranceSec) {
+    return { valid: true, delta, message: `within ${absDelta}s of consensus` };
+  }
+  return {
+    valid: false,
+    delta,
+    message: `timestamp ${absDelta}s ${delta > 0 ? 'ahead' : 'behind'} consensus (tolerance ${toleranceSec}s)`,
+  };
 }
 
 /**
@@ -456,12 +587,12 @@ export function initSharedNetworkTime({ headerApi = null } = {}) {
       if (!node?.services?.pubsub?.addEventListener) {
         logEvent('[attach] node missing pubsub');
         updateHeader();
-        return;
+        return Promise.resolve();
       }
       if (state.node === node) {
         logEvent('[attach] same node re-attached');
         scheduleSyncLoop();
-        return;
+        return Promise.resolve();
       }
       state.node = node;
       state.localPeerId = node?.peerId?.toString?.() || '';
@@ -483,7 +614,7 @@ export function initSharedNetworkTime({ headerApi = null } = {}) {
         }
       });
 
-      Promise.resolve(node.services.pubsub.subscribe(state.topic)).then(() => {
+      return Promise.resolve(node.services.pubsub.subscribe(state.topic)).then(() => {
         logEvent('[attach] topic subscribed');
         if (state._peerListenerNode !== node) {
           state._peerListenerNode = node;
@@ -529,7 +660,21 @@ export function initSharedNetworkTime({ headerApi = null } = {}) {
       state.lastSampleCount = 0;
       state.lastAccuracyMs = null;
       state.peerSamples = [];
+      state.peerScores = new Map();
+      state.lastPeerActivity = new Map();
       state._lastTickKey = null;
+      if (state.tickTimer) {
+        globalThis.clearInterval(state.tickTimer);
+        state.tickTimer = null;
+      }
+      if (state.syncTimer) {
+        globalThis.clearInterval(state.syncTimer);
+        state.syncTimer = null;
+      }
+      if (state._peerCheckTimer) {
+        globalThis.clearInterval(state._peerCheckTimer);
+        state._peerCheckTimer = null;
+      }
       try {
         globalThis.localStorage?.removeItem(STORAGE_KEY);
       } catch {
