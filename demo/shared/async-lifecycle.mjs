@@ -20,3 +20,31 @@ export function yieldToBrowser() {
     scheduleAfterPaint(resolve);
   });
 }
+
+/**
+ * Simple concurrency limiter for async tasks.
+ * @param {number} concurrency - max number of tasks running in parallel
+ * @returns {(fn: () => Promise<any>) => Promise<any>}
+ */
+export function pLimit(concurrency) {
+  const queue = [];
+  let active = 0;
+  function next() {
+    active--;
+    if (queue.length) queue.shift()();
+  }
+  return (fn) => new Promise((resolve, reject) => {
+    async function run() {
+      active++;
+      try {
+        resolve(await fn());
+      } catch (e) {
+        reject(e);
+      } finally {
+        next();
+      }
+    }
+    if (active < concurrency) run();
+    else queue.push(run);
+  });
+}
