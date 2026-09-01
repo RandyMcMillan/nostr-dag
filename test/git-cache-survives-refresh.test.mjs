@@ -12,7 +12,21 @@ import { APP_VERSION } from '../demo/shared/app-version.generated.mjs';
 const BASE = process.env.BASE_URL || 'http://127.0.0.1:3000';
 const CACHE_KEY = `nostr-dag-git-repo-cache-${APP_VERSION}`;
 
+async function serverHealthy() {
+  try {
+    const res = await fetch(`${BASE}/`, { method: 'HEAD', signal: AbortSignal.timeout(2000) });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 test('git repo cache survives browser refresh', { timeout: 30_000 }, async (t) => {
+  if (!(await serverHealthy())) {
+    t.skip('server not running — start nostr-dag-server to run this test');
+    return;
+  }
+
   let browser;
   try {
     try {
