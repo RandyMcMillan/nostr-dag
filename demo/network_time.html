@@ -234,9 +234,10 @@
       topicLogEl.textContent = topicLogs.slice(-40).join('\n');
     }
 
-    function logTopicPeer({ peerId, topic }) {
+    function logTopicPeer({ peerId, topic, left }) {
       const short = peerId ? peerId.slice(0, 12) + '…' : 'unknown';
-      topicLogs.push(`[${new Date().toLocaleTimeString()}] [${topic}] +peer ${short}`);
+      const marker = left ? '-peer' : '+peer';
+      topicLogs.push(`[${new Date().toLocaleTimeString()}] [${topic}] ${marker} ${short}`);
       topicLogEl.textContent = topicLogs.slice(-40).join('\n');
     }
 
