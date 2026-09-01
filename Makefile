@@ -45,9 +45,9 @@ test-native:
 
 test-js:
 	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) cargo check --quiet
-	@echo "Starting nostr-dag-server for JS tests (P2P disabled)..."
-	@CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) $(CARGO) build --bin nostr-dag-server --features native >/dev/null 2>&1
-	@./target/debug/nostr-dag-server &
+	@echo "Starting nostr-dag-server for JS tests (P2P enabled)..."
+	@CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) P2P_ENABLE=1 $(CARGO) build --bin nostr-dag-server --features p2p,native >/dev/null 2>&1
+	@P2P_ENABLE=1 ./target/debug/nostr-dag-server &
 	SERVER_PID=$$!; \
 	for i in 1 2 3 4 5 6 7 8 9 10; do \
 		if curl -s -o /dev/null http://127.0.0.1:3000/; then break; fi; \
