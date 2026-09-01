@@ -390,6 +390,17 @@ export function initSharedNetworkTime({ headerApi = null } = {}) {
       node.services.pubsub.addEventListener('message', (event) => {
         void handleNetworkTimeMessage(event);
       });
+      if (!state._peerListenersAttached) {
+        state._peerListenersAttached = true;
+        node.addEventListener('peer:connect', () => {
+          logEvent('[peer:connect] triggering sync');
+          void syncNetworkTime();
+        });
+        node.addEventListener('peer:disconnect', () => {
+          logEvent('[peer:disconnect] triggering sync');
+          void syncNetworkTime();
+        });
+      }
       scheduleSyncLoop();
       void syncNetworkTime();
     },
