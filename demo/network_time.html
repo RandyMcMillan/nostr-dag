@@ -232,16 +232,20 @@
     }
 
     // Create a minimal header API stub so network-time can update us.
+    // Use `let` so the callback can reference it without a TDZ error during
+    // the synchronous init call (updateHeader() fires immediately inside
+    // initSharedNetworkTime before the const assignment would complete).
+    let networkTime = null;
     const headerApi = {
       setNetworkTime({ text, title, state }) {
         // Pull the real snapshot so the display shows actual offset/samples.
-        const snapshot = networkTime.getSnapshot();
+        const snapshot = networkTime?.getSnapshot?.() || { offsetMs: 0, status: 'checking', lastSampleCount: 0, lastAccuracyMs: null };
         updateDisplay(snapshot);
         log(text);
       },
     };
 
-    const networkTime = initSharedNetworkTime({ headerApi });
+    networkTime = initSharedNetworkTime({ headerApi });
 
     // Poll the network time state and refresh the display.
     function refresh() {
