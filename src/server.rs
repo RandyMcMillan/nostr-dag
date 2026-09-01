@@ -1337,6 +1337,7 @@ mod tests {
 
         let redirect = canonical_directory_redirect(
             site_dir.to_str().expect("temp dir utf-8"),
+            None,
             "/git",
             "/git?repo=nostr-dag",
         )
