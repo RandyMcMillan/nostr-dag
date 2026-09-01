@@ -397,6 +397,45 @@
       return null;
     }
 
+    async function getFileLastCommits(repo, files, ref) {
+      const map = new Map();
+      const limit = pLimit(5);
+      await Promise.all(files.map((file) => limit(async () => {
+        try {
+          const history = await git.log({ fs, dir: repo.dir, ref, filepath: file, depth: 1 });
+          if (history.length > 0) {
+            map.set(file, history[0].oid);
+          }
+        } catch {
+          // ignore missing history
+        }
+      })));
+      return map;
+    }
+
+    function pLimit(concurrency) {
+      const queue = [];
+      let active = 0;
+      function next() {
+        active--;
+        if (queue.length) queue.shift()();
+      }
+      return (fn) => new Promise((resolve, reject) => {
+        async function run() {
+          active++;
+          try {
+            resolve(await fn());
+          } catch (e) {
+            reject(e);
+          } finally {
+            next();
+          }
+        }
+        if (active < concurrency) run();
+        else queue.push(run);
+      });
+    }
+
     function refCandidatesForRoute(route, branches, tags) {
       if (route?.branch) {
         return [
@@ -916,14 +955,19 @@
         return [];
       });
       const commitLimit = estimateRecentCommitLimit(files.length);
-      footer.log('git', `readRepo done ${repo.name} commits=${commits.length} files=${files.length} snapshotRef=${snapshotRef} total=${Math.round(performance.now() - readStart)} ms`, 'debug');
+      const fileList = files.slice(0, 100);
+      const fileCommits = fileList.length > 0
+        ? await getFileLastCommits(repo, fileList, snapshotRef)
+        : new Map();
+      footer.log('git', `readRepo done ${repo.name} commits=${commits.length} files=${fileList.length} fileCommits=${fileCommits.size} snapshotRef=${snapshotRef} total=${Math.round(performance.now() - readStart)} ms`, 'debug');
       const decoratedCommits = await collectCommitDecorations(repo, localBranches, remoteBranches, route, commits.slice(0, commitLimit).map(createCommitSummary));
       return {
         latest,
         latestCommit: latestCommit ? createCommitSummary(latestCommit) : null,
         selectedCommit,
         commitDiff,
-        files: files.slice(0, 100),
+        files: fileList,
+        fileCommits: Object.fromEntries(fileCommits),
         tags,
         tagMap,
         serverRefs,
@@ -1075,7 +1119,7 @@
                       <span class="muted small">Files at commit · ${data.files.length} entries</span>
                     </span>
                   </summary>
-                  <div style="margin-top:10px;">${renderFileList(repo, data.files, route)}</div>
+                  <div style="margin-top:10px;">${renderFileList(repo, data.files, route, data.fileCommits)}</div>
                 </details>
               </div>
             </div>
@@ -1100,7 +1144,7 @@
       `;
     }
 
-    function renderFileList(repo, files, route) {
+    function renderFileList(repo, files, route, fileCommits = {}) {
       if (!files.length) {
         return '<div class="repo-files-empty muted">No files found for this ref.</div>';
       }
@@ -1124,10 +1168,23 @@
           return isLast ? segment : `${segment}<span class="repo-files-path-separator">/</span>`;
         }).join('')}</div>`;
       };
+      const renderCommit = (file) => {
+        const oid = fileCommits[file];
+        if (!oid) return '<span class="muted">—</span>';
+        const short = oid.slice(0, 12);
+        const href = repoFileHref(repo, {
+          branch: route?.branch || null,
+          tag: route?.tag || null,
+          commit: oid,
+          path: file,
+        });
+        return `<a class="mono" href="${href}" title="Blame ${escapeHtml(file)} @ ${short}">${escapeHtml(short)}</a>`;
+      };
       return `
         <div class="repo-files">
         <div class="repo-files-header">
           <div>Path</div>
+          <div>Commit</div>
           <div>Type</div>
         </div>
         ${files.map((file) => {
@@ -1137,6 +1194,7 @@
           return `
             <div class="repo-files-row mono">
               <div>${renderPath(file)}</div>
+              <div>${renderCommit(file)}</div>
               <div>${escapeHtml(ext)}</div>
             </div>
           `;
@@ -1225,7 +1283,7 @@
                     <h3 style="margin:0;">Files</h3>
                     <span class="muted small">${displayedFiles.length} entries</span>
                   </div>
-                  <div style="margin-top:10px;">${renderFileList(repo, displayedFiles, route)}</div>
+                  <div style="margin-top:10px;">${renderFileList(repo, displayedFiles, route, data.fileCommits)}</div>
                 </div>
               `}
               <div class="repo-sidebar-card repo-bumper" aria-hidden="true"></div>
