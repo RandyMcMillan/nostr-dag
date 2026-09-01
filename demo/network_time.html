@@ -52,6 +52,7 @@
       flex-direction: column;
       flex: 1;
       min-height: 0;
+      padding-bottom: 10px;
     }
     .header-row {
       display: flex;
@@ -85,11 +86,14 @@
       margin-bottom: 4px;
     }
     .stats {
-      font-size: 0.75rem;
-      line-height: 1.4;
+      font-size: 0.7rem;
+      line-height: 1.35;
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
     }
     .stats > span { white-space: nowrap; }
-    .stats > span:not(:last-child)::after { content: " | "; color: var(--border); }
+    .stats > span:not(:last-child)::after { content: none; }
     .mono { font-family: ui-monospace, SFMono-Regular, monospace; }
     .muted { color: var(--muted); }
     .status { font-weight: 600; }
@@ -109,7 +113,7 @@
     button:disabled { opacity: 0.5; cursor: not-allowed; }
     .log-panel {
       margin-top: 4px;
-      margin-bottom: 6px;
+      margin-bottom: 10px;
       display: flex;
       flex-direction: column;
       flex: 1;

@@ -109,6 +109,7 @@ function updateHeader() {
 
 function ensureTickTimer() {
   if (state.tickTimer) return;
+  logEvent('[timer] tick timer started');
   // Safari iOS can suspend setInterval when the tab is backgrounded or the
   // screen dims.  We track the last-tick wall-clock so that when the page
   // becomes visible again we can detect the gap and immediately refresh the
@@ -124,7 +125,11 @@ function scheduleSyncLoop() {
   if (state.syncTimer) {
     globalThis.clearInterval(state.syncTimer);
   }
-  if (!state.node?.services?.pubsub?.publish) return;
+  if (!state.node?.services?.pubsub?.publish) {
+    logEvent('[sync] loop skipped: no pubsub');
+    return;
+  }
+  logEvent(`[sync] loop scheduled every ${SYNC_INTERVAL_MS}ms`);
   state.syncTimer = globalThis.setInterval(() => {
     void syncNetworkTime();
   }, SYNC_INTERVAL_MS);
@@ -329,6 +334,7 @@ export function initSharedNetworkTime({ headerApi = null } = {}) {
   } else if (!state.headerApi && globalThis.__sharedHeaderApi) {
     state.headerApi = globalThis.__sharedHeaderApi;
   }
+  logEvent(`[init] restored offset=${formatDeltaMs(state.offsetMs)} status=${state.status} samples=${state.peerSamples.length}`);
   ensureTickTimer();
   updateHeader();
 
@@ -359,15 +365,18 @@ export function initSharedNetworkTime({ headerApi = null } = {}) {
   return {
     attachNode(node) {
       if (!node?.services?.pubsub?.addEventListener) {
+        logEvent('[attach] node missing pubsub');
         updateHeader();
         return;
       }
       if (state.node === node) {
+        logEvent('[attach] same node re-attached');
         scheduleSyncLoop();
         return;
       }
       state.node = node;
       state.localPeerId = node?.peerId?.toString?.() || '';
+      logEvent(`[attach] peerId=${state.localPeerId}`);
       node.services.pubsub.addEventListener('message', (event) => {
         void handleNetworkTimeMessage(event);
       });
