@@ -97,6 +97,9 @@ test('git page renders repo cards with tags in Chromium', { timeout: 120_000 }, 
     const criticalErrors = errors.filter((e) => {
       if (e.includes('Source map') || e.includes('.map')) return false;
       if (/restricted:|blocked:|not authorized|connection timed out|invalid:|replaced:|publish timed out|pow:/i.test(e)) return false;
+      // libp2p/WebRTC/WebSocket dials to unreachable peers are expected in headless tests.
+      if (/ERR_CONNECTION_REFUSED|ERR_CONNECTION_RESET|ERR_EMPTY_RESPONSE|ERR_SOCKET_NOT_CONNECTED/i.test(e)) return false;
+      if (/WebSocket connection to .* failed/i.test(e)) return false;
       return true;
     });
     assert.strictEqual(criticalErrors.length, 0, `no critical errors expected, got: ${criticalErrors.join('; ')}`);
