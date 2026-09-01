@@ -176,6 +176,11 @@
           <button id="syncBtn" type="button">Sync</button>
           <button id="resetBtn" type="button">Reset</button>
         </div>
+        <div class="clock-row">
+          <span class="muted">Topic:</span>
+          <input id="topicInput" type="text" value="nostr-dag-bridge" style="font-family:ui-monospace,monospace;font-size:0.7rem;flex:1;min-width:120px;border:1px solid var(--border);border-radius:3px;padding:2px 4px;background:var(--bg);color:var(--fg);" />
+          <button id="applyTopicBtn" type="button">Apply</button>
+        </div>
       </div>
 
       <div class="panel">
@@ -284,6 +289,12 @@
 
     networkTime = initSharedNetworkTime({ headerApi });
 
+    // Restore topic from persisted state into the input field.
+    if (topicInput && networkTime?.getSnapshot) {
+      const snap = networkTime.getSnapshot();
+      if (snap?.topic) topicInput.value = snap.topic;
+    }
+
     function refresh() {
       const state = networkTime.getSnapshot();
       updateDisplay(state);
@@ -316,6 +327,21 @@
       refresh();
       log('Network time state reset');
     });
+
+    const topicInput = document.getElementById('topicInput');
+    const applyTopicBtn = document.getElementById('applyTopicBtn');
+    if (topicInput && applyTopicBtn && networkTime?.setTopic) {
+      applyTopicBtn.addEventListener('click', () => {
+        const newTopic = topicInput.value.trim();
+        if (!newTopic) return;
+        log(`Changing topic to "${newTopic}"…`);
+        networkTime.setTopic(newTopic).then(() => {
+          log(`Topic changed to "${newTopic}"`);
+        }).catch((e) => {
+          log(`Topic change failed: ${e.message}`);
+        });
+      });
+    }
 
     async function initLibp2pNode() {
       if (nodeStarted) return;
