@@ -71,7 +71,7 @@ import { detectProbableVpn } from './vpn-detect.mjs';
           { label: 'Git viewer', href: resolveHref('../git/', window.location.href) },
           { label: 'Bridge', href: resolveHref('./', window.location.href), current: true },
         ],
-        networkTimeHref: resolveHref('../examples/network_time.html', window.location.href),
+        networkTimeHref: resolveHref('../network_time.html', window.location.href),
       },
       footerOptions: {
         title: 'Logger',

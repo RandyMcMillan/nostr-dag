@@ -38,7 +38,7 @@ export function bootstrapDagChrome({
         { label: 'dag', href: resolveHref('./', window.location.href), current: true },
         { label: 'Bridge', href: resolveHref('../bridge/', window.location.href) },
       ],
-      networkTimeHref: resolveHref('../examples/network_time.html', window.location.href),
+      networkTimeHref: resolveHref('../network_time.html', window.location.href),
     },
     footerOptions: {
       title: 'Logger',

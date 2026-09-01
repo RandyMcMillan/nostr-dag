@@ -130,7 +130,7 @@
         <p class="small">
           For the full interactive demo with peer sampling and Byzantine-resistant
           consensus logic, see
-          <a href="./byz-time-consensus.html">Byzantine Time Consensus</a>.
+          <a href="../examples/byz-time-consensus.html">Byzantine Time Consensus</a>.
         </p>
       </div>
 
@@ -179,7 +179,7 @@
 
     // Poll the network time state and refresh the display.
     function refresh() {
-      const state = networkTime.getState?.() || {};
+      const state = networkTime.getSnapshot();
       updateDisplay(state);
     }
     refresh();
@@ -188,7 +188,7 @@
     syncBtn.addEventListener('click', () => {
       syncBtn.disabled = true;
       log('Manual sync requested…');
-      networkTime.forceSync?.().then(() => {
+      networkTime.syncNow().then(() => {
         refresh();
         syncBtn.disabled = false;
         log('Manual sync complete');

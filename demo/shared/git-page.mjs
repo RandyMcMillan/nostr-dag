@@ -80,7 +80,7 @@ export function bootstrapGitChrome({
         { label: 'dag', href: resolveHref('../dag/', window.location.href) },
         { label: 'Bridge', href: resolveHref('../bridge/', window.location.href) },
       ],
-      networkTimeHref: resolveHref('../examples/network_time.html', window.location.href),
+      networkTimeHref: resolveHref('../network_time.html', window.location.href),
     },
     footerOptions: {
       title: footerTitle,
