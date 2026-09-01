@@ -773,10 +773,12 @@
 
     async function fetchRepoRefs(repo, route = null, onProgress = null) {
       const selection = fetchSelectionOptions(route);
+      footer.log('git', `${repo.name} fetchRepoRefs selection=${JSON.stringify(selection)}`, 'trace');
       // isomorphic-git can skip tag fetching when a specific ref is combined with
       // all: true.  We do a targeted fetch for the ref first, then a second
       // fetch without ref constraints so tags are always refreshed.
       if (selection.ref) {
+        footer.log('git', `${repo.name} fetch-ref start ref=${selection.ref}`, 'trace');
         await tryWithCorsProxies(
           (opts) => git.fetch({ fs, http, dir: repo.dir, url: repo.url, force: true, depth: route ? GIT_HISTORY_DEPTH : undefined, onProgress, ...selection, ...opts }),
           {},
@@ -784,14 +786,18 @@
         ).catch((e) => {
           footer.log('git', `${repo.name} fetch-ref ${selection.ref} failed: ${e.message}`, 'warn');
         });
+        footer.log('git', `${repo.name} fetch-ref done ref=${selection.ref}`, 'trace');
       }
       // Fetch all refs and tags without depth limit so older tags (e.g. v0.13.0)
       // are not silently omitted by a shallow fetch.
+      footer.log('git', `${repo.name} fetch-all start (all=true, tags=true, force=true, prune=true)`, 'trace');
       await tryWithCorsProxies(
         (opts) => git.fetch({ fs, http, dir: repo.dir, url: repo.url, all: true, tags: true, force: true, prune: true, onProgress, ...opts }),
         {},
         `${repo.name} fetch-all`,
       );
+      const postFetchTags = await git.listTags({ fs, dir: repo.dir }).catch(() => []);
+      footer.log('git', `${repo.name} fetch-all done tags=[${postFetchTags.join(', ')}]`, 'trace');
     }
 
     async function readRepo(repo, route = null, { skipNetwork = false } = {}) {
@@ -834,17 +840,21 @@
         footer.log('git', `${repo.name} listTags failed: ${e.message}`, 'warn');
         return [];
       });
+      footer.log('git', `${repo.name} localTags=[${localTags.join(', ')}]`, 'trace');
       if (branches.length === 0 && localTags.length === 0) {
         footer.log('git', `${repo.name} local clone appears empty or invalid (no branches/tags)`, 'warn');
       }
       const cachedTags = mergedCached?.tags || [];
+      footer.log('git', `${repo.name} cachedTags=[${cachedTags.join(', ')}]`, 'trace');
       const remoteTags = remoteTagNames(serverRefs);
+      footer.log('git', `${repo.name} remoteTags=[${remoteTags.join(', ')}]`, 'trace');
       const tags = [...new Set([
         ...localTags,
         ...remoteTags,
         ...cachedTags,
       ])];
       tags.sort(compareSemverDesc);
+      footer.log('git', `${repo.name} mergedTags=[${tags.join(', ')}]`, 'trace');
       // Build tagMap from server refs so consumers can resolve tag -> commit.
       const tagMap = {};
       for (const entry of serverRefs) {
@@ -854,6 +864,7 @@
         if (!tagName) continue;
         tagMap[tagName] = entry.oid || tagMap[tagName] || '';
       }
+      footer.log('git', `${repo.name} tagMap=${JSON.stringify(tagMap)}`, 'trace');
       const ref = resolveRefSelection(branches, tags, route || {});
       // Truth table for selectedRef preservation:
       // | route.branch | route.tag | cached.selectedRef | result              |
