@@ -67,15 +67,44 @@
           return;
         }
         const { createSharedLibp2pStack } = await import('../shared/libp2p-stack.mjs');
-        const { node } = await createSharedLibp2pStack({
-          onLog(level, text, state) {
-            footer.log('libp2p', text, level, state);
-          },
-          onPeer({ kind, peer, detail }) {
-            footer.log('libp2p', `${kind}: ${peer}`, 'debug', kind === 'connected' ? 'available' : 'checking');
-            footer.log('libp2p', `${kind} detail: ${detail ? JSON.stringify(detail) : 'none'}`, 'trace', kind === 'connected' ? 'available' : 'checking');
-          },
-        });
+
+        const configs = [
+          { includeWebRTC: true, includeWebRTCDirect: false, includeCircuitRelay: true },
+          { includeWebRTC: true, includeWebRTCDirect: false, includeCircuitRelay: false },
+          { includeWebRTC: false, includeWebRTCDirect: false, includeCircuitRelay: false },
+        ];
+
+        let node = null;
+        let lastError = null;
+        for (const config of configs) {
+          try {
+            const stack = await createSharedLibp2pStack({
+              ...config,
+              deterministicKeySeed: 'nostr-dag-git',
+              onLog(level, text, state) {
+                footer.log('libp2p', text, level, state);
+              },
+              onPeer({ kind, peer, detail }) {
+                footer.log('libp2p', `${kind}: ${peer}`, 'debug', kind === 'connected' ? 'available' : 'checking');
+                footer.log('libp2p', `${kind} detail: ${detail ? JSON.stringify(detail) : 'none'}`, 'trace', kind === 'connected' ? 'available' : 'checking');
+              },
+              onStatus(state, peerId) {
+                footer.log('libp2p', `status ${state} ${peerId}`, 'trace');
+              },
+            });
+            node = stack.node;
+            lastError = null;
+            break;
+          } catch (e) {
+            lastError = e;
+            footer.log('libp2p', `p2p config failed: ${JSON.stringify(config)} (${e.message})`, 'warn');
+          }
+        }
+
+        if (!node) {
+          throw lastError || new Error('unable to start libp2p');
+        }
+
         window.__gitBlameP2pNode = node;
         networkTime.attachNode(node);
         footer.log('libp2p', `node ready: ${node.peerId.toString()}`, 'info', 'available');
