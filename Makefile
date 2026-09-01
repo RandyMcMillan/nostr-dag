@@ -11,7 +11,7 @@ ifndef CARGO_TARGET_DIR
 CARGO_TARGET_DIR := $(shell cargo metadata --format-version 1 --no-deps | grep -o '"target_directory":"[^"]*"' | cut -d'"' -f4)
 endif
 
-.PHONY: help build test test-all test-native test-js test-p2p test-p2p-native-wasm test-pip-bare-repo build-relay build-server ensure-wasm-target wasm site demo server clean deploy
+.PHONY: help build test test-all test-native test-js test-p2p test-p2p-native-wasm test-pip-bare-repo build-relay build-server ensure-wasm-target wasm site demo server clean deploy githooks
 
 help:
 	@printf '%s\n' \
@@ -30,6 +30,7 @@ help:
 		'  site        Build the GitHub Pages site' \
 		'  demo        Run the local demo launcher' \
 		'  server      Run the nostr-dag server' \
+		'  githooks    Symlink ./githooks into .git/hooks' \
 		'  clean       Remove build artifacts' \
 		'  deploy      Build the site and trigger the Pages workflow'
 
@@ -145,6 +146,19 @@ demo:
 
 server: build-server site
 	P2P_ENABLE=1 cargo run --bin nostr-dag-server --features p2p,native
+
+githooks:
+	@mkdir -p .git/hooks
+	@for hook in githooks/*; do \
+		name=$$(basename "$$hook"); \
+		target=".git/hooks/$$name"; \
+		if [ -e "$$target" ] && [ ! -L "$$target" ]; then \
+			echo "Backing up existing .git/hooks/$$name"; \
+			mv "$$target" "$$target.backup"; \
+		fi; \
+		ln -sf "../../$$hook" "$$target"; \
+		echo "Linked $$name"; \
+	done
 
 clean:
 	$(CARGO) clean

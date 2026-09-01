@@ -87,6 +87,20 @@ demo:
 server: build-server site
     P2P_ENABLE=1 cargo run --bin nostr-dag-server --features p2p,native
 
+githooks:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for hook in githooks/*; do
+        name=$(basename "$hook")
+        target=".git/hooks/$name"
+        if [ -e "$target" ] && [ ! -L "$target" ]; then
+            echo "Backing up existing .git/hooks/$name"
+            mv "$target" "$target.backup"
+        fi
+        ln -sf "../../$hook" "$target"
+        echo "Linked $name"
+    done
+
 clean:
     cargo clean
     rm -rf pkg site

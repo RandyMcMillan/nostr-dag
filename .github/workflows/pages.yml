@@ -1,15 +1,15 @@
 name: Deploy to GitHub Pages
 
 on:
-  push:
-    branches: [master]
   workflow_dispatch:
   workflow_run:
-    workflows: ["pages-build-deployment"]
+    workflows: [CI, JS / GUI]
     types: [completed]
+    branches: [master]
 
 permissions:
   contents: read
+  actions: read
   pages: write
   id-token: write
 
@@ -18,8 +18,35 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  check-tests:
+    name: Verify CI tests passed
+    runs-on: ubuntu-latest
+    outputs:
+      should-build: ${{ steps.check.outputs.should-build }}
+    steps:
+      - name: Check all required workflows passed
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          sha="${{ github.event.workflow_run.head_sha }}"
+          repo="${{ github.repository }}"
+          for wf in "CI" "JS / GUI"; do
+            echo "Checking $wf for $sha..."
+            conclusion=$(gh api "repos/$repo/actions/runs?event=push&branch=master&per_page=20" --jq "[.workflow_runs[] | select(.name==\"$wf\" and .head_sha==\"$sha\" and .status==\"completed\")] | sort_by(.run_number) | reverse | .[0].conclusion // empty")
+            if [ "$conclusion" != "success" ]; then
+              echo "$wf not yet passed for $sha (conclusion=$conclusion)"
+              echo "should-build=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "All required workflows passed."
+          echo "should-build=true" >> "$GITHUB_OUTPUT"
+
   build:
     name: Build wasm + site
+    needs: check-tests
+    if: needs.check-tests.outputs.should-build == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

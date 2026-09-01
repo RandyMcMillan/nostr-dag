@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# Run the full test suite before allowing a push.
+# Falls back to just if make is unavailable.
+if command -v make >/dev/null 2>&1; then
+    make test-all
+else
+    just test-all
+fi
