@@ -408,8 +408,8 @@
         });
 
         networkTime.attachNode(node);
-        networkTime.onTopicMessage(logTopic);
-        networkTime.onTopicPeer(logTopicPeer);
+        networkTime.onTopicMessage?.(logTopic);
+        networkTime.onTopicPeer?.(logTopicPeer);
         nodeStarted = true;
         updateNodeDisplay();
         log(`Node started: ${node.peerId.toString()}`);
