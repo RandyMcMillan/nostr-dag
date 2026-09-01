@@ -1,0 +1,2 @@
+pkill -f 'nostr-dag-server' 2>/dev/null || true; sleep 1; \
+    P2P_ENABLE=1 ./target/debug/nostr-dag-server > /tmp/nostr-dag-server-test.log 2>&1 & SERVER_PID=$!; sleep 3; SERVER_URL=$(grep -o 'SERVER_URL=http://[^ ]*' /tmp/nostr-dag-server-test.log | tail -1 | cut -d=-f2-); echo "SERVER_URL=$SERVER_URL"; curl -s -o /dev/null -w "%{http_code}" "${SERVER_URL}/network_time.html"; echo; curl -s -o /dev/null -w "%{http_code}" "${SERVER_URL}/examples/byz-time-consensus.html"; echo; kill $SERVER_PID 2>/dev/null || true
