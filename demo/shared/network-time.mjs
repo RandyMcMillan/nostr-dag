@@ -99,11 +99,6 @@ function updateHeader() {
   const localNow = Date.now();
   const consensusNow = getNetworkNowMs();
   const peerList = state.peerSamples.map((s) => s.responderPeerId.slice(0, 12)).join(',');
-  const tickKey = `${state.offsetMs}|${state.status}|${state.peerSamples.length}|${peerList}`;
-  if (state._lastTickKey !== tickKey) {
-    state._lastTickKey = tickKey;
-    logEvent(`[tick] local=${localNow} consensus=${consensusNow} delta=${deltaText} status=${state.status} samples=${state.peerSamples.length} peers=[${peerList}] sync=${syncText}`);
-  }
   if (!headerApi?.setNetworkTime) return;
   headerApi.setNetworkTime({
     text: `${formatUtcTime(consensusNow)} (${deltaText}) · ${sampleText}`,
