@@ -2,6 +2,7 @@ mod assets;
 #[cfg(feature = "native")]
 mod bridge_native;
 mod bridge_roundtrip;
+mod bft_time;
 mod dag;
 mod error;
 mod event;
