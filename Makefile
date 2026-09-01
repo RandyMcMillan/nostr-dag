@@ -60,6 +60,7 @@ test-js:
 	if [ -z "$$SERVER_URL" ]; then echo "Server failed to start"; kill $$SERVER_PID 2>/dev/null; rm -f /tmp/nostr-dag-server.$$.log; exit 1; fi; \
 	TEST_URL=$$(echo "$$SERVER_URL" | sed 's/0\.0\.0\.0/127.0.0.1/'); \
 	echo "Server ready at $$SERVER_URL (tests use $$TEST_URL)"; \
+	sleep 3; \
 	for f in test/*.test.mjs; do \
 		case "$$f" in \
 			*p2p-native-wasm*) continue ;; \
