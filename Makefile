@@ -134,6 +134,8 @@ site: wasm
 	cp demo/bridge/*.html site/bridge/
 	mkdir -p site/vendor
 	cp demo/vendor/*.mjs site/vendor/
+	mkdir -p site/examples
+	cp examples/*.html site/examples/
 
 demo:
 	./demo/run.sh
