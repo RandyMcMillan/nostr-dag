@@ -84,9 +84,10 @@ function updateHeader() {
   const syncText = syncedAgoMs == null ? 'no sync yet' : `${Math.round(syncedAgoMs / 1000)}s ago`;
   const accuracyText = Number.isFinite(state.lastAccuracyMs) ? `${Math.round(state.lastAccuracyMs)}ms` : 'n/a';
   const sampleText = state.lastSampleCount ? `${state.lastSampleCount} peer${state.lastSampleCount === 1 ? '' : 's'}` : 'local clock';
+  const deltaText = formatDeltaMs(state.offsetMs);
   headerApi.setNetworkTime({
-    text: formatUtcTime(getNetworkNowMs()),
-    title: `Network time ${state.status} · ${sampleText} · accuracy ${accuracyText} · last sync ${syncText}`,
+    text: `${formatUtcTime(getNetworkNowMs())} (${deltaText})`,
+    title: `Network time ${state.status} · ${sampleText} · accuracy ${accuracyText} · delta ${deltaText} · last sync ${syncText}`,
     state: state.status,
   });
 }
@@ -183,7 +184,8 @@ function noteConsensusResponses(responses) {
   state.lastAccuracyMs = median(responses.map((response) => response.rttMs / 2));
   state.status = 'available';
   // Log the integer delta (ms) between network time and local UTC time.
-  console.error(`[network-time] delta network-utc: ${Math.round(state.offsetMs)} ms`);
+  const deltaStr = formatDeltaMs(state.offsetMs);
+  console.error(`[network-time] delta network-utc: ${deltaStr}`);
   persistState();
   updateHeader();
 }
@@ -228,6 +230,20 @@ export function getNetworkNowMs() {
 
 export function getNetworkUnixTime() {
   return Math.floor(getNetworkNowMs() / 1000);
+}
+
+/**
+ * Return the current delta between network consensus time and local UTC.
+ * Positive means the local clock is behind network time;
+ * negative means the local clock is ahead.
+ */
+export function getNetworkTimeDelta() {
+  return state.offsetMs;
+}
+
+function formatDeltaMs(ms) {
+  const sign = ms >= 0 ? '+' : '';
+  return `${sign}${Math.round(ms)} ms`;
 }
 
 export async function syncNetworkTime({ waitMs = QUERY_WAIT_MS } = {}) {
