@@ -84,7 +84,7 @@ build-relay:
 	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) $(CARGO) build --release --bin relay --bin federation --features relay
 
 build-server:
-	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) $(CARGO) build --bin nostr-dag-server --features native
+	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) $(CARGO) build --bin nostr-dag-server --features native,p2p
 
 ensure-wasm-target:
 	@rustup target list --installed | grep -qx "$(WASM_TARGET)" || rustup target add "$(WASM_TARGET)"
