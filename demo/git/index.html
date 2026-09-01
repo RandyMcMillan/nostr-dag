@@ -154,7 +154,6 @@
       headerRoot: document.getElementById('sharedHeader'),
       footerRoot: document.getElementById('pageFooter'),
     });
-    footer.setLevel('info');
     footer.log('git', 'module loaded', 'debug');
     window.addEventListener('error', (event) => {
       footer.log('git', `uncaught error: ${event.message} at ${event.filename}:${event.lineno}`, 'error', 'unavailable');
