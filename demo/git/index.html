@@ -220,8 +220,8 @@
     // header controls stay responsive even on slower/mobile browsers.
     scheduleAfterPaint(() => {
       // Toggle: use initGitTransport() for proxy-only, initGitP2P() for full P2P
-      void initGitTransport();
-      // void initGitP2P();
+      // void initGitTransport();
+      void initGitP2P();
     });
 
     function setStatus(text, state = 'idle') {
