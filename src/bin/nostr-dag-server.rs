@@ -11,7 +11,7 @@
 
 use std::env;
 
-const DEFAULT_HOST: &str = "127.0.0.1";
+const DEFAULT_HOST: &str = "0.0.0.0";
 const DEFAULT_PORT: &str = "3000";
 const DEFAULT_SITE_DIR: &str = "site";
 const DEFAULT_DB_PATH: &str = "nostr-dag.db";

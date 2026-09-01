@@ -83,7 +83,9 @@ fn detect_local_ip() -> Option<std::net::IpAddr> {
 
 #[cfg(feature = "p2p")]
 /// Run the native libp2p peer used by the `p2p-node` binary.
-pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+pub async fn run_native_p2p_node(
+    shared_listen_addrs: Option<std::sync::Arc<tokio::sync::RwLock<Vec<String>>>>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
@@ -194,7 +196,7 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
     );
 
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse::<Multiaddr>()?)?;
-    swarm.listen_on("/ip4/127.0.0.1/tcp/0/ws".parse::<Multiaddr>()?)?;
+    swarm.listen_on("/ip4/0.0.0.0/tcp/0/ws".parse::<Multiaddr>()?)?;
     if std::env::var("WSS_DISABLE").is_err() {
         swarm.listen_on("/ip4/0.0.0.0/tcp/0/tls/ws".parse::<Multiaddr>()?)?;
     }
@@ -545,6 +547,12 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                         if !listen_addrs.iter().any(|existing| existing == &address) {
                             listen_addrs.push(address.clone());
                         }
+                        if let Some(ref shared) = shared_listen_addrs {
+                            let mut locked = shared.write().await;
+                            if !locked.iter().any(|existing| existing == &address) {
+                                locked.push(address.clone());
+                            }
+                        }
                         safe_println!("LISTENING {address}");
                         let dial_addr = format!("{address}/p2p/{local_peer_id}");
                         safe_println!("DIAL {dial_addr}");
@@ -553,6 +561,12 @@ pub async fn run_native_p2p_node() -> Result<(), Box<dyn std::error::Error + Sen
                         let address = address.to_string();
                         if !external_addrs.iter().any(|existing| existing == &address) {
                             external_addrs.push(address.clone());
+                        }
+                        if let Some(ref shared) = shared_listen_addrs {
+                            let mut locked = shared.write().await;
+                            if !locked.iter().any(|existing| existing == &address) {
+                                locked.push(address.clone());
+                            }
                         }
                         safe_println!("PUBLIC_ADDR {address}");
                     }

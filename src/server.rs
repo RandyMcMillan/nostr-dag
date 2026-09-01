@@ -224,8 +224,35 @@ pub async fn run_server(
                 updated_at: now_ms(),
             });
         }
+        let shared_listen_addrs = std::sync::Arc::new(tokio::sync::RwLock::new(Vec::<String>::new()));
+        let listen_addrs_for_peer_store = Arc::clone(&shared_listen_addrs);
+        let peer_store_for_p2p = Arc::clone(&peer_store);
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                interval.tick().await;
+                let addrs = listen_addrs_for_peer_store.read().await.clone();
+                if addrs.is_empty() {
+                    continue;
+                }
+                let peer_id = crate::p2p::deterministic_native_identity_keypair()
+                    .public()
+                    .to_peer_id()
+                    .to_string();
+                let detail = format!("embedded peer {} addrs={}", peer_id, addrs.join(","));
+                peer_store_for_p2p.upsert(PeerEntry {
+                    peer_id,
+                    kind: "native".to_string(),
+                    path: "/".to_string(),
+                    detail: Some(detail),
+                    source: Some("localhost".to_string()),
+                    updated_at: now_ms(),
+                });
+            }
+        });
         p2p_task = Some(tokio::spawn(async move {
-            if let Err(e) = crate::run_native_p2p_node().await {
+            if let Err(e) = crate::run_native_p2p_node(Some(shared_listen_addrs)).await {
                 tracing::error!(?e, "embedded p2p-node exited with error");
             }
         }));

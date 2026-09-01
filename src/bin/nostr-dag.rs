@@ -117,7 +117,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         #[cfg(feature = "p2p")]
-        Commands::P2p => nostr_dag::run_native_p2p_node().await.map_err(|e| e as Box<dyn std::error::Error>),
+        Commands::P2p => nostr_dag::run_native_p2p_node(None).await.map_err(|e| e as Box<dyn std::error::Error>),
 
         #[cfg(feature = "native")]
         Commands::Federation => nostr_dag::run_federation().await,
