@@ -387,6 +387,7 @@ export function initSharedNetworkTime({ headerApi = null } = {}) {
       state.node = node;
       state.localPeerId = node?.peerId?.toString?.() || '';
       logEvent(`[attach] peerId=${state.localPeerId}`);
+      node.services.pubsub.subscribe(NETWORK_TIME_TOPIC);
       node.services.pubsub.addEventListener('message', (event) => {
         void handleNetworkTimeMessage(event);
       });
