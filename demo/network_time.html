@@ -74,16 +74,18 @@
       padding: 6px 8px;
     }
     .panel h2 { font-size: 0.8rem; margin: 0 0 3px; }
-    .time-display {
-      font-size: 1rem;
+    .time-display-inline {
+      font-size: 0.85rem;
       font-weight: 700;
       font-family: ui-monospace, SFMono-Regular, monospace;
-      padding: 3px 6px;
-      border-radius: 3px;
-      text-align: center;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      margin-bottom: 4px;
+    }
+    .clock-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      font-size: 0.75rem;
+      line-height: 1.3;
     }
     .stats {
       font-size: 0.7rem;
@@ -151,12 +153,13 @@
 
     <div class="panels">
       <div class="panel">
-        <h2>Consensus Clock</h2>
-        <div id="timeDisplay" class="time-display status-checking">syncing…</div>
-        <div class="stats">
-          <span><span class="muted">Offset:</span> <span id="offsetDisplay" class="mono">—</span></span>
-          <span><span class="muted">Samples:</span> <span id="sampleDisplay">0</span></span>
-          <span><span class="muted">Status:</span> <span id="statusDisplay" class="status">checking</span></span>
+        <div class="clock-row">
+          <span id="timeDisplay" class="time-display-inline status-checking">syncing…</span>
+          <span id="statusDisplay" class="status">checking</span>
+        </div>
+        <div class="clock-row">
+          <span class="muted">Offset:</span> <span id="offsetDisplay" class="mono">—</span>
+          <span class="muted">Samples:</span> <span id="sampleDisplay">0</span>
           <button id="syncBtn" type="button">Sync</button>
         </div>
       </div>
@@ -226,7 +229,7 @@
     function updateDisplay(state) {
       const consensusTime = Date.now() + (state.offsetMs || 0);
       timeDisplay.textContent = new Date(consensusTime).toISOString().replace('T', ' ').replace('Z', ' UTC');
-      timeDisplay.className = `time-display status-${state.status}`;
+      timeDisplay.className = `time-display-inline status-${state.status}`;
       offsetDisplay.textContent = `${state.offsetMs > 0 ? '+' : ''}${state.offsetMs} ms`;
       sampleDisplay.textContent = String(state.lastSampleCount || 0);
       statusDisplay.textContent = state.status;
