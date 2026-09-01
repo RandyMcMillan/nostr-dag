@@ -652,12 +652,16 @@
           await ensureDir(fs, dir);
 
           // Race P2P bundle fetch+clone against proxy clone.  A simple lock
-          // guarantees only the first successful path writes to `dir`.
+          // guarantees only the first successful path writes to `dir`.  If a path
+          // fails it releases the lock so the other path can retry.
           let cloneLock = false;
           const takeLock = () => {
-            if (cloneLock) return false;
+            if (cloneLock) throw new Error('lock already taken');
             cloneLock = true;
             return true;
+          };
+          const releaseLock = () => {
+            cloneLock = false;
           };
 
           const p2pPromise = (async () => {
@@ -670,61 +674,70 @@
             await ensureDir(fs, '/bundles');
             await fs.writeFile(bundlePath, bundle);
             footer.log('git', `${repo.name} p2p bundle received bytes=${bundle.length}`, 'info', 'available');
-            if (!takeLock()) {
-              footer.log('git', `${repo.name} p2p bundle arrived but proxy already cloning — discarding`, 'info');
-              return 'p2p-late';
+            takeLock();
+            try {
+              const bundleHttp = createBundleHttpClient({ fs, bundlePath });
+              await git.clone({
+                fs,
+                http: bundleHttp,
+                dir,
+                url: 'bundle://local',
+                singleBranch: false,
+                onProgress: (progress) => {
+                  const message = getGitProgressReporter(repo, 'clone', route)(progress);
+                  if (message) footer.log('git', `[bundle] ${message}`, 'trace');
+                },
+              });
+              repoSource.set(repo.name, 'p2p');
+              footer.log('git', `${repo.name} cloned from libp2p bundle`, 'info', 'available');
+              return 'p2p';
+            } catch (e) {
+              releaseLock();
+              throw e;
             }
-            const bundleHttp = createBundleHttpClient({ fs, bundlePath });
-            await git.clone({
-              fs,
-              http: bundleHttp,
-              dir,
-              url: 'bundle://local',
-              singleBranch: false,
-              onProgress: (progress) => {
-                const message = getGitProgressReporter(repo, 'clone', route)(progress);
-                if (message) footer.log('git', `[bundle] ${message}`, 'trace');
-              },
-            });
-            repoSource.set(repo.name, 'p2p');
-            footer.log('git', `${repo.name} cloned from libp2p bundle`, 'info', 'available');
-            return 'p2p';
           })();
 
           const proxyPromise = (async () => {
-            if (!takeLock()) {
-              footer.log('git', `${repo.name} proxy clone skipped — p2p already cloning`, 'info');
-              return 'proxy-late';
+            takeLock();
+            try {
+              repoSource.set(repo.name, 'proxy');
+              const cloneOptions = {
+                fs,
+                http,
+                dir,
+                url,
+                singleBranch: true,
+                depth: route ? GIT_HISTORY_DEPTH : 1,
+                onProgress: (progress) => {
+                  const message = getGitProgressReporter(repo, 'clone', route)(progress);
+                  if (message) {
+                    footer.log('git', message, 'trace');
+                  }
+                },
+              };
+              await cloneWithSingleBranchFallback(
+                (options) => tryWithCorsProxies((opts) => git.clone(opts), options, `${repo.name} clone`),
+                cloneOptions,
+                (error) => {
+                  footer.log('git', `${repo.name} clone failed with singleBranch=true: ${error.message}`, 'warn');
+                  footer.log('git', `${repo.name} retrying clone with singleBranch=false`, 'warn');
+                },
+              );
+              return 'proxy';
+            } catch (e) {
+              releaseLock();
+              throw e;
             }
-            repoSource.set(repo.name, 'proxy');
-            const cloneOptions = {
-              fs,
-              http,
-              dir,
-              url,
-              singleBranch: true,
-              depth: route ? GIT_HISTORY_DEPTH : 1,
-              onProgress: (progress) => {
-                const message = getGitProgressReporter(repo, 'clone', route)(progress);
-                if (message) {
-                  footer.log('git', message, 'trace');
-                }
-              },
-            };
-            await cloneWithSingleBranchFallback(
-              (options) => tryWithCorsProxies((opts) => git.clone(opts), options, `${repo.name} clone`),
-              cloneOptions,
-              (error) => {
-                footer.log('git', `${repo.name} clone failed with singleBranch=true: ${error.message}`, 'warn');
-                footer.log('git', `${repo.name} retrying clone with singleBranch=false`, 'warn');
-              },
-            );
-            return 'proxy';
           })();
 
           // Promise.any waits for the first success; if both fail it rejects.
-          const winner = await Promise.any([p2pPromise, proxyPromise]);
-          footer.log('git', `${repo.name} clone won by ${winner} in ${Math.round(performance.now() - ensureStart)} ms`, 'debug');
+          try {
+            const winner = await Promise.any([p2pPromise, proxyPromise]);
+            footer.log('git', `${repo.name} clone won by ${winner} in ${Math.round(performance.now() - ensureStart)} ms`, 'debug');
+          } catch (anyErr) {
+            const reasons = anyErr.errors?.map((e) => e?.message || String(e)).join('; ') || String(anyErr);
+            throw new Error(`clone failed (both paths): ${reasons}`);
+          }
         } else {
           setRepoStatus(repo.name, 'reusing cached clone...');
           footer.log('git', `${repo.name} reusing cached clone`, 'info');
