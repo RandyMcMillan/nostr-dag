@@ -31,7 +31,7 @@ import { webRTC, webRTCDirect } from "https://esm.sh/@libp2p/webrtc";
 import { generateKeyPairFromSeed } from "https://esm.sh/@libp2p/crypto/keys";
 import { noise } from "https://esm.sh/@chainsafe/libp2p-noise";
 import { yamux } from "https://esm.sh/@chainsafe/libp2p-yamux";
-import { peerIdFromPrivateKey } from "https://esm.sh/@libp2p/peer-id";
+import { peerIdFromPrivateKey, peerIdFromString } from "https://esm.sh/@libp2p/peer-id";
 import { multiaddr } from "https://esm.sh/@multiformats/multiaddr";
 
 export const DEFAULT_BOOTSTRAP_PEERS = [
@@ -409,6 +409,42 @@ export async function createSharedLibp2pStack({
     },
   ];
 
+  // Build direct-peers list for gossipsub so the native server is always kept
+  // in the mesh (deterministic key => known peer id).
+  let directPeers = [];
+  try {
+    const res = await fetch("/peers", { cache: "no-store" });
+    if (res.ok) {
+      const peerList = await res.json();
+      for (const peer of peerList) {
+        if (peer.kind !== "native" || peer.source !== "localhost") continue;
+        const peerAddrs = parsePeerAddrs(peer.detail);
+        const addrs = [];
+        for (const addr of peerAddrs) {
+          if (addr.includes("/ws") || addr.includes("/wss") || addr.includes("/webrtc")) {
+            const suffix = `/p2p/${peer.peer_id}`;
+            addrs.push(addr.endsWith(suffix) ? addr : `${addr}${suffix}`);
+          }
+        }
+        if (addrs.length) {
+          try {
+            directPeers.push({
+              id: peerIdFromString(peer.peer_id),
+              addrs: addrs.map((a) => multiaddr(a)),
+            });
+          } catch {
+            // skip malformed peer id
+          }
+        }
+      }
+    }
+  } catch {
+    // best effort only
+  }
+  if (directPeers.length) {
+    emitLog(onLog, "debug", `gossipsub directPeers: ${directPeers.length}`, "checking");
+  }
+
   let node = null;
   let lastError = null;
   const allowLocalDial = peers.some((addr) => /127\.0\.0\.1|localhost|::1/.test(addr))
@@ -431,6 +467,7 @@ export async function createSharedLibp2pStack({
           pubsub: gossipsub({
             allowPublishToZeroTopicPeers: true,
             emitSelf: true,
+            ...(directPeers.length ? { directPeers } : {}),
           }),
         },
         ...(allowLocalDial ? {
