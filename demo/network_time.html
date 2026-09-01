@@ -32,26 +32,26 @@
       background: var(--bg);
       color: var(--fg);
       margin: 0;
-      padding: 16px;
-      line-height: 1.5;
+      padding: 10px;
+      line-height: 1.35;
     }
-    h1 { font-size: 1.4rem; margin: 0 0 8px; }
-    .subtitle { color: var(--muted); font-size: 0.9rem; margin-bottom: 16px; }
+    h1 { font-size: 1.25rem; margin: 0 0 4px; }
+    .subtitle { color: var(--muted); font-size: 0.85rem; margin-bottom: 10px; }
     .grid {
       display: grid;
       grid-template-columns: 1fr;
-      gap: 12px;
+      gap: 8px;
       max-width: 720px;
       margin: 0 auto;
     }
     .panel {
       background: var(--panel);
       border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 16px;
+      border-radius: 6px;
+      padding: 10px 12px;
     }
-    .panel h2 { font-size: 1rem; margin: 0 0 10px; }
-    .row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+    .panel h2 { font-size: 0.95rem; margin: 0 0 6px; }
+    .row { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; flex-wrap: wrap; }
     .status { font-weight: 600; }
     .status.ok { color: var(--ok); }
     .status.warn { color: var(--warn); }
@@ -63,26 +63,26 @@
       background: var(--info);
       color: #fff;
       border: none;
-      border-radius: 6px;
-      padding: 8px 14px;
-      font-size: 0.9rem;
+      border-radius: 4px;
+      padding: 4px 10px;
+      font-size: 0.85rem;
       cursor: pointer;
     }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
     #log {
-      max-height: 240px;
+      max-height: 160px;
       overflow-y: auto;
       font-family: ui-monospace, SFMono-Regular, monospace;
-      font-size: 0.8rem;
+      font-size: 0.75rem;
       white-space: pre-wrap;
       word-break: break-all;
     }
     .time-display {
-      font-size: 1.6rem;
+      font-size: 1.4rem;
       font-weight: 700;
       font-family: ui-monospace, SFMono-Regular, monospace;
-      padding: 12px;
-      border-radius: 8px;
+      padding: 8px;
+      border-radius: 6px;
       text-align: center;
       background: var(--bg);
       border: 1px solid var(--border);
@@ -91,7 +91,7 @@
 </head>
 <body>
   <div style="max-width:720px;margin:0 auto;">
-    <header class="row" style="justify-content:space-between;margin-bottom:12px;">
+    <header class="row" style="justify-content:space-between;margin-bottom:8px;">
       <div>
         <h1>Network Time</h1>
         <div class="subtitle">P2P consensus clock synced via libp2p gossipsub</div>
