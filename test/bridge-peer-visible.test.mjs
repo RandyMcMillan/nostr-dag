@@ -6,7 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-const BASE = process.env.SERVER_URL || 'http://127.0.0.1:3000';
+const BASE = process.env.SERVER_URL || process.env.BASE_URL || 'http://127.0.0.1:3000';
 
 /**
  * Core functionality test: the embedded native peer must be visible via /peers.

@@ -46,21 +46,28 @@ test-native:
 test-js:
 	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) cargo check --quiet
 	@echo "Starting nostr-dag-server for JS tests (P2P enabled)..."
+	@pkill -f 'nostr-dag-server' 2>/dev/null || true
+	@sleep 1
 	@CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) P2P_ENABLE=1 $(CARGO) build --bin nostr-dag-server --features p2p,native >/dev/null 2>&1
-	@P2P_ENABLE=1 ./target/debug/nostr-dag-server &
+	@P2P_ENABLE=1 ./target/debug/nostr-dag-server > /tmp/nostr-dag-server.$$.log 2>&1 &
 	SERVER_PID=$$!; \
+	SERVER_URL=""; \
 	for i in 1 2 3 4 5 6 7 8 9 10; do \
-		if curl -s -o /dev/null http://127.0.0.1:3000/; then break; fi; \
+		SERVER_URL=$$(grep -o 'SERVER_URL=http://[^ ]*' /tmp/nostr-dag-server.$$.log 2>/dev/null | tail -1 | cut -d= -f2-); \
+		if [ -n "$$SERVER_URL" ]; then break; fi; \
 		sleep 1; \
 	done; \
+	if [ -z "$$SERVER_URL" ]; then echo "Server failed to start"; kill $$SERVER_PID 2>/dev/null; rm -f /tmp/nostr-dag-server.$$.log; exit 1; fi; \
+	echo "Server ready at $$SERVER_URL"; \
 	for f in test/*.test.mjs; do \
 		case "$$f" in \
 			*p2p-native-wasm*) continue ;; \
 		esac; \
 		echo "=== running $$f ==="; \
-		NODE_OPTIONS=--trace-uncaught node --test "$$f" || { kill $$SERVER_PID 2>/dev/null; exit 1; }; \
+		SERVER_URL=$$SERVER_URL NODE_OPTIONS=--trace-uncaught node --test "$$f" || { kill $$SERVER_PID 2>/dev/null; rm -f /tmp/nostr-dag-server.$$.log; exit 1; }; \
 	done; \
 	kill $$SERVER_PID 2>/dev/null; \
+	rm -f /tmp/nostr-dag-server.$$.log; \
 	echo "Server stopped."
 
 test-p2p:
