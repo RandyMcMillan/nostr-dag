@@ -482,6 +482,9 @@ export function initSharedNetworkTime({ headerApi = null } = {}) {
     onTopicMessage(handler) {
       state.topicLogHandler = typeof handler === 'function' ? handler : null;
     },
+    onTopicPeer(handler) {
+      state.topicPeerHandler = typeof handler === 'function' ? handler : null;
+    },
     getSnapshot() {
       return {
         offsetMs: state.offsetMs,
