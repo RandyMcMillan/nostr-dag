@@ -91,14 +91,17 @@ function logEvent(text) {
 
 function updateHeader() {
   const headerApi = currentHeaderApi();
-  if (!headerApi?.setNetworkTime) return;
   const syncedAgoMs = state.lastSyncAt ? Math.max(0, Date.now() - state.lastSyncAt) : null;
   const syncText = syncedAgoMs == null ? 'no sync yet' : `${Math.round(syncedAgoMs / 1000)}s ago`;
   const accuracyText = Number.isFinite(state.lastAccuracyMs) ? `${Math.round(state.lastAccuracyMs)}ms` : 'n/a';
   const sampleText = state.peerSamples.length ? `${state.peerSamples.length} sample${state.peerSamples.length === 1 ? '' : 's'}` : 'local clock';
   const deltaText = formatDeltaMs(state.offsetMs);
+  const localNow = Date.now();
+  const consensusNow = getNetworkNowMs();
+  logEvent(`[tick] local=${localNow} consensus=${consensusNow} delta=${deltaText} status=${state.status} samples=${state.peerSamples.length} sync=${syncText}`);
+  if (!headerApi?.setNetworkTime) return;
   headerApi.setNetworkTime({
-    text: `${formatUtcTime(getNetworkNowMs())} (${deltaText}) · ${sampleText}`,
+    text: `${formatUtcTime(consensusNow)} (${deltaText}) · ${sampleText}`,
     title: `Network time ${state.status} · ${sampleText} · accuracy ${accuracyText} · delta ${deltaText} · last sync ${syncText}`,
     state: state.status,
   });
@@ -192,17 +195,19 @@ export function computeConsensusOffset(samples = []) {
 function recalibrateOffset() {
   if (state.peerSamples.length < MIN_SAMPLES_FOR_RECALIBRATION) {
     state.status = state.lastSyncAt ? 'available' : 'unavailable';
+    logEvent(`[consensus] insufficient samples=${state.peerSamples.length} offset=${formatDeltaMs(state.offsetMs)}`);
     return;
   }
   const targetOffset = computeConsensusOffset(state.peerSamples);
   const beforeOffset = state.offsetMs;
   const delta = targetOffset - beforeOffset;
-  state.offsetMs = Math.round(beforeOffset + delta * DAMPING_FACTOR);
+  const dampedDelta = Math.round(delta * DAMPING_FACTOR);
+  state.offsetMs = Math.round(beforeOffset + dampedDelta);
   state.lastSyncAt = Date.now();
   state.lastSampleCount = state.peerSamples.length;
   state.lastAccuracyMs = median(state.peerSamples.map((s) => s.rttMs / 2));
   state.status = 'available';
-  logEvent(`[consensus] target=${formatDeltaMs(targetOffset)} before=${formatDeltaMs(beforeOffset)} after=${formatDeltaMs(state.offsetMs)} samples=${state.peerSamples.length}`);
+  logEvent(`[consensus] target=${formatDeltaMs(targetOffset)} before=${formatDeltaMs(beforeOffset)} delta=${formatDeltaMs(delta)} damped=${formatDeltaMs(dampedDelta)} after=${formatDeltaMs(state.offsetMs)} samples=${state.peerSamples.length} accuracy=${Math.round(state.lastAccuracyMs)}ms`);
   persistState();
 }
 
@@ -234,7 +239,10 @@ async function handleNetworkTimeMessage(event) {
   const receivedAtMs = Date.now();
   const sentAtMs = Number(payload.sent_at_ms);
   const serverTimeMs = Number(payload.server_time_ms);
-  if (!Number.isFinite(sentAtMs) || !Number.isFinite(serverTimeMs)) return;
+  if (!Number.isFinite(sentAtMs) || !Number.isFinite(serverTimeMs)) {
+    logEvent(`[response] invalid numbers req=${payload.request_id}`);
+    return;
+  }
   const offsetMs = serverTimeMs - ((pending.sentAtMs + receivedAtMs) / 2);
   const rttMs = Math.max(0, receivedAtMs - pending.sentAtMs);
   const responderPeerId = payload.responder_peer_id || 'unknown';
@@ -245,7 +253,7 @@ async function handleNetworkTimeMessage(event) {
     state.peerSamples.shift();
   }
 
-  logEvent(`[peer:${responderPeerId.slice(0, 16)}…] offset=${formatDeltaMs(offsetMs)} rtt=${Math.round(rttMs)}ms`);
+  logEvent(`[response] peer=${responderPeerId.slice(0, 16)}… req=${payload.request_id} localSent=${pending.sentAtMs} localRecv=${receivedAtMs} peerTime=${serverTimeMs} offset=${formatDeltaMs(offsetMs)} rtt=${Math.round(rttMs)}ms window=${state.peerSamples.length}`);
 }
 
 export function getNetworkNowMs() {
