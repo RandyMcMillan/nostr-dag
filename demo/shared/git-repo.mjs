@@ -65,6 +65,7 @@ export class GitRepo {
       tagMap: mergedTagMap,
       branches: mergedBranches,
       serverRefs: dedupedServerRefs,
+      selectedRef: this.data.selectedRef || existingRefs.selectedRef || '',
     };
     saveRefCache(refCache);
 
