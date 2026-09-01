@@ -187,7 +187,7 @@ export function parseNetworkTimeMessage(text) {
 export function computeConsensusOffset(samples = []) {
   return median(
     samples
-      .map((sample) => Number(sample?.offsetMs))
+      .map((sample) => Number(sample?.deltaMs))
       .filter((value) => Number.isFinite(value)),
   );
 }
@@ -203,16 +203,14 @@ function recalibrateOffset() {
     logEvent(`[consensus] insufficient samples=${state.peerSamples.length} offset=${formatDeltaMs(state.offsetMs)}`);
     return;
   }
-  const targetOffset = computeConsensusOffset(state.peerSamples);
+  const medianDelta = computeConsensusOffset(state.peerSamples);
   const beforeOffset = state.offsetMs;
-  const delta = targetOffset - beforeOffset;
-  const dampedDelta = Math.round(delta * DAMPING_FACTOR);
-  state.offsetMs = Math.round(beforeOffset + dampedDelta);
+  state.offsetMs += Math.round(medianDelta * DAMPING_FACTOR);
   state.lastSyncAt = Date.now();
   state.lastSampleCount = state.peerSamples.length;
   state.lastAccuracyMs = median(state.peerSamples.map((s) => s.rttMs / 2));
   state.status = 'available';
-  logEvent(`[consensus] target=${formatDeltaMs(targetOffset)} before=${formatDeltaMs(beforeOffset)} delta=${formatDeltaMs(delta)} damped=${formatDeltaMs(dampedDelta)} after=${formatDeltaMs(state.offsetMs)} samples=${state.peerSamples.length} accuracy=${Math.round(state.lastAccuracyMs)}ms`);
+  logEvent(`[consensus] medianDelta=${formatDeltaMs(medianDelta)} before=${formatDeltaMs(beforeOffset)} after=${formatDeltaMs(state.offsetMs)} samples=${state.peerSamples.length} accuracy=${Math.round(state.lastAccuracyMs)}ms`);
   persistState();
 }
 
@@ -248,19 +246,20 @@ async function handleNetworkTimeMessage(event) {
     logEvent(`[response] invalid numbers req=${payload.request_id}`);
     return;
   }
-  const offsetMs = serverTimeMs - ((pending.sentAtMs + receivedAtMs) / 2);
+  const localConsensusTime = Date.now() + state.offsetMs;
+  const deltaMs = serverTimeMs - localConsensusTime;
   const rttMs = Math.max(0, receivedAtMs - pending.sentAtMs);
   const responderPeerId = payload.responder_peer_id || 'unknown';
 
   // Add to persistent sliding window, evicting oldest if full.
-  state.peerSamples.push({ responderPeerId, offsetMs, rttMs, receivedAtMs });
+  state.peerSamples.push({ responderPeerId, deltaMs, rttMs, receivedAtMs });
   if (state.peerSamples.length > SAMPLE_WINDOW) {
     state.peerSamples.shift();
   }
 
   const peerShort = responderPeerId.slice(0, 16);
-  logEvent(`[response] peer=${peerShort}… req=${payload.request_id} localSent=${pending.sentAtMs} localRecv=${receivedAtMs} peerTime=${serverTimeMs} offset=${formatDeltaMs(offsetMs)} rtt=${Math.round(rttMs)}ms window=${state.peerSamples.length}`);
-  logEvent(`[sample] peer=${peerShort}… offset=${formatDeltaMs(offsetMs)} rtt=${Math.round(rttMs)}ms`);
+  logEvent(`[response] peer=${peerShort}… req=${payload.request_id} localConsensus=${localConsensusTime} peerTime=${serverTimeMs} delta=${formatDeltaMs(deltaMs)} rtt=${Math.round(rttMs)}ms window=${state.peerSamples.length}`);
+  logEvent(`[sample] peer=${peerShort}… delta=${formatDeltaMs(deltaMs)} rtt=${Math.round(rttMs)}ms`);
 }
 
 export function getNetworkNowMs() {
