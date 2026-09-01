@@ -242,6 +242,8 @@
       setNetworkTime({ text, title, state }) {
         const snapshot = networkTime?.getSnapshot?.() || { offsetMs: 0, status: 'checking', lastSampleCount: 0, lastAccuracyMs: null };
         updateDisplay(snapshot);
+      },
+      logNetworkTime(text) {
         log(text);
       },
     };

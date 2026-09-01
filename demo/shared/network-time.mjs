@@ -4,6 +4,9 @@ const NETWORK_TIME_VERSION = 1;
 const NETWORK_TIME_TOPIC = 'nostr-dag-bridge';
 const SYNC_INTERVAL_MS = 30_000;
 const QUERY_WAIT_MS = 1_200;
+const SAMPLE_WINDOW = 10;
+const DAMPING_FACTOR = 0.1;
+const MIN_SAMPLES_FOR_RECALIBRATION = 3;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
@@ -20,6 +23,8 @@ const state = globalThis.__nostrDagNetworkTimeState || {
   tickTimer: null,
   pendingRequests: new Map(),
   requestCounter: 0,
+  // Persistent sliding window of recent peer samples for damped consensus.
+  peerSamples: [],
   // Tracks whether we have already attached the visibility listener so that
   // re-calling initSharedNetworkTime() (e.g. hot-module reload) does not
   // register a second handler.
@@ -77,13 +82,20 @@ function currentHeaderApi() {
   return state.headerApi || globalThis.__sharedHeaderApi || null;
 }
 
+function logEvent(text) {
+  const api = currentHeaderApi();
+  if (api?.logNetworkTime) {
+    api.logNetworkTime(text);
+  }
+}
+
 function updateHeader() {
   const headerApi = currentHeaderApi();
   if (!headerApi?.setNetworkTime) return;
   const syncedAgoMs = state.lastSyncAt ? Math.max(0, Date.now() - state.lastSyncAt) : null;
   const syncText = syncedAgoMs == null ? 'no sync yet' : `${Math.round(syncedAgoMs / 1000)}s ago`;
   const accuracyText = Number.isFinite(state.lastAccuracyMs) ? `${Math.round(state.lastAccuracyMs)}ms` : 'n/a';
-  const sampleText = state.lastSampleCount ? `${state.lastSampleCount} peer${state.lastSampleCount === 1 ? '' : 's'}` : 'local clock';
+  const sampleText = state.peerSamples.length ? `${state.peerSamples.length} sample${state.peerSamples.length === 1 ? '' : 's'}` : 'local clock';
   const deltaText = formatDeltaMs(state.offsetMs);
   headerApi.setNetworkTime({
     text: `${formatUtcTime(getNetworkNowMs())} (${deltaText}) · ${sampleText}`,
@@ -164,30 +176,34 @@ export function parseNetworkTimeMessage(text) {
   }
 }
 
-export function computeConsensusOffset(responses = []) {
+export function computeConsensusOffset(samples = []) {
   return median(
-    responses
-      .map((response) => Number(response?.offsetMs))
+    samples
+      .map((sample) => Number(sample?.offsetMs))
       .filter((value) => Number.isFinite(value)),
   );
 }
 
-function noteConsensusResponses(responses) {
-  if (!responses.length) {
+/**
+ * Recalibrate the local offset using a damped sliding window.
+ * Instead of snapping to the raw median immediately (which causes oscillation),
+ * we move only a fraction of the way toward the target each round.
+ */
+function recalibrateOffset() {
+  if (state.peerSamples.length < MIN_SAMPLES_FOR_RECALIBRATION) {
     state.status = state.lastSyncAt ? 'available' : 'unavailable';
-    updateHeader();
     return;
   }
-  state.offsetMs = computeConsensusOffset(responses);
+  const targetOffset = computeConsensusOffset(state.peerSamples);
+  const beforeOffset = state.offsetMs;
+  const delta = targetOffset - beforeOffset;
+  state.offsetMs = Math.round(beforeOffset + delta * DAMPING_FACTOR);
   state.lastSyncAt = Date.now();
-  state.lastSampleCount = responses.length;
-  state.lastAccuracyMs = median(responses.map((response) => response.rttMs / 2));
+  state.lastSampleCount = state.peerSamples.length;
+  state.lastAccuracyMs = median(state.peerSamples.map((s) => s.rttMs / 2));
   state.status = 'available';
-  // Log the integer delta (ms) between network time and local UTC time.
-  const deltaStr = formatDeltaMs(state.offsetMs);
-  console.error(`[network-time] delta network-utc: ${deltaStr}`);
+  logEvent(`[consensus] target=${formatDeltaMs(targetOffset)} before=${formatDeltaMs(beforeOffset)} after=${formatDeltaMs(state.offsetMs)} samples=${state.peerSamples.length}`);
   persistState();
-  updateHeader();
 }
 
 async function publishNetworkTimeMessage(payload) {
@@ -217,11 +233,17 @@ async function handleNetworkTimeMessage(event) {
   const sentAtMs = Number(payload.sent_at_ms);
   const serverTimeMs = Number(payload.server_time_ms);
   if (!Number.isFinite(sentAtMs) || !Number.isFinite(serverTimeMs)) return;
-  pending.responses.push({
-    responderPeerId: payload.responder_peer_id || '',
-    offsetMs: serverTimeMs - ((pending.sentAtMs + receivedAtMs) / 2),
-    rttMs: Math.max(0, receivedAtMs - pending.sentAtMs),
-  });
+  const offsetMs = serverTimeMs - ((pending.sentAtMs + receivedAtMs) / 2);
+  const rttMs = Math.max(0, receivedAtMs - pending.sentAtMs);
+  const responderPeerId = payload.responder_peer_id || 'unknown';
+
+  // Add to persistent sliding window, evicting oldest if full.
+  state.peerSamples.push({ responderPeerId, offsetMs, rttMs, receivedAtMs });
+  if (state.peerSamples.length > SAMPLE_WINDOW) {
+    state.peerSamples.shift();
+  }
+
+  logEvent(`[peer:${responderPeerId.slice(0, 16)}…] offset=${formatDeltaMs(offsetMs)} rtt=${Math.round(rttMs)}ms`);
 }
 
 export function getNetworkNowMs() {
@@ -253,7 +275,7 @@ export async function syncNetworkTime({ waitMs = QUERY_WAIT_MS } = {}) {
     return {
       offsetMs: state.offsetMs,
       status: state.status,
-      sampleCount: state.lastSampleCount,
+      sampleCount: state.peerSamples.length,
     };
   }
 
@@ -278,11 +300,12 @@ export async function syncNetworkTime({ waitMs = QUERY_WAIT_MS } = {}) {
     state.pendingRequests.delete(requestId);
   }
 
-  noteConsensusResponses(pending.responses);
+  recalibrateOffset();
+  updateHeader();
   return {
     offsetMs: state.offsetMs,
     status: state.status,
-    sampleCount: state.lastSampleCount,
+    sampleCount: state.peerSamples.length,
   };
 }
 
