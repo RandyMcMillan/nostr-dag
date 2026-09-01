@@ -79,6 +79,7 @@ site: wasm
     cp demo/vendor/*.mjs site/vendor/
     mkdir -p site/examples
     cp examples/*.html site/examples/
+    cp demo/network_time.html site/network_time.html
 
 demo:
     ./demo/run.sh
