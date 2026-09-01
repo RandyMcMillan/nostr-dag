@@ -19,6 +19,7 @@ import { createListContainerController } from './list-container.mjs';
 import { createPeersListController } from './peers-list.mjs';
 import { extractBridgeRoundTripStartMs } from './bridge-roundtrip.mjs';
 import { createRelaysListController } from './relays-list.mjs';
+import { detectProbableVpn } from './vpn-detect.mjs';
     import { getRecentItems } from './bridge-recent-query.mjs';
     import { persistBridgeCacheState, restoreBridgeCacheState } from './bridge-cache.mjs';
     import {
@@ -79,6 +80,21 @@ import { createRelaysListController } from './relays-list.mjs';
         maxEntries: 5000,
       },
       footerMode: 'raf',
+    });
+
+    // Detect probable VPN early; VPNs often interfere with libp2p hole punching
+    // and WebRTC connectivity.  Log the result so users know why P2P may fail.
+    detectProbableVpn().then((result) => {
+      if (result.probableVpn) {
+        const reason = result.reasons.join('; ');
+        window.__sharedFooter?.log('bridge', `probable VPN detected (${reason}) — P2P hole punching may be impaired`, 'warn', 'checking');
+      } else if (result.score > 0) {
+        window.__sharedFooter?.log('bridge', `weak VPN signal: ${result.reasons.join('; ')}`, 'trace', 'checking');
+      } else {
+        window.__sharedFooter?.log('bridge', `no VPN detected (publicIp=${result.publicIp || 'unknown'})`, 'trace', 'available');
+      }
+    }).catch((e) => {
+      window.__sharedFooter?.log('bridge', `VPN detection failed: ${e.message}`, 'trace', 'checking');
     });
 
     const pool = new SimplePool();
