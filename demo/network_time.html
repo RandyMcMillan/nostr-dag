@@ -194,6 +194,25 @@
       logEl.textContent = logs.slice(-40).join('\n');
     }
 
+    function postLogger(label, text, level = 'info', state = 'checking') {
+      try {
+        fetch('/logger', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            time: new Date().toISOString(),
+            label,
+            text,
+            level,
+            state,
+            source: '/network_time.html',
+          }),
+        }).catch(() => {});
+      } catch {
+        // best effort
+      }
+    }
+
     function updateDisplay(state) {
       const consensusTime = Date.now() + (state.offsetMs || 0);
       timeDisplay.textContent = new Date(consensusTime).toISOString().replace('T', ' ').replace('Z', ' UTC');
@@ -265,6 +284,7 @@
           connectedPeers.add(peerId);
           updateNodeDisplay();
           log(`Peer connected: ${peerId}`);
+          postLogger('network-time', `Peer connected: ${peerId}`, 'info', 'available');
         });
 
         node.addEventListener('peer:disconnect', (event) => {
@@ -272,13 +292,16 @@
           connectedPeers.delete(peerId);
           updateNodeDisplay();
           log(`Peer disconnected: ${peerId}`);
+          postLogger('network-time', `Peer disconnected: ${peerId}`, 'warn', 'checking');
         });
 
         networkTime.attachNode(node);
         nodeStarted = true;
         updateNodeDisplay();
         log(`Node started: ${node.peerId.toString()}`);
+        postLogger('network-time', `Node started: ${node.peerId.toString()}`, 'info', 'available');
         log(`Bootstrap peers: ${bootstrapPeers.length}`);
+        postLogger('network-time', `Bootstrap peers: ${bootstrapPeers.length}`, 'debug', 'checking');
       } catch (e) {
         log(`Node bootstrap failed: ${e.message}`);
         startNodeBtn.disabled = false;

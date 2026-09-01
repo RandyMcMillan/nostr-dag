@@ -42,6 +42,15 @@ enum Commands {
         /// Also start the embedded libp2p peer
         #[arg(long, env = "P2P_ENABLE")]
         p2p: bool,
+        /// Additional directory to serve static files from
+        #[arg(long)]
+        path: Option<String>,
+        /// Allow serving subdirectories of --path
+        #[arg(long)]
+        recursive: bool,
+        /// Maximum path depth for --path (default: 3)
+        #[arg(long, default_value = "3")]
+        depth: usize,
     },
 
     /// Run the native libp2p peer
@@ -100,8 +109,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             site_dir,
             db_path,
             p2p,
+            path,
+            recursive,
+            depth,
         } => {
-            nostr_dag::server::run_server(&host, port, &site_dir, &db_path, p2p).await
+            nostr_dag::server::run_server(&host, port, &site_dir, &db_path, p2p, path.as_deref(), recursive, depth).await
         }
 
         #[cfg(feature = "p2p")]

@@ -138,6 +138,9 @@ pub async fn run_server(
     site_dir: &str,
     db_path: &str,
     _embed_p2p: bool,
+    extra_path: Option<&str>,
+    extra_recursive: bool,
+    extra_depth: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let site_dir = if std::path::Path::new(site_dir).is_dir() {
         site_dir.to_string()
@@ -145,6 +148,15 @@ pub async fn run_server(
         println!("WARN site_dir '{site_dir}' not found, falling back to 'demo/'");
         "demo".to_string()
     };
+    let extra_path = extra_path.and_then(|p| {
+        let meta = std::fs::metadata(p).ok()?;
+        if meta.is_dir() {
+            Some(p.to_string())
+        } else {
+            println!("WARN extra_path '{p}' is not a directory, ignoring");
+            None
+        }
+    });
     let logger_store = Arc::new(LoggerStore::default());
     let peer_store = Arc::new(PeerStore::default());
     // Seed the peer store with the public GitHub Pages deployment so
@@ -247,8 +259,9 @@ pub async fn run_server(
                 let event_store = Arc::clone(&event_store);
                 let http_client = Arc::clone(&http_client);
                 let connection_shutdown = shutdown_rx.clone();
+                let extra_path = extra_path.clone();
                 connections.spawn(async move {
-                    if let Err(err) = handle_connection(stream, &site_dir, logger_store, peer_store, event_store, http_client, connection_shutdown).await {
+                    if let Err(err) = handle_connection(stream, &site_dir, extra_path.as_deref(), extra_recursive, extra_depth, logger_store, peer_store, event_store, http_client, connection_shutdown).await {
                         if is_disconnect_error(&err) || err.kind() == io::ErrorKind::Interrupted {
                             trace!(%peer, ?err, "client disconnected");
                         } else {
@@ -287,6 +300,9 @@ pub async fn run_server(
 async fn handle_connection(
     mut stream: TcpStream,
     site_dir: &str,
+    extra_path: Option<&str>,
+    extra_recursive: bool,
+    extra_depth: usize,
     logger_store: Arc<LoggerStore>,
     peer_store: Arc<PeerStore>,
     event_store: Arc<EventStoreState>,
@@ -318,7 +334,7 @@ async fn handle_connection(
         && !path.starts_with(NIP11_ROUTE_PREFIX)
         && !path.starts_with(EVENTS_ROUTE_PREFIX)
     {
-        canonical_directory_redirect(site_dir, path, request_target).await
+        canonical_directory_redirect(site_dir, extra_path, path, request_target).await
     } else {
         None
     };
@@ -514,7 +530,7 @@ async fn handle_connection(
             }
         }
     } else {
-        match route_path(site_dir, path).await {
+        match try_route_paths(site_dir, extra_path, extra_recursive, extra_depth, path).await {
             Ok((body, content_type)) => {
                 trace!(%path, content_type, head_only, body_len = body.len(), "serving response");
                 response_bytes(200, "OK", body, content_type, head_only)
@@ -1123,8 +1139,31 @@ async fn route_path(site_dir: &str, path: &str) -> Result<(Vec<u8>, &'static str
     Ok((body, content_type))
 }
 
+async fn try_route_paths(
+    site_dir: &str,
+    extra_path: Option<&str>,
+    extra_recursive: bool,
+    extra_depth: usize,
+    path: &str,
+) -> Result<(Vec<u8>, &'static str), RouteError> {
+    match route_path(site_dir, path).await {
+        Ok(result) => return Ok(result),
+        Err(RouteError::NotFound) => {}
+        Err(e) => return Err(e),
+    }
+    if let Some(extra) = extra_path {
+        let normalized = normalize_path(path)?;
+        let depth = normalized.components().count();
+        if depth <= extra_depth || (extra_recursive && depth > 0) {
+            return route_path(extra, path).await;
+        }
+    }
+    Err(RouteError::NotFound)
+}
+
 async fn canonical_directory_redirect(
     site_dir: &str,
+    extra_path: Option<&str>,
     path: &str,
     request_target: &str,
 ) -> Option<String> {
@@ -1132,16 +1171,27 @@ async fn canonical_directory_redirect(
     if normalized.as_os_str().is_empty() {
         return None;
     }
-    let candidate = PathBuf::from(site_dir).join(normalized);
+    let candidate = PathBuf::from(site_dir).join(&normalized);
     let is_dir = fs::metadata(&candidate)
         .await
         .map(|meta| meta.is_dir())
         .unwrap_or(false);
-    if !is_dir {
-        return None;
+    if is_dir {
+        let suffix = query_suffix(request_target);
+        return Some(format!("{path}/{suffix}"));
     }
-    let suffix = query_suffix(request_target);
-    Some(format!("{path}/{suffix}"))
+    if let Some(extra) = extra_path {
+        let candidate = PathBuf::from(extra).join(normalized);
+        let is_dir = fs::metadata(&candidate)
+            .await
+            .map(|meta| meta.is_dir())
+            .unwrap_or(false);
+        if is_dir {
+            let suffix = query_suffix(request_target);
+            return Some(format!("{path}/{suffix}"));
+        }
+    }
+    None
 }
 
 fn normalize_path(path: &str) -> Result<PathBuf, RouteError> {
