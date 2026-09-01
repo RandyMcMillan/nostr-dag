@@ -25,6 +25,7 @@ const state = globalThis.__nostrDagNetworkTimeState || {
   pendingRequests: new Map(),
   requestCounter: 0,
   topic: DEFAULT_NETWORK_TIME_TOPIC,
+  topicLogHandler: null,
   // Persistent sliding window of recent peer samples for damped consensus.
   peerSamples: [],
   // Tracks whether we have already attached the visibility listener so that
@@ -402,6 +403,18 @@ export function initSharedNetworkTime({ headerApi = null } = {}) {
 
       node.services.pubsub.addEventListener('message', (event) => {
         void handleNetworkTimeMessage(event);
+        const msgTopic = event?.detail?.topic;
+        if (msgTopic && msgTopic === state.topic && typeof state.topicLogHandler === 'function') {
+          try {
+            state.topicLogHandler({
+              topic: msgTopic,
+              data: decodePubsubMessage(event),
+              from: event?.detail?.from?.toString?.() || '',
+            });
+          } catch {
+            // ignore handler errors
+          }
+        }
       });
 
       Promise.resolve(node.services.pubsub.subscribe(state.topic)).then(() => {
@@ -425,6 +438,9 @@ export function initSharedNetworkTime({ headerApi = null } = {}) {
     },
     syncNow(options) {
       return syncNetworkTime(options);
+    },
+    onTopicMessage(handler) {
+      state.topicLogHandler = typeof handler === 'function' ? handler : null;
     },
     getSnapshot() {
       return {
