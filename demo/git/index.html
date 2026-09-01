@@ -825,7 +825,13 @@
         tagMap[tagName] = entry.oid || tagMap[tagName] || '';
       }
       const ref = resolveRefSelection(branches, tags, route || {});
-      const selectedRef = selectedRefForRoute(route) || ref;
+      // Truth table for selectedRef preservation:
+      // | route.branch | route.tag | cached.selectedRef | result              |
+      // | yes          | —         | any                | route.branch        |
+      // | —            | yes       | any                | route.tag           |
+      // | —            | —         | yes                | cached.selectedRef  |
+      // | —            | —         | no                 | ref (default)       |
+      const selectedRef = selectedRefForRoute(route) || mergedCached?.selectedRef || ref;
       footer.log('git', `readRepo refs ${repo.name} branches=${branches.length} tags=${tags.length} ref=${ref} selectedRef=${selectedRef}`, 'debug');
       const candidates = refCandidatesForRoute(route, branches, tags);
       let commits = [];
