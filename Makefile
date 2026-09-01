@@ -45,13 +45,23 @@ test-native:
 
 test-js:
 	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) cargo check --quiet
-	@for f in test/*.test.mjs; do \
+	@echo "Starting nostr-dag-server for JS tests (P2P disabled)..."
+	@CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) $(CARGO) build --bin nostr-dag-server --features native >/dev/null 2>&1
+	@./target/debug/nostr-dag-server &
+	SERVER_PID=$$!; \
+	for i in 1 2 3 4 5 6 7 8 9 10; do \
+		if curl -s -o /dev/null http://127.0.0.1:3000/; then break; fi; \
+		sleep 1; \
+	done; \
+	for f in test/*.test.mjs; do \
 		case "$$f" in \
 			*p2p-native-wasm*) continue ;; \
 		esac; \
 		echo "=== running $$f ==="; \
-		NODE_OPTIONS=--trace-uncaught node --test "$$f" || exit 1; \
-	done
+		NODE_OPTIONS=--trace-uncaught node --test "$$f" || { kill $$SERVER_PID 2>/dev/null; exit 1; }; \
+	done; \
+	kill $$SERVER_PID 2>/dev/null; \
+	echo "Server stopped."
 
 test-p2p:
 	NODE_OPTIONS=--trace-uncaught node --test test/p2p-wasm.test.mjs test/pip-js-rust-parity.test.mjs test/nip-pip-wasm.test.mjs test/pip-git-bare-transfer.test.mjs
