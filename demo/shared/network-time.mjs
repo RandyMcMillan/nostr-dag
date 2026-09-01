@@ -424,5 +424,21 @@ export function initSharedNetworkTime({ headerApi = null } = {}) {
         lastAccuracyMs: state.lastAccuracyMs,
       };
     },
+    resetState() {
+      state.offsetMs = 0;
+      state.status = 'checking';
+      state.lastSyncAt = 0;
+      state.lastSampleCount = 0;
+      state.lastAccuracyMs = null;
+      state.peerSamples = [];
+      state._lastTickKey = null;
+      try {
+        globalThis.localStorage?.removeItem(STORAGE_KEY);
+      } catch {
+        // ignore
+      }
+      updateHeader();
+      logEvent('[reset] state cleared');
+    },
   };
 }

@@ -258,6 +258,17 @@
       nodeStatusDisplay.className = `status ${nodeStarted ? 'ok' : ''}`;
       connectedDisplay.textContent = String(connectedPeers.size);
       bootstrapDisplay.textContent = String(DEFAULT_BOOTSTRAP_PEERS.length);
+      const listEl = document.getElementById('peerList');
+      if (listEl) {
+        if (peerDetails.size === 0) {
+          listEl.textContent = '';
+        } else {
+          listEl.innerHTML = Array.from(peerDetails.entries()).map(([id, info]) => {
+            const short = id.slice(0, 12) + '…';
+            return `<div title="${id}">${short} ${info.addrs ? info.addrs.slice(0, 30) : ''}</div>`;
+          }).join('');
+        }
+      }
     }
 
     let networkTime = null;
@@ -293,6 +304,19 @@
       });
     });
 
+    const resetBtn = document.getElementById('resetBtn');
+    resetBtn.addEventListener('click', () => {
+      log('Resetting network time state…');
+      try {
+        globalThis.localStorage?.removeItem('nostr-dag.network-time.v2');
+      } catch {
+        // ignore
+      }
+      networkTime.resetState();
+      refresh();
+      log('Network time state reset');
+    });
+
     async function initLibp2pNode() {
       if (nodeStarted) return;
       startNodeBtn.disabled = true;
@@ -310,7 +334,9 @@
 
         node.addEventListener('peer:connect', (event) => {
           const peerId = event?.detail?.peerId?.toString?.() || event?.detail?.remotePeer?.toString?.() || 'unknown';
+          const addrs = event?.detail?.multiaddrs?.map?.((m) => m.toString()).join(', ') || '';
           connectedPeers.add(peerId);
+          peerDetails.set(peerId, { addrs, connectedAt: Date.now() });
           updateNodeDisplay();
           log(`Peer connected: ${peerId}`);
           postLogger('network-time', `Peer connected: ${peerId}`, 'info', 'available');
@@ -319,6 +345,7 @@
         node.addEventListener('peer:disconnect', (event) => {
           const peerId = event?.detail?.peerId?.toString?.() || event?.detail?.remotePeer?.toString?.() || 'unknown';
           connectedPeers.delete(peerId);
+          peerDetails.delete(peerId);
           updateNodeDisplay();
           log(`Peer disconnected: ${peerId}`);
           postLogger('network-time', `Peer disconnected: ${peerId}`, 'warn', 'checking');
