@@ -4,8 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Network Time — nostr-dag</title>
-  <link rel="icon" href="../demo/shared/favicon.ico" />
-  <link rel="stylesheet" href="../demo/shared/page.css" />
+  <link rel="icon" href="./shared/favicon.ico" />
+  <link rel="stylesheet" href="./shared/page.css" />
   <style>
     :root {
       --ok: #2e7d32;
@@ -94,7 +94,7 @@
     <header class="row" style="justify-content:space-between;margin-bottom:12px;">
       <div>
         <h1>Network Time</h1>
-        <div class="subtitle">P2P consensus clock synced via libp2p</div>
+        <div class="subtitle">P2P consensus clock synced via libp2p gossipsub</div>
       </div>
       <a href="../index.html" style="text-decoration:none;font-size:1.6rem;">⬅</a>
     </header>
@@ -121,11 +121,39 @@
       </div>
 
       <div class="panel">
+        <h2>P2P Node</h2>
+        <div class="row">
+          <span class="muted">Peer ID:</span>
+          <span id="peerIdDisplay" class="mono">—</span>
+        </div>
+        <div class="row">
+          <span class="muted">Status:</span>
+          <span id="nodeStatusDisplay" class="status">off</span>
+        </div>
+        <div class="row">
+          <span class="muted">Connected:</span>
+          <span id="connectedDisplay">0</span>
+        </div>
+        <div class="row">
+          <span class="muted">Bootstrap:</span>
+          <span id="bootstrapDisplay">0</span>
+        </div>
+        <div class="row" style="margin-top:10px;">
+          <button id="startNodeBtn" type="button">Start Node</button>
+        </div>
+      </div>
+
+      <div class="panel">
         <h2>About</h2>
         <p class="small">
           This page displays the network time offset calculated from peer samples
           using Cristian's Algorithm. The median offset across all samples is
           applied to the local clock to produce a consensus time.
+        </p>
+        <p class="small">
+          When the P2P node is started, it joins the <code>nostr-dag-bridge</code>
+          gossipsub topic and exchanges time queries/responses with any connected
+          peers to reach consensus.
         </p>
         <p class="small">
           For the full interactive demo with peer sampling and Byzantine-resistant
@@ -142,15 +170,24 @@
   </div>
 
   <script type="module">
-    import { initSharedNetworkTime } from '../demo/shared/network-time.mjs';
+    import { initSharedNetworkTime } from './shared/network-time.mjs';
+    import { createSharedLibp2pStack, DEFAULT_BOOTSTRAP_PEERS } from './shared/libp2p-stack.mjs';
 
     const timeDisplay = document.getElementById('timeDisplay');
     const offsetDisplay = document.getElementById('offsetDisplay');
     const sampleDisplay = document.getElementById('sampleDisplay');
     const statusDisplay = document.getElementById('statusDisplay');
     const syncBtn = document.getElementById('syncBtn');
+    const peerIdDisplay = document.getElementById('peerIdDisplay');
+    const nodeStatusDisplay = document.getElementById('nodeStatusDisplay');
+    const connectedDisplay = document.getElementById('connectedDisplay');
+    const bootstrapDisplay = document.getElementById('bootstrapDisplay');
+    const startNodeBtn = document.getElementById('startNodeBtn');
     const logEl = document.getElementById('log');
     const logs = [];
+
+    const connectedPeers = new Set();
+    let nodeStarted = false;
 
     function log(text) {
       logs.push(`[${new Date().toLocaleTimeString()}] ${text}`);
@@ -167,10 +204,20 @@
       statusDisplay.className = `status status-${state.status}`;
     }
 
+    function updateNodeDisplay() {
+      peerIdDisplay.textContent = globalThis.__currentLibp2pPeerId || '—';
+      nodeStatusDisplay.textContent = nodeStarted ? 'started' : 'off';
+      nodeStatusDisplay.className = `status ${nodeStarted ? 'ok' : ''}`;
+      connectedDisplay.textContent = String(connectedPeers.size);
+      bootstrapDisplay.textContent = String(DEFAULT_BOOTSTRAP_PEERS.length);
+    }
+
     // Create a minimal header API stub so network-time can update us.
     const headerApi = {
       setNetworkTime({ text, title, state }) {
-        updateDisplay({ offsetMs: 0, status: state, lastSampleCount: 0 });
+        // Pull the real snapshot so the display shows actual offset/samples.
+        const snapshot = networkTime.getSnapshot();
+        updateDisplay(snapshot);
         log(text);
       },
     };
@@ -197,6 +244,53 @@
         log(`Sync failed: ${e.message}`);
       });
     });
+
+    async function initLibp2pNode() {
+      if (nodeStarted) return;
+      startNodeBtn.disabled = true;
+      log('Bootstrapping libp2p node…');
+      try {
+        const { node, bootstrapPeers } = await createSharedLibp2pStack({
+          bootstrapPeers: DEFAULT_BOOTSTRAP_PEERS,
+          onLog(level, text, state) {
+            log(`[libp2p] ${text}`);
+          },
+          onStatus(state, peerId) {
+            log(`[libp2p] ${state} ${peerId}`);
+          },
+        });
+
+        node.addEventListener('peer:connect', (event) => {
+          const peerId = event?.detail?.peerId?.toString?.() || event?.detail?.remotePeer?.toString?.() || 'unknown';
+          connectedPeers.add(peerId);
+          updateNodeDisplay();
+          log(`Peer connected: ${peerId}`);
+        });
+
+        node.addEventListener('peer:disconnect', (event) => {
+          const peerId = event?.detail?.peerId?.toString?.() || event?.detail?.remotePeer?.toString?.() || 'unknown';
+          connectedPeers.delete(peerId);
+          updateNodeDisplay();
+          log(`Peer disconnected: ${peerId}`);
+        });
+
+        networkTime.attachNode(node);
+        nodeStarted = true;
+        updateNodeDisplay();
+        log(`Node started: ${node.peerId.toString()}`);
+        log(`Bootstrap peers: ${bootstrapPeers.length}`);
+      } catch (e) {
+        log(`Node bootstrap failed: ${e.message}`);
+        startNodeBtn.disabled = false;
+      }
+    }
+
+    startNodeBtn.addEventListener('click', () => {
+      void initLibp2pNode();
+    });
+
+    // Auto-start the node on page load so users immediately join the mesh.
+    void initLibp2pNode();
   </script>
 </body>
 </html>
