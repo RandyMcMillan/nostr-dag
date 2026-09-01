@@ -38,14 +38,9 @@ jobs:
           rustup toolchain install stable --profile minimal
           rustup default stable
 
-      - name: Cache cargo
-        uses: actions/cache@v4
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          shared-key: stable-cache
 
       - name: Build (native)
         run: cargo build --features native
@@ -68,14 +63,9 @@ jobs:
       - name: Install libp2p system deps
         run: sudo apt-get install -y libssl-dev pkg-config
 
-      - name: Cache cargo
-        uses: actions/cache@v4
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-p2p-${{ hashFiles('**/Cargo.lock') }}
+          shared-key: stable-cache
 
       - name: Build (native + p2p)
         run: cargo build --features native,p2p
@@ -96,14 +86,9 @@ jobs:
           rustup default stable
           rustup target add wasm32-unknown-unknown
 
-      - name: Cache cargo
-        uses: actions/cache@v4
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-p2p-wasm-${{ hashFiles('**/Cargo.lock') }}
+          shared-key: stable-cache
 
       - name: Install wasm-pack
         run: cargo install wasm-pack --locked

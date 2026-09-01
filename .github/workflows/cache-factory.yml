@@ -1,0 +1,41 @@
+# This workflow produces a cache that is used to speed up pull request builds.
+#
+# CI runs multiple jobs with different feature sets, meaning all jobs share
+# compilation artifacts but never the full cache. We make a single cache here
+# that is used by all jobs and the jobs only read from this cache.
+
+name: Cache factory
+
+on:
+  push:
+    branches: [master]
+    tags: ['**']
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  stable-cache:
+    name: Populate stable Rust cache
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install libp2p system deps
+        run: sudo apt-get install -y libssl-dev pkg-config
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: stable-cache
+
+      - name: Populate native cache
+        run: cargo test --features native --no-run
+
+      - name: Populate p2p cache
+        run: cargo test --features native,p2p --no-run

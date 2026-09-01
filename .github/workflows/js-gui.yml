@@ -42,14 +42,9 @@ jobs:
       - name: Install clang for wasm C dependencies
         run: sudo apt-get update && sudo apt-get install -y clang lld
 
-      - name: Cache cargo
-        uses: actions/cache@v4
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-wasm-${{ hashFiles('**/Cargo.lock') }}
+          shared-key: stable-cache
 
       - name: Install wasm-pack
         run: cargo install wasm-pack --locked
