@@ -26,6 +26,9 @@ const state = globalThis.__nostrDagNetworkTimeState || {
   requestCounter: 0,
   topic: DEFAULT_NETWORK_TIME_TOPIC,
   topicLogHandler: null,
+  topicPeerHandler: null,
+  _knownTopicPeers: new Set(),
+  _peerCheckTimer: null,
   // Persistent sliding window of recent peer samples for damped consensus.
   peerSamples: [],
   // Tracks whether we have already attached the visibility listener so that
@@ -139,6 +142,42 @@ function scheduleSyncLoop() {
   state.syncTimer = globalThis.setInterval(() => {
     void syncNetworkTime();
   }, SYNC_INTERVAL_MS);
+}
+
+function checkTopicPeers() {
+  const pubsub = state.node?.services?.pubsub;
+  if (!pubsub?.getPeers) return;
+  try {
+    const peers = pubsub.getPeers(state.topic) || [];
+    for (const peerId of peers) {
+      const id = typeof peerId === 'string' ? peerId : peerId?.toString?.() || '';
+      if (!id || state._knownTopicPeers.has(id)) continue;
+      state._knownTopicPeers.add(id);
+      if (typeof state.topicPeerHandler === 'function') {
+        try {
+          state.topicPeerHandler({ peerId: id, topic: state.topic });
+        } catch {
+          // ignore handler errors
+        }
+      }
+      logEvent(`[peer] joined topic=${state.topic} peer=${id.slice(0, 16)}…`);
+    }
+  } catch {
+    // best effort only
+  }
+}
+
+function schedulePeerCheckLoop() {
+  if (state._peerCheckTimer) {
+    globalThis.clearInterval(state._peerCheckTimer);
+  }
+  if (!state.node?.services?.pubsub?.getPeers) {
+    logEvent('[peer] check loop skipped: no getPeers');
+    return;
+  }
+  state._peerCheckTimer = globalThis.setInterval(() => {
+    checkTopicPeers();
+  }, 2_000);
 }
 
 function decodePubsubMessage(event) {
@@ -431,6 +470,7 @@ export function initSharedNetworkTime({ headerApi = null } = {}) {
           });
         }
         scheduleSyncLoop();
+        schedulePeerCheckLoop();
         void syncNetworkTime();
       }).catch((e) => {
         logEvent(`[attach] subscribe failed: ${e.message || e}`);
@@ -472,6 +512,7 @@ export function initSharedNetworkTime({ headerApi = null } = {}) {
       const oldTopic = state.topic;
       if (!newTopic || typeof newTopic !== 'string' || newTopic === oldTopic) return;
       state.topic = newTopic;
+      state._knownTopicPeers.clear();
       logEvent(`[topic] changed from "${oldTopic}" to "${newTopic}"`);
       if (state.node?.services?.pubsub?.unsubscribe) {
         try {
