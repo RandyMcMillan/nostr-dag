@@ -201,7 +201,7 @@ export function computeConsensusOffset(samples = []) {
 function recalibrateOffset() {
   if (state.peerSamples.length < MIN_SAMPLES_FOR_RECALIBRATION) {
     state.status = state.lastSyncAt ? 'available' : 'unavailable';
-    logEvent(`[consensus] insufficient samples=${state.peerSamples.length} offset=${formatDeltaMs(state.offsetMs)}`);
+    logEvent(`[consensus] need ${MIN_SAMPLES_FOR_RECALIBRATION}+ peers for consensus — have ${state.peerSamples.length} samples, offset=${formatDeltaMs(state.offsetMs)}`);
     return;
   }
   const medianDelta = computeConsensusOffset(state.peerSamples);
@@ -394,11 +394,11 @@ export function initSharedNetworkTime({ headerApi = null } = {}) {
       if (!state._peerListenersAttached) {
         state._peerListenersAttached = true;
         node.addEventListener('peer:connect', () => {
-          logEvent('[peer:connect] triggering sync');
-          void syncNetworkTime();
+          logEvent('[peer:connect] peer joined, waiting 1s for mesh graft then syncing');
+          globalThis.setTimeout(() => void syncNetworkTime(), 1_000);
         });
         node.addEventListener('peer:disconnect', () => {
-          logEvent('[peer:disconnect] triggering sync');
+          logEvent('[peer:disconnect] peer left, syncing');
           void syncNetworkTime();
         });
       }
