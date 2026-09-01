@@ -219,15 +219,24 @@ function recalibrateOffset() {
 async function publishNetworkTimeMessage(payload) {
   if (!state.node?.services?.pubsub?.publish) return;
   logEvent(`[pubsub] publish type=${payload.type} id=${payload.request_id || 'n/a'}`);
-  await state.node.services.pubsub.publish(
-    NETWORK_TIME_TOPIC,
-    encoder.encode(JSON.stringify(payload)),
-  );
+  try {
+    await state.node.services.pubsub.publish(
+      NETWORK_TIME_TOPIC,
+      encoder.encode(JSON.stringify(payload)),
+    );
+  } catch (e) {
+    logEvent(`[pubsub] publish failed: ${e.message || e}`);
+  }
 }
 
 async function handleNetworkTimeMessage(event) {
-  const payload = parseNetworkTimeMessage(decodePubsubMessage(event));
-  if (!payload) return;
+  const raw = decodePubsubMessage(event);
+  logEvent(`[pubsub] raw message received: ${raw.slice(0, 200)}`);
+  const payload = parseNetworkTimeMessage(raw);
+  if (!payload) {
+    logEvent(`[pubsub] message rejected (protocol/version/type mismatch)`);
+    return;
+  }
 
   if (payload.type === 'query') {
     if (!state.node?.services?.pubsub?.publish) return;
