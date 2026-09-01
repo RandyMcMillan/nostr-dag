@@ -604,24 +604,7 @@
       try {
         await ensureDir(fs, '/repos');
 
-        // Try libp2p bundle fetch first (only when P2P transport is active)
-        let bundlePath = null;
-        const transport = window.__gitViewerP2pTransport;
-        if (transport && !skipP2P) {
-          try {
-            setRepoStatus(repo.name, 'fetching p2p bundle...');
-            footer.log('git', `${repo.name} requesting bundle via libp2p`, 'info');
-            const bundle = await transport.requestBundle(url, 15000);
-            bundlePath = `/bundles/${repo.name}.bundle`;
-            await ensureDir(fs, '/bundles');
-            await fs.writeFile(bundlePath, bundle);
-            footer.log('git', `${repo.name} p2p bundle received bytes=${bundle.length}`, 'info', 'available');
-            setRepoHealth(repo.name, 'available');
-          } catch (p2pErr) {
-            footer.log('git', `${repo.name} p2p bundle failed: ${p2pErr.message}`, 'warn');
-          }
-        }
-
+        // Check existing clone validity up-front so we know whether we need to race clones.
         exists = await pathExists(fs, dir);
         let isValid = false;
         if (exists) {
@@ -632,36 +615,57 @@
             footer.log('git', `${repo.name} existing clone invalid (${e.message}) — will re-clone`, 'warn');
           }
         }
+
         if (!isValid) {
           setRepoStatus(repo.name, 'cloning...');
           footer.log('git', `${repo.name} cloning${route ? ` (${progressContextLabel(route)})` : ''}`, 'debug');
           await ensureDir(fs, dir);
 
-          // If we have a bundle, clone from it using the custom bundle HTTP transport.
-          let clonedFromBundle = false;
-          if (bundlePath) {
-            try {
-              const bundleHttp = createBundleHttpClient({ fs, bundlePath });
-              await git.clone({
-                fs,
-                http: bundleHttp,
-                dir,
-                url: 'bundle://local',
-                singleBranch: false,
-                onProgress: (progress) => {
-                  const message = getGitProgressReporter(repo, 'clone', route)(progress);
-                  if (message) footer.log('git', `[bundle] ${message}`, 'trace');
-                },
-              });
-              clonedFromBundle = true;
-              repoSource.set(repo.name, 'p2p');
-              footer.log('git', `${repo.name} cloned from libp2p bundle`, 'info', 'available');
-            } catch (bundleErr) {
-              footer.log('git', `${repo.name} bundle clone failed: ${bundleErr.message}`, 'warn');
-            }
-          }
+          // Race P2P bundle fetch+clone against proxy clone.  A simple lock
+          // guarantees only the first successful path writes to `dir`.
+          let cloneLock = false;
+          const takeLock = () => {
+            if (cloneLock) return false;
+            cloneLock = true;
+            return true;
+          };
 
-          if (!clonedFromBundle) {
+          const p2pPromise = (async () => {
+            const transport = window.__gitViewerP2pTransport;
+            if (!transport || skipP2P) throw new Error('P2P skipped');
+            setRepoStatus(repo.name, 'fetching p2p bundle...');
+            footer.log('git', `${repo.name} requesting bundle via libp2p`, 'info');
+            const bundle = await transport.requestBundle(url, 15000);
+            const bundlePath = `/bundles/${repo.name}.bundle`;
+            await ensureDir(fs, '/bundles');
+            await fs.writeFile(bundlePath, bundle);
+            footer.log('git', `${repo.name} p2p bundle received bytes=${bundle.length}`, 'info', 'available');
+            if (!takeLock()) {
+              footer.log('git', `${repo.name} p2p bundle arrived but proxy already cloning — discarding`, 'info');
+              return 'p2p-late';
+            }
+            const bundleHttp = createBundleHttpClient({ fs, bundlePath });
+            await git.clone({
+              fs,
+              http: bundleHttp,
+              dir,
+              url: 'bundle://local',
+              singleBranch: false,
+              onProgress: (progress) => {
+                const message = getGitProgressReporter(repo, 'clone', route)(progress);
+                if (message) footer.log('git', `[bundle] ${message}`, 'trace');
+              },
+            });
+            repoSource.set(repo.name, 'p2p');
+            footer.log('git', `${repo.name} cloned from libp2p bundle`, 'info', 'available');
+            return 'p2p';
+          })();
+
+          const proxyPromise = (async () => {
+            if (!takeLock()) {
+              footer.log('git', `${repo.name} proxy clone skipped — p2p already cloning`, 'info');
+              return 'proxy-late';
+            }
             repoSource.set(repo.name, 'proxy');
             const cloneOptions = {
               fs,
@@ -685,8 +689,12 @@
                 footer.log('git', `${repo.name} retrying clone with singleBranch=false`, 'warn');
               },
             );
-          }
-          footer.log('git', `${repo.name} clone done in ${Math.round(performance.now() - ensureStart)} ms`, 'debug');
+            return 'proxy';
+          })();
+
+          // Promise.any waits for the first success; if both fail it rejects.
+          const winner = await Promise.any([p2pPromise, proxyPromise]);
+          footer.log('git', `${repo.name} clone won by ${winner} in ${Math.round(performance.now() - ensureStart)} ms`, 'debug');
         } else {
           setRepoStatus(repo.name, 'reusing cached clone...');
           footer.log('git', `${repo.name} reusing cached clone`, 'info');
