@@ -252,7 +252,7 @@ export function parseNetworkTimeMessage(text) {
 export function computeConsensusOffset(samples = []) {
   return median(
     samples
-      .map((sample) => Number(sample?.deltaMs))
+      .map((sample) => Number(sample?.deltaMs ?? sample?.offsetMs))
       .filter((value) => Number.isFinite(value)),
   );
 }
