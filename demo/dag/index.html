@@ -1502,13 +1502,16 @@
     const fs = new LightningFS('fs');
     const dir = '/repo';
     const nostrDagDir = '/nostr-dag';
+    const CORS_PROXY = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+      ? 'http://127.0.0.1:3000/proxy/'
+      : undefined;
 
     async function cloneRepo(repoUrl, targetDir) {
       await git.clone({
         fs,
         http,
         dir: targetDir,
-        corsProxy: 'https://cors.isomorphic-git.org',
+        corsProxy: CORS_PROXY,
         url: repoUrl,
         singleBranch: true,
         depth: 1,
@@ -1520,7 +1523,7 @@
         fs,
         http,
         dir: targetDir,
-        corsProxy: 'https://cors.isomorphic-git.org',
+        corsProxy: CORS_PROXY,
         url: repoUrl,
         tags: true,
       });
