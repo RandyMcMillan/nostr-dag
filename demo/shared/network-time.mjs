@@ -208,6 +208,7 @@ function recalibrateOffset() {
 
 async function publishNetworkTimeMessage(payload) {
   if (!state.node?.services?.pubsub?.publish) return;
+  logEvent(`[pubsub] publish type=${payload.type} id=${payload.request_id || 'n/a'}`);
   await state.node.services.pubsub.publish(
     NETWORK_TIME_TOPIC,
     encoder.encode(JSON.stringify(payload)),
@@ -222,6 +223,7 @@ async function handleNetworkTimeMessage(event) {
     if (!state.node?.services?.pubsub?.publish) return;
     if (payload.requester_peer_id && payload.requester_peer_id === state.localPeerId) return;
     const response = buildNetworkTimeResponse(payload, state.localPeerId, Date.now());
+    logEvent(`[query] from=${payload.requester_peer_id || 'unknown'} req=${payload.request_id} localTime=${response.server_time_ms}`);
     await publishNetworkTimeMessage(response);
     return;
   }
@@ -272,6 +274,7 @@ export async function syncNetworkTime({ waitMs = QUERY_WAIT_MS } = {}) {
   if (!state.node?.services?.pubsub?.publish) {
     state.status = state.lastSyncAt ? 'available' : 'unavailable';
     updateHeader();
+    logEvent(`[sync] offline offset=${formatDeltaMs(state.offsetMs)} samples=${state.peerSamples.length}`);
     return {
       offsetMs: state.offsetMs,
       status: state.status,
@@ -283,6 +286,7 @@ export async function syncNetworkTime({ waitMs = QUERY_WAIT_MS } = {}) {
   updateHeader();
   state.requestCounter += 1;
   const requestId = `${Date.now()}-${state.requestCounter}`;
+  logEvent(`[sync] query=${requestId} wait=${waitMs}ms offset=${formatDeltaMs(state.offsetMs)} samples=${state.peerSamples.length}`);
   const pending = {
     requestId,
     sentAtMs: Date.now(),
@@ -302,6 +306,7 @@ export async function syncNetworkTime({ waitMs = QUERY_WAIT_MS } = {}) {
 
   recalibrateOffset();
   updateHeader();
+  logEvent(`[sync] query=${requestId} done offset=${formatDeltaMs(state.offsetMs)} samples=${state.peerSamples.length}`);
   return {
     offsetMs: state.offsetMs,
     status: state.status,
