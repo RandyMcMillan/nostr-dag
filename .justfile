@@ -80,6 +80,7 @@ site: wasm
     mkdir -p site/examples
     cp examples/*.html site/examples/
     cp demo/network_time.html site/network_time.html
+    cp demo/chat.html site/chat.html
 
 demo:
     ./demo/run.sh
