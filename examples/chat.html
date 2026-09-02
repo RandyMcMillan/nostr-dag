@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Byzantine Time Consensus — libp2p Example</title>
+  <link rel="icon" href="../demo/shared/favicon.ico" />
+  <link rel="stylesheet" href="../shared/page.css" />
+  <style>
+    :root {
+      --ok: #2e7d32;
+      --warn: #f9a825;
+      --error: #c62828;
+      --info: #1565c0;
+      --bg: #ffffff;
+      --fg: #111111;
+      --muted: #666666;
+      --border: #e0e0e0;
+      --panel: #f5f5f5;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0d0d0d;
+        --fg: #e0e0e0;
+        --muted: #999999;
+        --border: #333333;
+        --panel: #1a1a1a;
+      }
+    }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      margin: 0;
+      padding: 16px;
+      line-height: 1.5;
+    }
+    h1 { font-size: 1.4rem; margin: 0 0 8px; }
+    .subtitle { color: var(--muted); font-size: 0.9rem; margin-bottom: 16px; }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+      max-width: 960px;
+      margin: 0 auto;
+    }
+    @media (min-width: 720px) {
+      .grid { grid-template-columns: 1fr 1fr; }
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .panel h2 { font-size: 1rem; margin: 0 0 8px; }
+    .row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
+    .status { font-weight: 600; }
+    .status.ok { color: var(--ok); }
+    .status.warn { color: var(--warn); }
+    .status.error { color: var(--error); }
+    .mono { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 0.85rem; word-break: break-all; }
+    .small { font-size: 0.85rem; }
+    .muted { color: var(--muted); }
+    button {
+      background: var(--info);
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 8px 14px;
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button.secondary { background: var(--border); color: var(--fg); }
+    #log {
+      max-height: 320px;
+      overflow-y: auto;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      font-size: 0.8rem;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .log-line { margin-bottom: 2px; }
+    .sample-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px;
+      margin-bottom: 6px;
+    }
+    .sample-card b { display: block; margin-bottom: 2px; }
+    #consensusResult {
+      font-size: 1.1rem;
+      font-weight: 700;
+      padding: 10px;
+      border-radius: 6px;
+      text-align: center;
+    }
+    #consensusResult.ok { background: rgba(46,125,50,0.12); color: var(--ok); }
+    #consensusResult.warn { background: rgba(249,168,37,0.12); color: var(--warn); }
+    #consensusResult.error { background: rgba(198,40,40,0.12); color: var(--error); }
+  </style>
+</head>
+<body>
+  <div style="max-width:960px;margin:0 auto;">
+    <header class="row" style="justify-content:space-between;margin-bottom:12px;">
+      <div>
+        <h1>Byzantine Time Consensus</h1>
+        <div class="subtitle">Cristian's Algorithm over libp2p with median-offset Byzantine resistance</div>
+      </div>
+      <a href="../demo/index.html" style="text-decoration:none;font-size:1.6rem;">⬅</a>
+    </header>
+
+    <div class="grid">
+      <div class="panel">
+        <h2>Node Status</h2>
+        <div class="row"><span class="muted">Peer ID:</span> <span id="peerId" class="mono">starting…</span></div>
+        <div class="row"><span class="muted">Connections:</span> <span id="connCount">0</span></div>
+        <div class="row"><span class="muted">Protocol:</span> <span class="mono">/p2p/time-consensus/1.0.0</span></div>
+        <div class="row" style="margin-top:10px;">
+          <button id="startBtn" type="button">Start Node</button>
+          <button id="sampleBtn" type="button" disabled>Sample Peers</button>
+          <button id="stopBtn" type="button" class="secondary" disabled>Stop</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Consensus Result</h2>
+        <div id="consensusResult" class="error">Node not started</div>
+        <div class="row" style="margin-top:8px;">
+          <span class="muted">Local time:</span> <span id="localTime" class="mono">—</span>
+        </div>
+        <div class="row">
+          <span class="muted">Consensus time:</span> <span id="consensusTime" class="mono">—</span>
+        </div>
+        <div class="row">
+          <span class="muted">Median offset:</span> <span id="medianOffset" class="mono">—</span>
+        </div>
+        <div class="row">
+          <span class="muted">Samples used:</span> <span id="sampleCount">0</span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Peer Samples</h2>
+        <div id="samples">No samples yet</div>
+      </div>
+
+      <div class="panel">
+        <h2>Log</h2>
+        <div id="log"></div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { createLibp2p } from 'https://esm.sh/libp2p';
+    import { webSockets } from 'https://esm.sh/@libp2p/websockets';
+    import { webRTC } from 'https://esm.sh/@libp2p/webrtc';
+    import { circuitRelayTransport } from 'https://esm.sh/@libp2p/circuit-relay-v2';
+    import { bootstrap } from 'https://esm.sh/@libp2p/bootstrap';
+    import { identify } from 'https://esm.sh/@libp2p/identify';
+    import { noise } from 'https://esm.sh/@chainsafe/libp2p-noise';
+    import { yamux } from 'https://esm.sh/@chainsafe/libp2p-yamux';
+
+    const TIME_PROTOCOL = '/p2p/time-consensus/1.0.0';
+
+    const peerIdEl = document.getElementById('peerId');
+    const connCountEl = document.getElementById('connCount');
+    const startBtn = document.getElementById('startBtn');
+    const sampleBtn = document.getElementById('sampleBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const consensusResultEl = document.getElementById('consensusResult');
+    const localTimeEl = document.getElementById('localTime');
+    const consensusTimeEl = document.getElementById('consensusTime');
+    const medianOffsetEl = document.getElementById('medianOffset');
+    const sampleCountEl = document.getElementById('sampleCount');
+    const samplesEl = document.getElementById('samples');
+    const logEl = document.getElementById('log');
+
+    let node = null;
+    const logs = [];
+
+    function log(level, text) {
+      const line = `[${new Date().toLocaleTimeString()}] [${level}] ${text}`;
+      logs.push(line);
+      logEl.textContent = logs.slice(-80).join('\n');
+      console.log(line);
+    }
+
+    function setConsensus(status, text) {
+      consensusResultEl.textContent = text;
+      consensusResultEl.className = status;
+    }
+
+    // -------------------------------------------------------------------------
+    // Node factory
+    // -------------------------------------------------------------------------
+    async function createTimeNode() {
+      const n = await createLibp2p({
+        addresses: { listen: [] },
+        transports: [
+          webSockets(),
+          webRTC(),
+          circuitRelayTransport({ discoverRelays: 1 }),
+        ],
+        connectionEncrypters: [noise()],
+        streamMuxers: [yamux()],
+        peerDiscovery: [
+          bootstrap({
+            list: [
+              '/dns4/sv15.bootstrap.libp2p.io/tcp/443/wss/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN',
+              '/dns4/ny5.bootstrap.libp2p.io/tcp/443/wss/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa',
+              '/dns4/am6.bootstrap.libp2p.io/tcp/443/wss/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9KiKNN6tpvbUcqanj75Nb',
+              '/dns4/sg1.bootstrap.libp2p.io/tcp/443/wss/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjYZcYW3dwt',
+            ],
+          }),
+        ],
+        services: { identify: identify() },
+      });
+
+      // Handle incoming time requests (Cristian's Algorithm server side)
+      await n.handle(TIME_PROTOCOL, async ({ stream, connection }) => {
+        log('info', `TIME_REQ from ${connection.remotePeer.toString().slice(0, 16)}…`);
+        const reader = stream.source.getReader();
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            const text = new TextDecoder().decode(value.subarray ? value.subarray() : value);
+            if (text === 'TIME_REQ') {
+              const payload = new TextEncoder().encode(
+                JSON.stringify({ serverTime: Date.now() })
+              );
+              await stream.sink([payload]);
+              break;
+            }
+          }
+        } finally {
+          reader.releaseLock();
+          await stream.close();
+        }
+      });
+
+      await n.start();
+      return n;
+    }
+
+    // -------------------------------------------------------------------------
+    // Time sampling (Cristian's Algorithm client side)
+    // -------------------------------------------------------------------------
+    async function fetchP2PNetworkTime() {
+      const connections = node.getConnections();
+      if (connections.length === 0) {
+        throw new Error('No connected peers available for time consensus.');
+      }
+
+      const peerSamples = [];
+
+      for (const conn of connections) {
+        const peerId = conn.remotePeer.toString();
+        try {
+          const stream = await node.dialProtocol(conn.remotePeer, TIME_PROTOCOL);
+          const t0 = Date.now();
+
+          await stream.sink([new TextEncoder().encode('TIME_REQ')]);
+
+          const reader = stream.source.getReader();
+          let responseText = '';
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              responseText += new TextDecoder().decode(value.subarray ? value.subarray() : value);
+            }
+          } finally {
+            reader.releaseLock();
+            await stream.close();
+          }
+
+          const { serverTime } = JSON.parse(responseText);
+          const t1 = Date.now();
+          const rtt = t1 - t0;
+
+          const estimatedPeerTime = serverTime + Math.floor(rtt / 2);
+          const offset = estimatedPeerTime - t1;
+
+          peerSamples.push({ peerId, offset, rtt });
+          log('info', `Sample from ${peerId.slice(0, 16)}…  RTT=${rtt}ms  offset=${offset}ms`);
+        } catch (err) {
+          log('warn', `Failed to sample ${peerId.slice(0, 16)}…: ${err.message}`);
+        }
+      }
+
+      if (peerSamples.length === 0) {
+        throw new Error('Failed to retrieve time samples from any peer.');
+      }
+
+      const validSamples = peerSamples.filter((s) => s.rtt < 1000);
+      const samplesToUse = validSamples.length > 0 ? validSamples : peerSamples;
+
+      samplesToUse.sort((a, b) => a.offset - b.offset);
+      const mid = Math.floor(samplesToUse.length / 2);
+      const medianOffset = samplesToUse.length % 2 !== 0
+        ? samplesToUse[mid].offset
+        : Math.floor((samplesToUse[mid - 1].offset + samplesToUse[mid].offset) / 2);
+
+      const consensusTime = Date.now() + medianOffset;
+      return { consensusTime, medianOffset, sampleCount: samplesToUse.length, peerSamples };
+    }
+
+    // -------------------------------------------------------------------------
+    // UI: run consensus check
+    // -------------------------------------------------------------------------
+    async function runConsensus() {
+      sampleBtn.disabled = true;
+      setConsensus('warn', 'Sampling peers…');
+      localTimeEl.textContent = new Date().toISOString();
+
+      try {
+        const result = await fetchP2PNetworkTime();
+        consensusTimeEl.textContent = new Date(result.consensusTime).toISOString();
+        medianOffsetEl.textContent = `${result.medianOffset > 0 ? '+' : ''}${result.medianOffset} ms`;
+        sampleCountEl.textContent = String(result.sampleCount);
+
+        samplesEl.innerHTML = result.peerSamples.map((s) => `
+          <div class="sample-card">
+            <b class="mono">${s.peerId.slice(0, 24)}…</b>
+            <div class="small">RTT: <b>${s.rtt} ms</b> · Offset: <b>${s.offset > 0 ? '+' : ''}${s.offset} ms</b></div>
+          </div>
+        `).join('');
+
+        const skew = Math.abs(result.medianOffset);
+        if (skew > 5000) {
+          setConsensus('error', `Clock skew detected (${skew}ms)`);
+        } else if (skew > 1000) {
+          setConsensus('warn', `Elevated offset (${skew}ms)`);
+        } else {
+          setConsensus('ok', `Consensus within ${skew}ms`);
+        }
+        log('ok', `Consensus reached using ${result.sampleCount} samples. Median offset=${result.medianOffset}ms`);
+      } catch (e) {
+        setConsensus('error', e.message);
+        log('error', e.message);
+      } finally {
+        sampleBtn.disabled = false;
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // UI: start / stop
+    // -------------------------------------------------------------------------
+    startBtn.addEventListener('click', async () => {
+      startBtn.disabled = true;
+      setConsensus('warn', 'Starting libp2p node…');
+      log('info', 'Creating libp2p node…');
+
+      try {
+        node = await createTimeNode();
+        peerIdEl.textContent = node.peerId.toString();
+        log('ok', `Node started: ${node.peerId.toString()}`);
+        setConsensus('ok', 'Node ready — click Sample Peers');
+        sampleBtn.disabled = false;
+        stopBtn.disabled = false;
+
+        const updateConns = () => {
+          const count = node.getConnections().length;
+          connCountEl.textContent = String(count);
+        };
+        updateConns();
+        window._connTimer = setInterval(updateConns, 2000);
+      } catch (e) {
+        log('error', `Start failed: ${e.message}`);
+        setConsensus('error', `Start failed: ${e.message}`);
+        startBtn.disabled = false;
+      }
+    });
+
+    sampleBtn.addEventListener('click', () => { void runConsensus(); });
+
+    stopBtn.addEventListener('click', async () => {
+      if (!node) return;
+      stopBtn.disabled = true;
+      sampleBtn.disabled = true;
+      log('info', 'Stopping node…');
+      try {
+        await node.stop();
+        clearInterval(window._connTimer);
+        log('ok', 'Node stopped');
+        setConsensus('error', 'Node stopped');
+        peerIdEl.textContent = '—';
+        connCountEl.textContent = '0';
+        startBtn.disabled = false;
+      } catch (e) {
+        log('error', `Stop failed: ${e.message}`);
+      }
+    });
+
+    log('info', 'Page loaded. Click Start Node to begin.');
+  </script>
+</body>
+</html>
