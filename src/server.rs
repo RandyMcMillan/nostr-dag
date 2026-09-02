@@ -141,6 +141,10 @@ struct ChatMessage {
     text: String,
     timestamp: u64,
     id: String,
+    #[serde(default)]
+    msg_type: String,
+    #[serde(default, rename = "ping_id")]
+    ping_id: String,
 }
 
 #[derive(Default)]
@@ -913,7 +917,8 @@ fn handle_peer_get(
 
 async fn handle_chat_post(body: &str, chat_store: &Arc<ChatStore>) -> Result<(), RouteError> {
     let msg: ChatMessage = serde_json::from_str(body).map_err(|_| RouteError::BadRequest)?;
-    if msg.from.is_empty() || msg.text.is_empty() {
+    let is_ping_pong = msg.msg_type == "ping" || msg.msg_type == "pong";
+    if msg.from.is_empty() || (msg.text.is_empty() && !is_ping_pong) {
         return Err(RouteError::BadRequest);
     }
     chat_store.push(msg);

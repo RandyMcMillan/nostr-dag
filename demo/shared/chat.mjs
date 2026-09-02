@@ -163,6 +163,7 @@ export function createChat(options = {}) {
       try { state.onPeerHandler({ kind: 'left', peer: ev.from, timestamp: ev.timestamp }); } catch {}
     }
     if (ev.type === 'ping') {
+      console.debug('[chat:handleIncomingChatRaw] ping received', { from: ev.from, pingId: ev.pingId, localPeerId: state.localPeerId });
       if (typeof state.onPeerHandler === 'function') {
         try { state.onPeerHandler({ kind: 'ping', peer: ev.from, timestamp: ev.timestamp }); } catch {}
       }
@@ -172,10 +173,12 @@ export function createChat(options = {}) {
     }
 
     if (ev.type === 'pong') {
+      console.debug('[chat:handleIncomingChatRaw] pong received', { from: ev.from, pingId: ev.pingId, hasPending: state.pendingPings.has(ev.pingId) });
       if (ev.pingId && state.pendingPings.has(ev.pingId)) {
         const startTime = state.pendingPings.get(ev.pingId);
         const rtt = Date.now() - startTime;
         state.pendingPings.delete(ev.pingId);
+        console.debug('[chat:handleIncomingChatRaw] RTT calculated', { peer: ev.from, rtt, pingId: ev.pingId });
         if (typeof state.onPingHandler === 'function') {
           try { state.onPingHandler({ peer: ev.from, rtt, pingId: ev.pingId }); } catch {}
         }
@@ -210,20 +213,8 @@ export function createChat(options = {}) {
     if (!trimmed) {
       throw new Error('Empty message');
     }
-    const payload = buildChatMessage(state.localPeerId, trimmed, git);
 
-    broadcastChannelSend(payload);
-    localStorageSend(payload);
-    await httpRelaySend(payload);
-
-    if (state.node?.services?.pubsub?.publish) {
-      try {
-        await state.node.services.pubsub.publish(topic, new TextEncoder().encode(payload));
-      } catch {
-        // best-effort
-      }
-    }
-
+    // Show the message locally immediately for responsive UX
     const entry = {
       from: state.localPeerId || 'me',
       text: trimmed,
@@ -243,6 +234,20 @@ export function createChat(options = {}) {
         // ignore handler errors
       }
     }
+
+    const payload = buildChatMessage(state.localPeerId, trimmed, git);
+    broadcastChannelSend(payload);
+    localStorageSend(payload);
+    await httpRelaySend(payload);
+
+    if (state.node?.services?.pubsub?.publish) {
+      try {
+        await state.node.services.pubsub.publish(topic, new TextEncoder().encode(payload));
+      } catch {
+        // best-effort
+      }
+    }
+
     return entry;
   }
 
@@ -272,18 +277,10 @@ export function createChat(options = {}) {
 
   async function sendChatPing() {
     const pingId = `${state.localPeerId || 'me'}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const payload = buildChatPing(state.localPeerId, pingId);
     state.pendingPings.set(pingId, Date.now());
+    console.debug('[chat:sendChatPing]', { pingId });
 
-    broadcastChannelSend(payload);
-    localStorageSend(payload);
-    await httpRelaySend(payload);
-    if (state.node?.services?.pubsub?.publish) {
-      try {
-        await state.node.services.pubsub.publish(topic, new TextEncoder().encode(payload));
-      } catch {}
-    }
-
+    // Show ping locally immediately
     const entry = {
       from: state.localPeerId || 'me',
       text: 'Ping',
@@ -296,13 +293,25 @@ export function createChat(options = {}) {
     if (typeof state.onMessageHandler === 'function') {
       try { state.onMessageHandler(entry); } catch {}
     }
+
+    const payload = buildChatPing(state.localPeerId, pingId);
+    broadcastChannelSend(payload);
+    localStorageSend(payload);
+    await httpRelaySend(payload);
+    if (state.node?.services?.pubsub?.publish) {
+      try {
+        await state.node.services.pubsub.publish(topic, new TextEncoder().encode(payload));
+      } catch {}
+    }
     return { pingId };
   }
 
   async function sendChatPong(pingId) {
     const payload = buildChatPong(state.localPeerId, pingId);
+    console.debug('[chat:sendChatPong]', { pingId, payload });
     broadcastChannelSend(payload);
     localStorageSend(payload);
+    await httpRelaySend(payload);
     if (state.node?.services?.pubsub?.publish) {
       try {
         await state.node.services.pubsub.publish(topic, new TextEncoder().encode(payload));
@@ -383,15 +392,16 @@ export function createChat(options = {}) {
         const id = `${msg.from}-${msg.timestamp}-${msg.id || ''}`;
         if (state.httpSeen.has(id)) continue;
         state.httpSeen.add(id);
-        const envelope = JSON.stringify({
+        const envelopeObj = {
           protocol: CHAT_PROTOCOL,
           version: CHAT_VERSION,
-          type: 'message',
+          type: msg.msg_type || 'message',
           from: msg.from,
-          text: msg.text,
+          text: msg.text || '',
           timestamp: msg.timestamp,
-        });
-        handleIncomingChatRaw(envelope, 'http-relay');
+        };
+        if (msg.ping_id) envelopeObj.pingId = msg.ping_id;
+        handleIncomingChatRaw(JSON.stringify(envelopeObj), 'http-relay');
       }
       state.lastHttpPollAt = Date.now() - httpRelayMaxAgeMs;
     } catch (err) {
@@ -401,12 +411,16 @@ export function createChat(options = {}) {
 
   async function httpRelaySend(payload) {
     try {
-      const chat = parseChatMessage(payload);
-      if (!chat) return;
+      const ev = parseChatEvent(payload);
+      if (!ev) return;
       const msg = {
-        ...chat,
-        id: `${chat.from}-${chat.timestamp}-${Math.random().toString(36).slice(2, 8)}`,
+        from: ev.from,
+        text: ev.text || '',
+        timestamp: ev.timestamp,
+        msg_type: ev.type,
+        id: `${ev.from}-${ev.timestamp}-${Math.random().toString(36).slice(2, 8)}`,
       };
+      if (ev.pingId) msg.ping_id = ev.pingId;
       const res = await fetch(httpRelayUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
