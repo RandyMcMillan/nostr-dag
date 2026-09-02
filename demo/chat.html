@@ -151,6 +151,43 @@
       color: var(--muted);
       font-size: 0.65rem;
     }
+    .git-context-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 8px;
+      border-radius: 12px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      font-size: 0.75rem;
+      margin-bottom: 4px;
+      flex-shrink: 0;
+    }
+    .git-context-pill .remove {
+      cursor: pointer;
+      color: var(--muted);
+      font-weight: 700;
+      padding: 0 2px;
+    }
+    .git-context-pill .remove:hover {
+      color: var(--status-unavailable);
+    }
+    .git-card {
+      margin-top: 2px;
+      padding: 3px 6px;
+      border-radius: 3px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      font-size: 0.72rem;
+      display: inline-block;
+    }
+    .git-card a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+    .git-card a:hover {
+      text-decoration: underline;
+    }
     @media (max-width: 640px) {
       body { padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); }
       h1 { font-size: 1.1rem; }
@@ -218,6 +255,11 @@
     </div>
 
     <div class="chat-panel">
+      <div id="gitContextPill" class="git-context-pill" style="display:none;">
+        <span class="muted">Discussing:</span>
+        <span id="gitContextLabel" class="mono"></span>
+        <span class="remove" id="gitContextRemove" title="Clear context">×</span>
+      </div>
       <div class="chat-input-row">
         <input id="chatInput" type="text" placeholder="Type a message and press Enter…" disabled />
         <button id="sendBtn" type="button" disabled>Send</button>
@@ -234,6 +276,7 @@
   <script type="module">
     import { createSharedLibp2pStack, DEFAULT_BOOTSTRAP_PEERS } from './shared/libp2p-stack.mjs';
     import { attachChatNode, sendChat, sendChatJoin, sendChatPing, resetChat, onMessage, onPeer, onPing } from './shared/chat.mjs';
+    import { gitContextToHref, gitContextToLabel, parseGitContextParam } from './shared/git-chat-link.mjs';
     import { multiaddr } from 'https://esm.sh/@multiformats/multiaddr';
 
     const wasmModuleUrl = new URL('./pkg/nostr_dag.js', window.location.href).href;
@@ -249,12 +292,39 @@
     const chatLog = document.getElementById('chatLog');
     const chatInput = document.getElementById('chatInput');
     const sendBtn = document.getElementById('sendBtn');
+    const gitContextPill = document.getElementById('gitContextPill');
+    const gitContextLabel = document.getElementById('gitContextLabel');
+    const gitContextRemove = document.getElementById('gitContextRemove');
 
     const connectedPeers = new Set();
     let nodeStarted = false;
     let wasmModule = null;
     let libp2pNode = null;
     let userScrolledUp = false;
+    let activeGitContext = null;
+
+    // Read optional git context from URL parameter
+    const urlParams = new URLSearchParams(window.location.search);
+    const gitContextRaw = urlParams.get('gitContext');
+    if (gitContextRaw) {
+      activeGitContext = parseGitContextParam(gitContextRaw);
+    }
+
+    function updateGitContextPill() {
+      if (activeGitContext) {
+        gitContextLabel.textContent = gitContextToLabel(activeGitContext);
+        gitContextPill.style.display = 'inline-flex';
+      } else {
+        gitContextPill.style.display = 'none';
+      }
+    }
+
+    gitContextRemove.addEventListener('click', () => {
+      activeGitContext = null;
+      updateGitContextPill();
+    });
+
+    updateGitContextPill();
 
     function isNearBottom(container, threshold = 60) {
       return container.scrollHeight - container.scrollTop - container.clientHeight <= threshold;
@@ -278,7 +348,13 @@
       const shortFrom = entry.from;
       const time = new Date(entry.timestamp).toLocaleTimeString();
       const selfClass = entry.self ? 'self' : '';
-      div.innerHTML = `<span class="time">[${time}]</span> <span class="from ${selfClass}">${escapeHtml(shortFrom)}</span>: ${escapeHtml(entry.text)}`;
+      let html = `<span class="time">[${time}]</span> <span class="from ${selfClass}">${escapeHtml(shortFrom)}</span>: ${escapeHtml(entry.text)}`;
+      if (entry.git) {
+        const label = gitContextToLabel(entry.git);
+        const href = gitContextToHref(entry.git);
+        html += `<div class="git-card"><a href="${href}" target="_blank" rel="noreferrer noopener">${escapeHtml(label)}</a></div>`;
+      }
+      div.innerHTML = html;
       chatMessages.appendChild(div);
       // Only auto-scroll if the user was already near the bottom.
       if (wasNearBottom) {
@@ -476,7 +552,7 @@
         return;
       }
       try {
-        await sendChat(text);
+        await sendChat(text, activeGitContext || undefined);
       } catch (e) {
         appendMessage({ from: 'system', text: 'Send failed: ' + e.message, timestamp: Date.now() });
       }

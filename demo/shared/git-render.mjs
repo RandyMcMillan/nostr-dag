@@ -10,6 +10,7 @@ import {
   repoFileHref,
   repoSelectionHref,
 } from './git-viewer.mjs';
+import { buildChatUrlWithContext } from './git-chat-link.mjs';
 
 export function repoHealthClass(state) {
   if (state === 'checking') return 'health-checking';
@@ -58,6 +59,7 @@ export function renderRepoCard(card) {
         <button class="repo-refresh" type="button" data-refresh-repo="${card.toolbar.refreshId}">Refresh</button>
         <button class="button" type="button" data-view-repo="${card.toolbar.refreshId}">${card.toolbar.secondaryLabel}</button>
         <button class="button" type="button" data-view-commits="${card.toolbar.refreshId}">Commits</button>
+        <a class="button" href="${buildChatUrlWithContext(card.selectedBranch ? { repo: card.repo.name, type: 'branch', branch: card.selectedBranch } : card.selectedTag ? { repo: card.repo.name, type: 'tag', tag: card.selectedTag } : { repo: card.repo.name, type: 'repo' })}" rel="noreferrer noopener">Chat</a>
         <a class="button" href="${card.toolbar.primaryHref}" target="_blank" rel="noreferrer noopener">${card.toolbar.primaryLabel}</a>
       </div>
     </div>
@@ -239,6 +241,7 @@ export function renderCommitDetail(repo, data, route, options = {}) {
           <div class="actions">
             <a class="button" href="${repoCommitsHref(repo, route)}">Back to commits</a>
             <a class="button" href="${repoSelectionHref(repo, route)}">Back to code</a>
+            <a class="button" href="${buildChatUrlWithContext({ repo: repo.name, type: 'commit', commit: selectedSha, branch: route.branch || undefined, tag: route.tag || undefined })}" rel="noreferrer noopener">Discuss in chat</a>
             <a class="button" href="${repo.url.replace(/\/$/, '')}/commit/${encodeURIComponent(selectedSha)}" target="_blank" rel="noreferrer noopener">Open upstream</a>
           </div>
         </div>
@@ -335,6 +338,7 @@ export function renderRepoDetail(repo, data, route, options = {}) {
           <div class="actions">
             <button type="button" data-refresh-repo="${repo.name}" ${refreshingRepos && refreshingRepos.has(repo.name) ? 'disabled' : ''}>${refreshingRepos && refreshingRepos.has(repo.name) ? 'Refreshing...' : 'Refresh'}</button>
             <a class="button" href="./">Back to repos</a>
+            <a class="button" href="${buildChatUrlWithContext(route.branch ? { repo: repo.name, type: 'branch', branch: route.branch } : route.tag ? { repo: repo.name, type: 'tag', tag: route.tag } : { repo: repo.name, type: 'repo' })}" rel="noreferrer noopener">Discuss in chat</a>
             <a class="button" href="${repo.url}" target="_blank" rel="noreferrer noopener">Open upstream</a>
           </div>
         </div>

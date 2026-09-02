@@ -191,6 +191,7 @@ export function createChat(options = {}) {
       relay,
       system: ev.type !== 'message',
     };
+    if (ev.git) entry.git = ev.git;
     state.messages.push(entry);
     if (state.messages.length > maxMessages) {
       state.messages = state.messages.slice(-maxMessages);
@@ -204,12 +205,12 @@ export function createChat(options = {}) {
     }
   }
 
-  async function sendChat(text) {
+  async function sendChat(text, git = null) {
     const trimmed = String(text).trim();
     if (!trimmed) {
       throw new Error('Empty message');
     }
-    const payload = buildChatMessage(state.localPeerId, trimmed);
+    const payload = buildChatMessage(state.localPeerId, trimmed, git);
 
     broadcastChannelSend(payload);
     localStorageSend(payload);
@@ -230,6 +231,7 @@ export function createChat(options = {}) {
       id: `me-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       self: true,
     };
+    if (git) entry.git = git;
     state.messages.push(entry);
     if (state.messages.length > maxMessages) {
       state.messages = state.messages.slice(-maxMessages);
