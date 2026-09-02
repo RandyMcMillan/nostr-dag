@@ -84,6 +84,11 @@ test('chat message propagates between Chrome and Safari', { timeout: 120_000 }, 
     const chromePage = await chromeBrowser.newPage();
     const safariPage = await safariBrowser.newPage();
 
+    const chromeLogs = [];
+    const safariLogs = [];
+    chromePage.on('console', (msg) => chromeLogs.push(`[chrome ${msg.type()}] ${msg.text()}`));
+    safariPage.on('console', (msg) => safariLogs.push(`[safari ${msg.type()}] ${msg.text()}`));
+
     // Load chat page in both browsers
     await chromePage.goto(`${BASE}/chat`, { waitUntil: 'load', timeout: 15_000 });
     await safariPage.goto(`${BASE}/chat`, { waitUntil: 'load', timeout: 15_000 });
@@ -103,7 +108,19 @@ test('chat message propagates between Chrome and Safari', { timeout: 120_000 }, 
     });
 
     // Give libp2p time to bootstrap and (hopefully) form a mesh
-    await new Promise(r => setTimeout(r, 5000));
+    await new Promise(r => setTimeout(r, 8000));
+
+    // Dump logs for diagnostics
+    console.log('--- Chrome logs ---');
+    chromeLogs.forEach(l => console.log(l));
+    console.log('--- Safari logs ---');
+    safariLogs.forEach(l => console.log(l));
+
+    // Check chat contents for diagnostics
+    const chromeChat = await chromePage.evaluate(() => document.getElementById('chatMessages')?.innerText || '');
+    const safariChat = await safariPage.evaluate(() => document.getElementById('chatMessages')?.innerText || '');
+    console.log('--- Chrome chat ---\n', chromeChat.slice(0, 2000));
+    console.log('--- Safari chat ---\n', safariChat.slice(0, 2000));
 
     // Send a unique message from Chrome
     const testMessage = `cross-browser-${Date.now()}`;
@@ -124,6 +141,12 @@ test('chat message propagates between Chrome and Safari', { timeout: 120_000 }, 
       testMessage,
       { timeout: 15_000 }
     ).then(() => true).catch(() => false);
+
+    // Dump final chat contents
+    const chromeChatFinal = await chromePage.evaluate(() => document.getElementById('chatMessages')?.innerText || '');
+    const safariChatFinal = await safariPage.evaluate(() => document.getElementById('chatMessages')?.innerText || '');
+    console.log('--- Chrome chat final ---\n', chromeChatFinal.slice(0, 2000));
+    console.log('--- Safari chat final ---\n', safariChatFinal.slice(0, 2000));
 
     assert.ok(received, `Safari should receive the message from Chrome: "${testMessage}"`);
 

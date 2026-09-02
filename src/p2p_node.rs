@@ -128,7 +128,7 @@ pub async fn run_native_p2p_node(
 
     // Build TCP transport manually (no SwarmBuilder so we can inject WSS TLS).
     let tcp_transport = tcp::tokio::Transport::new(tcp::Config::default())
-        .upgrade(Version::V1Lazy)
+        .upgrade(Version::V1)
         .authenticate(noise::Config::new(&local_key)?)
         .multiplex(yamux::Config::default())
         .map(|(p, c), _| (p, StreamMuxerBox::new(c)));
@@ -152,7 +152,7 @@ pub async fn run_native_p2p_node(
     }
 
     let ws_transport = ws_config
-        .upgrade(Version::V1Lazy)
+        .upgrade(Version::V1)
         .authenticate(noise::Config::new(&local_key)?)
         .multiplex(yamux::Config::default())
         .map(|(p, c), _| (p, StreamMuxerBox::new(c)));
@@ -163,7 +163,7 @@ pub async fn run_native_p2p_node(
 
     let (relay_transport, relay_behaviour) = libp2p::relay::client::new(local_peer_id);
     let relay_transport = relay_transport
-        .upgrade(Version::V1Lazy)
+        .upgrade(Version::V1)
         .authenticate(noise::Config::new(&local_key)?)
         .multiplex(yamux::Config::default())
         .map(|(p, c), _| (p, StreamMuxerBox::new(c)));
