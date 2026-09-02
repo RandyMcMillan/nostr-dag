@@ -495,7 +495,10 @@
         }
       } catch (e) {
         startNodeBtn.disabled = false;
+        chatInput.disabled = false;
+        sendBtn.disabled = false;
         appendMessage({ from: 'system', text: 'Node failed: ' + e.message, timestamp: Date.now() });
+        appendMessage({ from: 'system', text: 'Chat input enabled — messages will use local fallback only.', timestamp: Date.now() });
       }
     }
 
