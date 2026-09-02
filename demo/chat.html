@@ -197,6 +197,9 @@
     import { attachChatNode, sendChat, onMessage } from './shared/chat.mjs';
     import { multiaddr } from 'https://esm.sh/@multiformats/multiaddr';
 
+    const wasmModuleUrl = new URL('./pkg/nostr_dag.js', window.location.href).href;
+    const wasmBinaryUrl = new URL('./pkg/nostr_dag_bg.wasm', window.location.href).href;
+
     const peerIdDisplay = document.getElementById('peerIdDisplay');
     const nodeStatusDisplay = document.getElementById('nodeStatusDisplay');
     const connectedDisplay = document.getElementById('connectedDisplay');
@@ -208,6 +211,7 @@
 
     const connectedPeers = new Set();
     let nodeStarted = false;
+    let wasmModule = null;
 
     function appendMessage(entry) {
       const div = document.createElement('div');
@@ -231,12 +235,26 @@
       appendMessage(entry);
     });
 
+    async function loadWasm() {
+      try {
+        const pkg = await import(wasmModuleUrl);
+        if (typeof pkg.default === 'function') {
+          await pkg.default({ module_or_path: wasmBinaryUrl });
+        }
+        wasmModule = pkg;
+        appendMessage({ from: 'system', text: 'WASM module loaded', timestamp: Date.now() });
+      } catch (e) {
+        appendMessage({ from: 'system', text: `WASM load skipped: ${e.message}`, timestamp: Date.now() });
+      }
+    }
+
     async function initLibp2pNode() {
       if (nodeStarted) return;
       startNodeBtn.disabled = true;
       try {
         const { node, bootstrapPeers } = await createSharedLibp2pStack({
           bootstrapPeers: DEFAULT_BOOTSTRAP_PEERS,
+          wasmModule,
           onLog(level, text) {
             // Log libp2p events to chat stream for diagnostics
             if (level === 'error' || level === 'warn' || text.includes('dial') || text.includes('connected') || text.includes('started')) {
@@ -332,7 +350,10 @@
       }
     });
 
-    void initLibp2pNode();
+    void (async () => {
+      await loadWasm();
+      await initLibp2pNode();
+    })();
   </script>
 </body>
 </html>
