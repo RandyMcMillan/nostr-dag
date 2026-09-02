@@ -253,8 +253,18 @@
     let nodeStarted = false;
     let wasmModule = null;
     let libp2pNode = null;
+    let userScrolledUp = false;
+
+    function isNearBottom(container, threshold = 60) {
+      return container.scrollHeight - container.scrollTop - container.clientHeight <= threshold;
+    }
+
+    chatMessages.addEventListener('scroll', () => {
+      userScrolledUp = !isNearBottom(chatMessages);
+    }, { passive: true });
 
     function appendMessage(entry) {
+      const wasNearBottom = isNearBottom(chatMessages);
       const div = document.createElement('div');
       div.className = 'chat-message';
       const shortFrom = entry.from.slice(0, 16) + (entry.from.length > 16 ? '…' : '');
@@ -262,7 +272,10 @@
       const selfClass = entry.self ? 'self' : '';
       div.innerHTML = `<span class="time">[${time}]</span> <span class="from ${selfClass}">${escapeHtml(shortFrom)}</span>: ${escapeHtml(entry.text)}`;
       chatMessages.appendChild(div);
-      chatMessages.scrollTop = chatMessages.scrollHeight;
+      // Only auto-scroll if the user was already near the bottom.
+      if (wasNearBottom) {
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+      }
       const count = chatMessages.children.length;
       messageCount.textContent = String(count);
       if (messageCountBadge) messageCountBadge.textContent = String(count);
