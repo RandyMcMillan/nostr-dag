@@ -13,6 +13,7 @@ const CHAT_PROTOCOL = 'nostr-dag-chat';
 const CHAT_VERSION = 1;
 const TOPIC = 'nostr-dag-bridge';
 const BC_CHANNEL = 'nostr-dag-chat';
+const LS_KEY = 'nostr-dag-chat-msg';
 
 const state = globalThis.__nostrDagChatState || {
   node: null,
@@ -21,6 +22,7 @@ const state = globalThis.__nostrDagChatState || {
   onMessageHandler: null,
   onStatusHandler: null,
   bc: null,
+  lsSeen: new Set(),
 };
 globalThis.__nostrDagChatState = state;
 
@@ -58,6 +60,57 @@ function broadcastChannelSend(payload) {
   if (!state.bc) return;
   try {
     state.bc.postMessage({ payload, sourceId: state.localPeerId });
+  } catch {
+    // ignore
+  }
+}
+
+function initLocalStorage() {
+  if (typeof window === 'undefined') return;
+  try {
+    window.addEventListener('storage', (ev) => {
+      if (ev.key !== LS_KEY || !ev.newValue) return;
+      try {
+        const data = JSON.parse(ev.newValue);
+        if (!data || data.sourceId === state.localPeerId) return;
+        if (state.lsSeen.has(data.id)) return;
+        state.lsSeen.add(data.id);
+        const chat = parseChatMessage(data.payload);
+        if (!chat) return;
+        const entry = {
+          ...chat,
+          id: `${chat.from}-${chat.timestamp}-${Math.random().toString(36).slice(2, 8)}`,
+          relay: 'localStorage',
+        };
+        state.messages.push(entry);
+        if (state.messages.length > 500) {
+          state.messages = state.messages.slice(-500);
+        }
+        if (typeof state.onMessageHandler === 'function') {
+          try { state.onMessageHandler(entry); } catch {}
+        }
+      } catch {
+        // ignore malformed storage events
+      }
+    });
+  } catch {
+    // localStorage not available
+  }
+}
+
+function localStorageSend(payload) {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    const id = `${state.localPeerId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const data = JSON.stringify({ payload, sourceId: state.localPeerId, id });
+    localStorage.setItem(LS_KEY, data);
+    setTimeout(() => {
+      try {
+        if (localStorage.getItem(LS_KEY) === data) {
+          localStorage.removeItem(LS_KEY);
+        }
+      } catch {}
+    }, 10000);
   } catch {
     // ignore
   }
@@ -103,6 +156,7 @@ export function attachChatNode(node) {
     state.localPeerId = node?.peerId?.toString?.() || '';
   }
   initBroadcastChannel();
+  initLocalStorage();
   if (!node?.services?.pubsub?.addEventListener) {
     return Promise.resolve();
   }
@@ -149,9 +203,11 @@ export async function sendChat(text) {
   }
   const payload = buildChatMessage(state.localPeerId, trimmed);
 
-  // Always broadcast via BroadcastChannel so same-origin tabs see the message
-  // immediately even before libp2p mesh forms.
+  // Always broadcast via BroadcastChannel + localStorage so same-origin tabs
+  // see the message immediately even before libp2p mesh forms.
+  // BroadcastChannel works same-browser; localStorage works cross-browser.
   broadcastChannelSend(payload);
+  localStorageSend(payload);
 
   // Also publish over libp2p gossipsub when connected.
   if (state.node?.services?.pubsub?.publish) {
