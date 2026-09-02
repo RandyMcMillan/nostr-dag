@@ -263,6 +263,12 @@
       userScrolledUp = !isNearBottom(chatMessages);
     }, { passive: true });
 
+    chatLog.addEventListener('toggle', () => {
+      if (chatLog.open) {
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+      }
+    });
+
     function appendMessage(entry) {
       const wasNearBottom = isNearBottom(chatMessages);
       const div = document.createElement('div');
