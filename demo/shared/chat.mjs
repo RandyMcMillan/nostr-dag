@@ -12,6 +12,7 @@
 const CHAT_PROTOCOL = 'nostr-dag-chat';
 const CHAT_VERSION = 1;
 const TOPIC = 'nostr-dag-bridge';
+const BC_CHANNEL = 'nostr-dag-chat';
 
 const state = globalThis.__nostrDagChatState || {
   node: null,
@@ -19,8 +20,48 @@ const state = globalThis.__nostrDagChatState || {
   messages: [],
   onMessageHandler: null,
   onStatusHandler: null,
+  bc: null,
 };
 globalThis.__nostrDagChatState = state;
+
+function initBroadcastChannel() {
+  if (state.bc) return;
+  if (typeof BroadcastChannel === 'undefined') return;
+  try {
+    const bc = new BroadcastChannel(BC_CHANNEL);
+    bc.onmessage = (ev) => {
+      if (!ev.data || typeof ev.data !== 'object') return;
+      const { payload, sourceId } = ev.data;
+      if (!payload || sourceId === state.localPeerId) return;
+      const chat = parseChatMessage(payload);
+      if (!chat) return;
+      const entry = {
+        ...chat,
+        id: `${chat.from}-${chat.timestamp}-${Math.random().toString(36).slice(2, 8)}`,
+        relay: 'broadcast-channel',
+      };
+      state.messages.push(entry);
+      if (state.messages.length > 500) {
+        state.messages = state.messages.slice(-500);
+      }
+      if (typeof state.onMessageHandler === 'function') {
+        try { state.onMessageHandler(entry); } catch {}
+      }
+    };
+    state.bc = bc;
+  } catch {
+    // BroadcastChannel not available
+  }
+}
+
+function broadcastChannelSend(payload) {
+  if (!state.bc) return;
+  try {
+    state.bc.postMessage({ payload, sourceId: state.localPeerId });
+  } catch {
+    // ignore
+  }
+}
 
 export function buildChatMessage(peerId, text) {
   return JSON.stringify({
@@ -54,14 +95,17 @@ export function parseChatMessage(raw) {
 }
 
 export function attachChatNode(node) {
-  if (!node?.services?.pubsub?.addEventListener) {
-    return Promise.resolve();
-  }
   if (state.node === node) {
     return Promise.resolve();
   }
-  state.node = node;
-  state.localPeerId = node?.peerId?.toString?.() || '';
+  if (node?.services?.pubsub?.addEventListener) {
+    state.node = node;
+    state.localPeerId = node?.peerId?.toString?.() || '';
+  }
+  initBroadcastChannel();
+  if (!node?.services?.pubsub?.addEventListener) {
+    return Promise.resolve();
+  }
 
   node.services.pubsub.addEventListener('message', (event) => {
     const data = event?.detail?.data;
