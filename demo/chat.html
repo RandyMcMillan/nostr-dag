@@ -76,13 +76,61 @@
       flex: 1;
       min-height: 0;
     }
+    .chat-input-row {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 4px;
+      flex-shrink: 0;
+    }
+    .chat-input-row input {
+      flex: 1;
+      font-family: system-ui, sans-serif;
+      font-size: 0.8rem;
+      padding: 4px 6px;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      background: var(--bg);
+      color: var(--fg);
+    }
+    /* Collapsible chat log */
+    .chat-log {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .chat-log-summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 4px 8px;
+      background: var(--panel);
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--fg);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+      user-select: none;
+    }
+    .chat-log-summary::-webkit-details-marker { display: none; }
+    .chat-log-summary::after {
+      content: '▸';
+      color: var(--muted);
+      font-size: 0.8rem;
+      margin-left: 6px;
+    }
+    .chat-log[open] .chat-log-summary::after { content: '▾'; color: var(--accent); }
+    .chat-log[open] {
+      background: var(--panel);
+    }
     .chat-messages {
       flex: 1;
       min-height: 0;
       overflow-y: auto;
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 4px;
       padding: 4px 6px;
       font-size: 0.78rem;
       line-height: 1.35;
@@ -102,22 +150,6 @@
       color: var(--muted);
       font-size: 0.65rem;
     }
-    .chat-input-row {
-      display: flex;
-      gap: 4px;
-      margin-top: 4px;
-      flex-shrink: 0;
-    }
-    .chat-input-row input {
-      flex: 1;
-      font-family: system-ui, sans-serif;
-      font-size: 0.8rem;
-      padding: 4px 6px;
-      border: 1px solid var(--border);
-      border-radius: 3px;
-      background: var(--bg);
-      color: var(--fg);
-    }
     @media (max-width: 640px) {
       body { padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); }
       h1 { font-size: 1.1rem; }
@@ -131,6 +163,10 @@
         font-size: 0.9rem;
         min-height: 40px;
       }
+      .chat-log-summary {
+        padding: 8px 10px;
+        font-size: 0.9rem;
+      }
       .chat-messages {
         padding: 8px 10px;
         font-size: 0.9rem;
@@ -139,7 +175,7 @@
       .chat-message .time { font-size: 0.72rem; }
       .chat-input-row {
         gap: 8px;
-        margin-top: 8px;
+        margin-bottom: 8px;
       }
       .chat-input-row input {
         padding: 8px 10px;
@@ -181,13 +217,16 @@
     </div>
 
     <div class="chat-panel">
-      <div id="chatMessages" class="chat-messages">
-        <div class="muted">Start the node to join the chat…</div>
-      </div>
       <div class="chat-input-row">
         <input id="chatInput" type="text" placeholder="Type a message and press Enter…" disabled />
         <button id="sendBtn" type="button" disabled>Send</button>
       </div>
+      <details class="chat-log" id="chatLog">
+        <summary class="chat-log-summary">Messages <span id="messageCountBadge" class="pill">0</span></summary>
+        <div id="chatMessages" class="chat-messages">
+          <div class="muted">Start the node to join the chat…</div>
+        </div>
+      </details>
     </div>
   </div>
 
@@ -204,7 +243,9 @@
     const connectedDisplay = document.getElementById('connectedDisplay');
     const startNodeBtn = document.getElementById('startNodeBtn');
     const messageCount = document.getElementById('messageCount');
+    const messageCountBadge = document.getElementById('messageCountBadge');
     const chatMessages = document.getElementById('chatMessages');
+    const chatLog = document.getElementById('chatLog');
     const chatInput = document.getElementById('chatInput');
     const sendBtn = document.getElementById('sendBtn');
 
@@ -222,7 +263,11 @@
       div.innerHTML = `<span class="time">[${time}]</span> <span class="from ${selfClass}">${escapeHtml(shortFrom)}</span>: ${escapeHtml(entry.text)}`;
       chatMessages.appendChild(div);
       chatMessages.scrollTop = chatMessages.scrollHeight;
-      messageCount.textContent = String(chatMessages.children.length);
+      const count = chatMessages.children.length;
+      messageCount.textContent = String(count);
+      if (messageCountBadge) messageCountBadge.textContent = String(count);
+      // Auto-open the log when a new message arrives so the user sees it.
+      if (chatLog && !chatLog.open) chatLog.open = true;
     }
 
     function escapeHtml(text) {
@@ -362,6 +407,8 @@
       // Clear UI immediately so the user sees feedback even if reload is delayed.
       chatMessages.innerHTML = '<div class="muted">Start the node to join the chat…</div>';
       messageCount.textContent = '0';
+      if (messageCountBadge) messageCountBadge.textContent = '0';
+      if (chatLog) chatLog.open = false;
       peerIdDisplay.textContent = '—';
       nodeStatusDisplay.className = 'status status-idle';
       nodeStatusDisplay.querySelector('.status-label').textContent = 'off';
@@ -380,6 +427,8 @@
       if (event.persisted) {
         chatMessages.innerHTML = '<div class="muted">Start the node to join the chat…</div>';
         messageCount.textContent = '0';
+        if (messageCountBadge) messageCountBadge.textContent = '0';
+        if (chatLog) chatLog.open = false;
         peerIdDisplay.textContent = '—';
         nodeStatusDisplay.className = 'status status-idle';
         nodeStatusDisplay.querySelector('.status-label').textContent = 'off';
