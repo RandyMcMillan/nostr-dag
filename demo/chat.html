@@ -243,14 +243,22 @@
 
         node.addEventListener('peer:connect', (event) => {
           const peerId = event?.detail?.peerId?.toString?.() || event?.detail?.remotePeer?.toString?.() || 'unknown';
+          const isNew = !connectedPeers.has(peerId);
           connectedPeers.add(peerId);
           connectedDisplay.textContent = String(connectedPeers.size);
+          if (isNew) {
+            appendMessage({ from: 'system', text: `Peer joined: ${peerId.slice(0, 16)}${peerId.length > 16 ? '…' : ''}`, timestamp: Date.now() });
+          }
         });
 
         node.addEventListener('peer:disconnect', (event) => {
           const peerId = event?.detail?.peerId?.toString?.() || event?.detail?.remotePeer?.toString?.() || 'unknown';
+          const hadPeer = connectedPeers.has(peerId);
           connectedPeers.delete(peerId);
           connectedDisplay.textContent = String(connectedPeers.size);
+          if (hadPeer) {
+            appendMessage({ from: 'system', text: `Peer left: ${peerId.slice(0, 16)}${peerId.length > 16 ? '…' : ''}`, timestamp: Date.now() });
+          }
         });
 
         await attachChatNode(node);
