@@ -27,6 +27,10 @@ pub const NOSTR_DAG_TOPIC: &str = "nostr-dag-bridge";
 pub const NETWORK_TIME_PROTOCOL: &str = "nostr-dag-network-time";
 pub const NETWORK_TIME_VERSION: u64 = 1;
 
+/// Chat protocol identifier used for lightweight peer-to-peer chat over gossipsub.
+pub const CHAT_PROTOCOL: &str = "nostr-dag-chat";
+pub const CHAT_VERSION: u64 = 1;
+
 /// PIP Nostr event kind used for on-demand bundle requests (browser → native peer).
 pub const PIP_REQUEST_KIND: nostr::Kind = nostr::Kind::Custom(39077);
 /// PIP Nostr event kind used for transfer manifests.
@@ -244,6 +248,40 @@ fn maybe_build_wasm_time_response(message: &str, local_peer_id: &str) -> Option<
         "server_time_ms": wasm_now_ms(),
     }))
     .ok()
+}
+
+/// Build a canonical chat message payload.
+pub fn build_chat_message(peer_id: &str, text: &str) -> String {
+    serde_json::json!({
+        "protocol": CHAT_PROTOCOL,
+        "version": CHAT_VERSION,
+        "type": "message",
+        "from": peer_id,
+        "text": text,
+        "timestamp": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0),
+    })
+    .to_string()
+}
+
+/// Parse a chat message payload. Returns `(from, text, timestamp)` on success.
+pub fn parse_chat_message(message: &str) -> Option<(String, String, u64)> {
+    let parsed: serde_json::Value = serde_json::from_str(message).ok()?;
+    if parsed.get("protocol")?.as_str()? != CHAT_PROTOCOL {
+        return None;
+    }
+    if parsed.get("version")?.as_u64()? != CHAT_VERSION {
+        return None;
+    }
+    if parsed.get("type")?.as_str()? != "message" {
+        return None;
+    }
+    let from = parsed.get("from")?.as_str()?.to_string();
+    let text = parsed.get("text")?.as_str()?.to_string();
+    let timestamp = parsed.get("timestamp")?.as_u64().unwrap_or(0);
+    Some((from, text, timestamp))
 }
 
 fn parse_payload_json(event: &nostr::Event) -> Result<serde_json::Value, TransferError> {
@@ -1422,7 +1460,8 @@ pub mod native {
     use tracing::{debug, info, warn};
 
     use super::{
-        deterministic_native_identity_keypair, maybe_build_native_time_response, NOSTR_DAG_TOPIC,
+        deterministic_native_identity_keypair, maybe_build_native_time_response,
+        parse_chat_message, NOSTR_DAG_TOPIC,
     };
 
     #[derive(NetworkBehaviour)]
@@ -1515,6 +1554,9 @@ pub mod native {
                                                 IdentTopic::new(NOSTR_DAG_TOPIC),
                                                 response.as_bytes(),
                                             );
+                                        }
+                                        if let Some((from, chat_text, _)) = parse_chat_message(&text) {
+                                            info!(%from, %chat_text, "chat message received");
                                         }
                                         debug!(%text, "gossipsub message received");
                                         let _ = event_tx.send(text).await;
@@ -1628,7 +1670,8 @@ pub mod wasm_node {
     use web_sys::js_sys::Function;
 
     use super::{
-        deterministic_wasm_identity_keypair, maybe_build_wasm_time_response, NOSTR_DAG_TOPIC,
+        deterministic_wasm_identity_keypair, maybe_build_wasm_time_response,
+        parse_chat_message, NOSTR_DAG_TOPIC,
     };
 
     #[derive(NetworkBehaviour)]
@@ -1821,6 +1864,11 @@ pub mod wasm_node {
                                 let _ = swarm.behaviour_mut().gossipsub.publish(
                                     IdentTopic::new(NOSTR_DAG_TOPIC),
                                     response.as_bytes(),
+                                );
+                            }
+                            if let Some((from, chat_text, _)) = parse_chat_message(&text) {
+                                web_sys::console::log_1(
+                                    &JsValue::from_str(&format!("[chat] {from}: {chat_text}")),
                                 );
                             }
                             if let Some(cb) = &on_message {

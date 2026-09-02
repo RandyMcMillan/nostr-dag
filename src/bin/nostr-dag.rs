@@ -5,6 +5,7 @@
 //!
 //!   nostr-dag server          # Run the static-file server
 //!   nostr-dag p2p             # Run the native libp2p peer
+//!   nostr-dag chat            # Run the P2P chat peer
 //!   nostr-dag federation      # Run a federation daemon
 //!   nostr-dag relay           # Run the embedded Nostr relay
 //!   nostr-dag keygen          # Generate deterministic keys
@@ -56,6 +57,10 @@ enum Commands {
     /// Run the native libp2p peer
     #[cfg(feature = "p2p")]
     P2p,
+
+    /// Run the P2P chat peer
+    #[cfg(feature = "p2p")]
+    Chat,
 
     /// Run a federation daemon
     #[cfg(feature = "native")]
@@ -118,6 +123,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         #[cfg(feature = "p2p")]
         Commands::P2p => nostr_dag::run_native_p2p_node(None).await.map_err(|e| e as Box<dyn std::error::Error>),
+
+        #[cfg(feature = "p2p")]
+        Commands::Chat => nostr_dag::run_chat().await.map_err(|e| e as Box<dyn std::error::Error>),
 
         #[cfg(feature = "native")]
         Commands::Federation => nostr_dag::run_federation().await,

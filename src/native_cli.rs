@@ -477,4 +477,29 @@ pub fn run_git_info(args: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
     Ok(())
 }
 
+/// Run the P2P chat peer.
+///
+/// Starts a full-stack native libp2p node and provides a stdin/stdout chat
+/// interface.  Messages are broadcast as `nostr-dag-chat` protocol frames over
+/// the shared `nostr-dag-bridge` gossipsub topic so they interoperate with
+/// browser (WASM/JS) peers on GitHub Pages.
+#[cfg(feature = "p2p")]
+pub async fn run_chat() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::from_default_env()
+                .add_directive("chat=info".parse().unwrap())
+                .add_directive("p2p_node=info".parse().unwrap()),
+        )
+        .try_init();
+
+    println!("╔═══════════════════════════════════════════╗");
+    println!("║     nostr-dag P2P Chat                    ║");
+    println!("╚═══════════════════════════════════════════╝");
+    println!("Type /chat <message> to broadcast to all peers");
+    println!("Type /help for all commands, /quit to exit");
+    println!();
+
+    crate::p2p_node::run_native_p2p_node(None).await
+}
 

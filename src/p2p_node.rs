@@ -26,8 +26,8 @@ use tracing::{debug, info, warn};
 
 #[cfg(feature = "p2p")]
 use crate::p2p::{
-    deterministic_native_identity_keypair, deterministic_native_nostr_keys, NETWORK_TIME_PROTOCOL,
-    NETWORK_TIME_VERSION, NOSTR_DAG_TOPIC,
+    deterministic_native_identity_keypair, deterministic_native_nostr_keys,
+    NETWORK_TIME_PROTOCOL, NETWORK_TIME_VERSION, NOSTR_DAG_TOPIC,
 };
 
 #[cfg(feature = "p2p")]
@@ -581,6 +581,17 @@ pub async fn run_native_p2p_node(
                             safe_println!("TIME_CONSENSUS request_id={} expired_or_missing", request_id);
                         }
                     }
+                    Some(NodeCommand::Chat(text)) => {
+                        let chat_msg = crate::p2p::build_chat_message(&local_peer_id.to_string(), &text);
+                        if let Err(err) = swarm.behaviour_mut().gossipsub.publish(
+                            IdentTopic::new(NOSTR_DAG_TOPIC),
+                            chat_msg.as_bytes(),
+                        ) {
+                            warn!(?err, "chat publish failed");
+                        } else {
+                            safe_println!("CHAT sent: {}", text);
+                        }
+                    }
                     Some(NodeCommand::Quit) => {
                         safe_println!("SHUTDOWN requested");
                         break;
@@ -799,6 +810,12 @@ pub async fn run_native_p2p_node(
                                 continue;
                             }
 
+                            // Handle chat messages separately so they don't pollute the DAG.
+                            if let Some((from, chat_text, _timestamp)) = crate::p2p::parse_chat_message(&text) {
+                                safe_println!("CHAT from={}: {}", from, chat_text);
+                                continue;
+                            }
+
                             let reaction = runtime.process_inbound_message(&text);
                             let summary = reaction.summary;
                             let topic_role = peer_topic_roles.get(&propagation_source).copied();
@@ -942,6 +959,8 @@ pub enum NodeCommand {
     SyncNetworkTime,
     /// Finalize a network-time consensus round after the collection window.
     FinalizeNetworkTime(String),
+    /// Send a chat message to all subscribed peers.
+    Chat(String),
     Status,
     Quit,
 }
@@ -1341,6 +1360,14 @@ pub fn parse_node_command(line: &str) -> Result<Option<NodeCommand>, String> {
         return Ok(Some(NodeCommand::Broadcast(message.to_string())));
     }
 
+    if let Some(rest) = trimmed.strip_prefix("/chat ") {
+        let message = rest.trim();
+        if message.is_empty() {
+            return Err("/chat requires a message".to_string());
+        }
+        return Ok(Some(NodeCommand::Chat(message.to_string())));
+    }
+
     if let Some(rest) = trimmed
         .strip_prefix("/pip ")
         .or_else(|| trimmed.strip_prefix("/nip-pip "))
@@ -1522,9 +1549,10 @@ pub const HELP_TEXT: &str = concat!(
     "  /help                 show this help\n",
     "  /status               print local peer status\n",
     "  /dial <multiaddr>     dial a peer by multiaddr\n",
+    "  /chat <message>       send a chat message to all peers\n",
     "  /pip <message>        publish a PIP/NIP-PIP blob\n",
     "  /mirror <url>         clone a git repo, bundle it, and publish via PIP\n",
-    "  /broadcast <message>  publish a message\n",
+    "  /broadcast <message>  publish a raw message\n",
     "  /quit                 exit the process\n",
     "Any other non-empty line is broadcast as-is.\n",
 );
@@ -1651,6 +1679,10 @@ mod tests {
         assert!(matches!(
             parse_node_command("/broadcast hello world").unwrap(),
             Some(NodeCommand::Broadcast(message)) if message == "hello world"
+        ));
+        assert!(matches!(
+            parse_node_command("/chat hello world").unwrap(),
+            Some(NodeCommand::Chat(message)) if message == "hello world"
         ));
         assert!(matches!(
             parse_node_command("/pip hello world").unwrap(),

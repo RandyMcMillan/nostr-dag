@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chat — nostr-dag</title>
+  <link rel="icon" href="./shared/favicon.ico" />
+  <link rel="stylesheet" href="./shared/page.css" />
+  <style>
+    :root {
+      --ok: #2e7d32;
+      --warn: #f9a825;
+      --error: #c62828;
+      --info: #1565c0;
+      --bg: #ffffff;
+      --fg: #111111;
+      --muted: #666666;
+      --border: #e0e0e0;
+      --panel: #f5f5f5;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0d0d0d;
+        --fg: #e0e0e0;
+        --muted: #999999;
+        --border: #333333;
+        --panel: #1a1a1a;
+      }
+    }
+    html, body {
+      height: 100vh;
+      margin: 0;
+      overflow: hidden;
+    }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      padding: 6px 8px;
+      line-height: 1.2;
+      font-size: 0.8rem;
+      display: flex;
+      flex-direction: column;
+    }
+    h1 { font-size: 1rem; margin: 0; display: inline; }
+    .subtitle { color: var(--muted); font-size: 0.7rem; display: inline; margin-left: 4px; }
+    .wrap {
+      max-width: 900px;
+      margin: 0 auto;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0;
+      padding-bottom: 10px;
+    }
+    .header-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 4px;
+      flex-shrink: 0;
+    }
+    .panels {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 6px 8px;
+    }
+    .panel h2 { font-size: 0.8rem; margin: 0 0 3px; }
+    .stats {
+      font-size: 0.7rem;
+      line-height: 1.35;
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+    .stats > span { white-space: nowrap; }
+    .mono { font-family: ui-monospace, SFMono-Regular, monospace; }
+    .muted { color: var(--muted); }
+    .status { font-weight: 600; }
+    .status.ok { color: var(--ok); }
+    button {
+      background: var(--info);
+      color: #fff;
+      border: none;
+      border-radius: 3px;
+      padding: 2px 6px;
+      font-size: 0.75rem;
+      cursor: pointer;
+      margin-left: 4px;
+    }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .chat-panel {
+      margin-top: 4px;
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0;
+    }
+    .chat-messages {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 4px 6px;
+      font-size: 0.78rem;
+      line-height: 1.35;
+    }
+    .chat-message {
+      margin-bottom: 2px;
+      word-break: break-word;
+    }
+    .chat-message .from {
+      font-weight: 600;
+      color: var(--info);
+    }
+    .chat-message .from.self {
+      color: var(--ok);
+    }
+    .chat-message .time {
+      color: var(--muted);
+      font-size: 0.65rem;
+    }
+    .chat-input-row {
+      display: flex;
+      gap: 4px;
+      margin-top: 4px;
+      flex-shrink: 0;
+    }
+    .chat-input-row input {
+      flex: 1;
+      font-family: system-ui, sans-serif;
+      font-size: 0.8rem;
+      padding: 4px 6px;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      background: var(--bg);
+      color: var(--fg);
+    }
+    @media (max-width: 600px) {
+      .panels { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="header-row">
+      <div>
+        <h1>P2P Chat</h1>
+        <span class="subtitle">libp2p gossipsub</span>
+      </div>
+      <a href="./index.html" style="text-decoration:none;font-size:1.1rem;">⬅</a>
+    </div>
+
+    <div class="panels">
+      <div class="panel">
+        <h2>Node</h2>
+        <div class="stats">
+          <span><span class="muted">Peer ID:</span> <span id="peerIdDisplay" class="mono">—</span></span>
+          <span><span class="muted">Status:</span> <span id="nodeStatusDisplay" class="status">off</span></span>
+          <span><span class="muted">Connected:</span> <span id="connectedDisplay">0</span></span>
+          <button id="startNodeBtn" type="button">Start</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Chat</h2>
+        <div class="stats">
+          <span><span class="muted">Messages:</span> <span id="messageCount">0</span></span>
+          <span><span class="muted">Topic:</span> <span class="mono">nostr-dag-bridge</span></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="chat-panel">
+      <div id="chatMessages" class="chat-messages">
+        <div class="muted">Start the node to join the chat…</div>
+      </div>
+      <div class="chat-input-row">
+        <input id="chatInput" type="text" placeholder="Type a message and press Enter…" disabled />
+        <button id="sendBtn" type="button" disabled>Send</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { createSharedLibp2pStack, DEFAULT_BOOTSTRAP_PEERS } from './shared/libp2p-stack.mjs';
+    import { attachChatNode, sendChat, onMessage } from './shared/chat.mjs';
+
+    const peerIdDisplay = document.getElementById('peerIdDisplay');
+    const nodeStatusDisplay = document.getElementById('nodeStatusDisplay');
+    const connectedDisplay = document.getElementById('connectedDisplay');
+    const startNodeBtn = document.getElementById('startNodeBtn');
+    const messageCount = document.getElementById('messageCount');
+    const chatMessages = document.getElementById('chatMessages');
+    const chatInput = document.getElementById('chatInput');
+    const sendBtn = document.getElementById('sendBtn');
+
+    const connectedPeers = new Set();
+    let nodeStarted = false;
+
+    function appendMessage(entry) {
+      const div = document.createElement('div');
+      div.className = 'chat-message';
+      const shortFrom = entry.from.slice(0, 16) + (entry.from.length > 16 ? '…' : '');
+      const time = new Date(entry.timestamp).toLocaleTimeString();
+      const selfClass = entry.self ? 'self' : '';
+      div.innerHTML = `<span class="time">[${time}]</span> <span class="from ${selfClass}">${escapeHtml(shortFrom)}</span>: ${escapeHtml(entry.text)}`;
+      chatMessages.appendChild(div);
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+      messageCount.textContent = String(chatMessages.children.length);
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    onMessage((entry) => {
+      appendMessage(entry);
+    });
+
+    async function initLibp2pNode() {
+      if (nodeStarted) return;
+      startNodeBtn.disabled = true;
+      try {
+        const { node, bootstrapPeers } = await createSharedLibp2pStack({
+          bootstrapPeers: DEFAULT_BOOTSTRAP_PEERS,
+          onLog(level, text) {
+            // best-effort only
+          },
+        });
+
+        node.addEventListener('peer:connect', (event) => {
+          const peerId = event?.detail?.peerId?.toString?.() || event?.detail?.remotePeer?.toString?.() || 'unknown';
+          connectedPeers.add(peerId);
+          connectedDisplay.textContent = String(connectedPeers.size);
+        });
+
+        node.addEventListener('peer:disconnect', (event) => {
+          const peerId = event?.detail?.peerId?.toString?.() || event?.detail?.remotePeer?.toString?.() || 'unknown';
+          connectedPeers.delete(peerId);
+          connectedDisplay.textContent = String(connectedPeers.size);
+        });
+
+        await attachChatNode(node);
+        nodeStarted = true;
+        peerIdDisplay.textContent = node.peerId.toString();
+        nodeStatusDisplay.textContent = 'started';
+        nodeStatusDisplay.className = 'status ok';
+        chatInput.disabled = false;
+        sendBtn.disabled = false;
+        chatMessages.innerHTML = '';
+        appendMessage({ from: 'system', text: 'Node started. Bootstrap peers: ' + bootstrapPeers.length, timestamp: Date.now() });
+      } catch (e) {
+        startNodeBtn.disabled = false;
+        appendMessage({ from: 'system', text: 'Node failed: ' + e.message, timestamp: Date.now() });
+      }
+    }
+
+    startNodeBtn.addEventListener('click', () => {
+      void initLibp2pNode();
+    });
+
+    async function doSend() {
+      const text = chatInput.value.trim();
+      if (!text) return;
+      chatInput.value = '';
+      try {
+        await sendChat(text);
+      } catch (e) {
+        appendMessage({ from: 'system', text: 'Send failed: ' + e.message, timestamp: Date.now() });
+      }
+    }
+
+    sendBtn.addEventListener('click', doSend);
+    chatInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        doSend();
+      }
+    });
+
+    void initLibp2pNode();
+  </script>
+</body>
+</html>

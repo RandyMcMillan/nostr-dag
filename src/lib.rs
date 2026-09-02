@@ -60,6 +60,8 @@ pub use p2p_node::run_native_p2p_node;
 pub use native_cli::run_keygen;
 #[cfg(feature = "native")]
 pub use native_cli::run_git_info;
+#[cfg(feature = "p2p")]
+pub use native_cli::run_chat;
 #[cfg(feature = "db-viewer")]
 pub mod db_viewer;
 #[cfg(feature = "db-viewer")]
