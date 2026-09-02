@@ -1745,6 +1745,13 @@ pub mod wasm_node {
     /// await node.start();
     /// await node.broadcast('hello');
     /// ```
+    /// Browser-side libp2p node exposed to JavaScript via wasm-bindgen.
+    ///
+    /// Peer lifecycle events (connect / disconnect) are forwarded from the
+    /// Rust swarm to JS so the UI can display accurate connection counts.
+    /// Without this, browsers using the WASM stack (Chrome, Firefox) show
+    /// "Connected: 0" even when they are actively participating in the
+    /// gossipsub mesh.
     #[wasm_bindgen]
     pub struct P2pNode {
         local_key: identity::Keypair,
@@ -1967,6 +1974,10 @@ pub mod wasm_node {
                                 }
                             }
                         }
+                        // Forward peer lifecycle events to JavaScript so the
+                        // chat UI can display an accurate "Connected" count.
+                        // Safari uses the JS libp2p stack which already fires
+                        // these events; Chrome/Firefox use this WASM stack.
                         SwarmEvent::ConnectionEstablished { peer_id, .. } => {
                             if let Some(cb) = &on_peer_connect {
                                 let _ = cb.call1(

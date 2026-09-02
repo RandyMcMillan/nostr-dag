@@ -417,6 +417,11 @@
     async function initLibp2pNode() {
       if (nodeStarted) return;
       startNodeBtn.disabled = true;
+      // Safari uses the pure-JS libp2p stack because the WASM Rust stack has
+      // transport compatibility issues in WebKit (WebRTC dials failing, WASM
+      // memory/instability quirks).  Chrome, Firefox and Edge use the WASM
+      // stack for better performance.  Both stacks interoperate over the same
+      // gossipsub topic so cross-browser chat works regardless.
       const safari = isSafari();
       if (safari) {
         appendMessage({ from: 'system', text: 'Safari detected — using JS libp2p stack for compatibility', timestamp: Date.now() });
@@ -425,6 +430,7 @@
         const { node, bootstrapPeers } = await createSharedLibp2pStack({
           bootstrapPeers: DEFAULT_BOOTSTRAP_PEERS,
           wasmModule,
+          // Force JS stack for Safari; WASM for everything else.
           useWasmP2p: safari ? false : true,
           onLog(level, text) {
             // Log libp2p events to chat stream for diagnostics

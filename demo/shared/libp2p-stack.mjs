@@ -292,11 +292,18 @@ export async function createSharedLibp2pStack({
           ? deterministicKeySeed
           : `nostr-dag-wasm-tab-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
         const p2pNode = new mod.P2pNode(wasmSeed);
+        // handlers: gossipsub message callbacks (used by chat.mjs via
+        // node.services.pubsub.addEventListener('message', ...))
         const handlers = [];
+        // peerLifecycleHandlers: peer:connect / peer:disconnect callbacks.
+        // The Rust WASM node forwards SwarmEvent::ConnectionEstablished and
+        // ConnectionClosed to JS so the UI can show accurate peer counts.
         const peerLifecycleHandlers = { connect: [], disconnect: [] };
         p2pNode.on_message((msg) => {
           for (const h of handlers) h(msg);
         });
+        // Wire Rust peer lifecycle events into the JS adapter so
+        // node.addEventListener('peer:connect', cb) works for WASM too.
         if (typeof p2pNode.on_peer_connect === 'function') {
           p2pNode.on_peer_connect((peerId) => {
             for (const h of peerLifecycleHandlers.connect) h({ detail: { peerId } });
@@ -359,6 +366,9 @@ export async function createSharedLibp2pStack({
               if (!addrStr) throw new TypeError("dial requires a multiaddr string");
               await p2pNode.dial(addrStr);
             },
+            // node.addEventListener mirrors the js-libp2p event surface.
+            // peer:connect / peer:disconnect are forwarded from the Rust WASM
+            // swarm so the chat UI can track connected peers accurately.
             addEventListener: (event, cb) => {
               if (event === "peer:connect") {
                 peerLifecycleHandlers.connect.push(cb);
