@@ -273,7 +273,7 @@
       const wasNearBottom = isNearBottom(chatMessages);
       const div = document.createElement('div');
       div.className = 'chat-message';
-      const shortFrom = entry.from.slice(0, 16) + (entry.from.length > 16 ? '…' : '');
+      const shortFrom = entry.from;
       const time = new Date(entry.timestamp).toLocaleTimeString();
       const selfClass = entry.self ? 'self' : '';
       div.innerHTML = `<span class="time">[${time}]</span> <span class="from ${selfClass}">${escapeHtml(shortFrom)}</span>: ${escapeHtml(entry.text)}`;
@@ -301,16 +301,16 @@
 
     onPeer((event) => {
       if (event.kind === 'joined') {
-        appendMessage({ from: 'system', text: `Peer joined: ${event.peer.slice(0, 16)}${event.peer.length > 16 ? '…' : ''}`, timestamp: event.timestamp });
+        appendMessage({ from: 'system', text: `Peer joined: ${event.peer}`, timestamp: event.timestamp });
       } else if (event.kind === 'left') {
-        appendMessage({ from: 'system', text: `Peer left: ${event.peer.slice(0, 16)}${event.peer.length > 16 ? '…' : ''}`, timestamp: event.timestamp });
+        appendMessage({ from: 'system', text: `Peer left: ${event.peer}`, timestamp: event.timestamp });
       } else if (event.kind === 'ping') {
-        appendMessage({ from: 'system', text: `Ping from ${event.peer.slice(0, 16)}${event.peer.length > 16 ? '…' : ''}`, timestamp: event.timestamp });
+        appendMessage({ from: 'system', text: `Ping from ${event.peer}`, timestamp: event.timestamp });
       }
     });
 
     onPing((result) => {
-      appendMessage({ from: 'system', text: `⏱ RTT ${result.rtt}ms (${result.peer.slice(0, 16)}${result.peer.length > 16 ? '…' : ''})`, timestamp: Date.now() });
+      appendMessage({ from: 'system', text: `⏱ RTT ${result.rtt}ms (${result.peer})`, timestamp: Date.now() });
     });
 
     async function loadWasm() {
@@ -356,7 +356,7 @@
                 const full = addr.includes(`/p2p/${peer.peer_id}`) ? addr : `${addr}/p2p/${peer.peer_id}`;
                 try {
                   await node.dial(multiaddr(full));
-                  appendMessage({ from: 'system', text: `Dialed native peer ${full.slice(0, 50)}…`, timestamp: Date.now() });
+                  appendMessage({ from: 'system', text: `Dialed native peer ${full}`, timestamp: Date.now() });
                 } catch (dialErr) {
                   appendMessage({ from: 'system', text: `Dial failed: ${dialErr.message || dialErr}`, timestamp: Date.now() });
                 }
@@ -373,7 +373,7 @@
           connectedPeers.add(peerId);
           connectedDisplay.textContent = String(connectedPeers.size);
           if (isNew) {
-            appendMessage({ from: 'system', text: `Peer joined: ${peerId.slice(0, 16)}${peerId.length > 16 ? '…' : ''}`, timestamp: Date.now() });
+            appendMessage({ from: 'system', text: `Peer joined: ${peerId}`, timestamp: Date.now() });
           }
         });
 
@@ -383,7 +383,7 @@
           connectedPeers.delete(peerId);
           connectedDisplay.textContent = String(connectedPeers.size);
           if (hadPeer) {
-            appendMessage({ from: 'system', text: `Peer left: ${peerId.slice(0, 16)}${peerId.length > 16 ? '…' : ''}`, timestamp: Date.now() });
+            appendMessage({ from: 'system', text: `Peer left: ${peerId}`, timestamp: Date.now() });
           }
         });
 
