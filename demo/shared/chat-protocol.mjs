@@ -5,6 +5,8 @@
  *   message  — regular text payload
  *   join     — peer entered the chat
  *   leave    — peer left the chat
+ *   ping     — request RTT measurement
+ *   pong     — reply to ping
  *
  * All messages carry the same envelope:
  *   {"protocol":"nostr-dag-chat","version":1,"type":"...",
@@ -45,6 +47,28 @@ export function buildChatLeave(peerId) {
   });
 }
 
+export function buildChatPing(peerId, pingId, timestamp = Date.now()) {
+  return JSON.stringify({
+    protocol: CHAT_PROTOCOL,
+    version: CHAT_VERSION,
+    type: 'ping',
+    from: peerId,
+    pingId,
+    timestamp,
+  });
+}
+
+export function buildChatPong(peerId, pingId, timestamp = Date.now()) {
+  return JSON.stringify({
+    protocol: CHAT_PROTOCOL,
+    version: CHAT_VERSION,
+    type: 'pong',
+    from: peerId,
+    pingId,
+    timestamp,
+  });
+}
+
 export function parseChatEvent(raw) {
   try {
     const parsed = JSON.parse(raw);
@@ -62,6 +86,12 @@ export function parseChatEvent(raw) {
     }
     if (type === 'leave') {
       return { type: 'leave', from, text: `Peer left: ${from.slice(0, 16)}`, timestamp };
+    }
+    if (type === 'ping') {
+      return { type: 'ping', from, text: `Ping from ${from.slice(0, 16)}`, timestamp, pingId: parsed.pingId };
+    }
+    if (type === 'pong') {
+      return { type: 'pong', from, text: `Pong from ${from.slice(0, 16)}`, timestamp, pingId: parsed.pingId };
     }
     return {
       type: 'message',

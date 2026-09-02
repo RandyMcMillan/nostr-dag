@@ -9,6 +9,8 @@ import {
   buildChatMessage,
   buildChatJoin,
   buildChatLeave,
+  buildChatPing,
+  buildChatPong,
   parseChatEvent,
   parseChatMessage,
   CHAT_PROTOCOL,
@@ -29,8 +31,10 @@ const state = globalThis.__nostrDagChatState || {
   onMessageHandler: null,
   onPeerHandler: null,
   onStatusHandler: null,
+  onPingHandler: null,
   bc: null,
   lsSeen: new Set(),
+  pendingPings: new Map(),
 };
 globalThis.__nostrDagChatState = state;
 
@@ -135,12 +139,34 @@ function handleIncomingChatRaw(raw, relay) {
   const ev = parseChatEvent(raw);
   if (!ev) return;
 
-  // Emit peer lifecycle events for join/leave
+  // Emit peer lifecycle events for join/leave/ping
   if (ev.type === 'join' && typeof state.onPeerHandler === 'function') {
     try { state.onPeerHandler({ kind: 'joined', peer: ev.from, timestamp: ev.timestamp }); } catch {}
   }
   if (ev.type === 'leave' && typeof state.onPeerHandler === 'function') {
     try { state.onPeerHandler({ kind: 'left', peer: ev.from, timestamp: ev.timestamp }); } catch {}
+  }
+  if (ev.type === 'ping') {
+    if (typeof state.onPeerHandler === 'function') {
+      try { state.onPeerHandler({ kind: 'ping', peer: ev.from, timestamp: ev.timestamp }); } catch {}
+    }
+    // Auto-reply with pong if the ping came from another peer
+    if (ev.from !== state.localPeerId && ev.pingId) {
+      sendChatPong(ev.pingId);
+    }
+  }
+
+  if (ev.type === 'pong') {
+    if (ev.pingId && state.pendingPings.has(ev.pingId)) {
+      const startTime = state.pendingPings.get(ev.pingId);
+      const rtt = Date.now() - startTime;
+      state.pendingPings.delete(ev.pingId);
+      if (typeof state.onPingHandler === 'function') {
+        try { state.onPingHandler({ peer: ev.from, rtt, pingId: ev.pingId }); } catch {}
+      }
+    }
+    // Pongs are control traffic — don't display them in the chat stream.
+    return;
   }
 
   const entry = {
@@ -235,6 +261,48 @@ export async function sendChatLeave() {
   }
 }
 
+export async function sendChatPing() {
+  const pingId = `${state.localPeerId || 'me'}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const payload = buildChatPing(state.localPeerId, pingId);
+  state.pendingPings.set(pingId, Date.now());
+
+  broadcastChannelSend(payload);
+  localStorageSend(payload);
+  await httpRelaySend(payload);
+  if (state.node?.services?.pubsub?.publish) {
+    try {
+      await state.node.services.pubsub.publish(TOPIC, new TextEncoder().encode(payload));
+    } catch {}
+  }
+
+  // Show the ping locally
+  const entry = {
+    from: state.localPeerId || 'me',
+    text: 'Ping',
+    timestamp: Date.now(),
+    id: `me-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    self: true,
+    system: true,
+  };
+  state.messages.push(entry);
+  if (typeof state.onMessageHandler === 'function') {
+    try { state.onMessageHandler(entry); } catch {}
+  }
+  return { pingId };
+}
+
+async function sendChatPong(pingId) {
+  const payload = buildChatPong(state.localPeerId, pingId);
+  broadcastChannelSend(payload);
+  localStorageSend(payload);
+  // Pongs carry a pingId the HTTP relay doesn't preserve; skip HTTP relay.
+  if (state.node?.services?.pubsub?.publish) {
+    try {
+      await state.node.services.pubsub.publish(TOPIC, new TextEncoder().encode(payload));
+    } catch {}
+  }
+}
+
 export function getMessages() {
   return state.messages.slice();
 }
@@ -251,12 +319,17 @@ export function onStatus(handler) {
   state.onStatusHandler = typeof handler === 'function' ? handler : null;
 }
 
+export function onPing(handler) {
+  state.onPingHandler = typeof handler === 'function' ? handler : null;
+}
+
 export function resetChat() {
   state.messages = [];
   state.node = null;
   state.localPeerId = '';
   state.httpSeen = new Set();
   state.lsSeen = new Set();
+  state.pendingPings.clear();
   if (state.bc) {
     try { state.bc.close(); } catch {}
     state.bc = null;

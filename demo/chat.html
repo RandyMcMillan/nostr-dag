@@ -196,7 +196,7 @@
 
   <script type="module">
     import { createSharedLibp2pStack, DEFAULT_BOOTSTRAP_PEERS } from './shared/libp2p-stack.mjs';
-    import { attachChatNode, sendChat, sendChatJoin, resetChat, onMessage, onPeer } from './shared/chat.mjs';
+    import { attachChatNode, sendChat, sendChatJoin, sendChatPing, resetChat, onMessage, onPeer, onPing } from './shared/chat.mjs';
     import { multiaddr } from 'https://esm.sh/@multiformats/multiaddr';
 
     const wasmModuleUrl = new URL('./pkg/nostr_dag.js', window.location.href).href;
@@ -215,7 +215,6 @@
     let nodeStarted = false;
     let wasmModule = null;
     let libp2pNode = null;
-    const pendingPings = new Set();
 
     function appendMessage(entry) {
       const div = document.createElement('div');
@@ -235,19 +234,7 @@
       return div.innerHTML;
     }
 
-    const PING_PREFIX = 'ping:';
-
     onMessage((entry) => {
-      if (entry.text.startsWith(PING_PREFIX)) {
-        const sentAt = parseInt(entry.text.slice(PING_PREFIX.length), 10);
-        if (!entry.self && pendingPings.has(sentAt)) {
-          const rtt = Date.now() - sentAt;
-          entry.text = `ping ⏱ ${rtt}ms`;
-          pendingPings.delete(sentAt);
-        } else {
-          entry.text = 'ping';
-        }
-      }
       appendMessage(entry);
     });
 
@@ -256,7 +243,13 @@
         appendMessage({ from: 'system', text: `Peer joined: ${event.peer.slice(0, 16)}${event.peer.length > 16 ? '…' : ''}`, timestamp: event.timestamp });
       } else if (event.kind === 'left') {
         appendMessage({ from: 'system', text: `Peer left: ${event.peer.slice(0, 16)}${event.peer.length > 16 ? '…' : ''}`, timestamp: event.timestamp });
+      } else if (event.kind === 'ping') {
+        appendMessage({ from: 'system', text: `Ping from ${event.peer.slice(0, 16)}${event.peer.length > 16 ? '…' : ''}`, timestamp: event.timestamp });
       }
+    });
+
+    onPing((result) => {
+      appendMessage({ from: 'system', text: `⏱ RTT ${result.rtt}ms (${result.peer.slice(0, 16)}${result.peer.length > 16 ? '…' : ''})`, timestamp: Date.now() });
     });
 
     async function loadWasm() {
@@ -406,13 +399,10 @@
       const text = chatInput.value.trim();
       chatInput.value = '';
       if (!text) {
-        const now = Date.now();
-        pendingPings.add(now);
         try {
-          await sendChat(`${PING_PREFIX}${now}`);
+          await sendChatPing();
         } catch (e) {
           appendMessage({ from: 'system', text: 'Ping failed: ' + e.message, timestamp: Date.now() });
-          pendingPings.delete(now);
         }
         return;
       }
