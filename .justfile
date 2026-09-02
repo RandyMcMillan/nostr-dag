@@ -88,6 +88,10 @@ demo:
 server: build-server site
     P2P_ENABLE=1 cargo run --bin nostr-dag-server --features p2p,native
 
+chat: build-server site
+    @echo "Starting server with chat support…"
+    P2P_ENABLE=1 cargo run --bin nostr-dag-server --features p2p,native
+
 githooks:
     #!/usr/bin/env bash
     set -euo pipefail
