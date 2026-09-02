@@ -356,8 +356,37 @@
         try { await libp2pNode.stop(); } catch {}
       }
       resetChat();
+      // Clear UI immediately so the user sees feedback even if reload is delayed.
+      chatMessages.innerHTML = '<div class="muted">Start the node to join the chat…</div>';
+      messageCount.textContent = '0';
+      peerIdDisplay.textContent = '—';
+      nodeStatusDisplay.textContent = 'off';
+      nodeStatusDisplay.className = 'status';
+      connectedDisplay.textContent = '0';
+      chatInput.disabled = true;
+      sendBtn.disabled = true;
+      nodeStarted = false;
+      libp2pNode = null;
+      connectedPeers.clear();
       // Force a full reload so every singleton (WASM, global state, peer id) is reborn.
       window.location.reload();
+    });
+
+    // Safari back-forward cache can restore the old DOM; hard-reset when that happens.
+    window.addEventListener('pageshow', (event) => {
+      if (event.persisted) {
+        chatMessages.innerHTML = '<div class="muted">Start the node to join the chat…</div>';
+        messageCount.textContent = '0';
+        peerIdDisplay.textContent = '—';
+        nodeStatusDisplay.textContent = 'off';
+        nodeStatusDisplay.className = 'status';
+        connectedDisplay.textContent = '0';
+        chatInput.disabled = true;
+        sendBtn.disabled = true;
+        nodeStarted = false;
+        libp2pNode = null;
+        connectedPeers.clear();
+      }
     });
 
     async function doSend() {
