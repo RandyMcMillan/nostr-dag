@@ -102,8 +102,10 @@
       border-radius: 4px;
       overflow: hidden;
     }
+    .chat-log.collapsed .chat-messages {
+      display: none;
+    }
     .chat-log-summary {
-      list-style: none;
       cursor: pointer;
       padding: 4px 8px;
       background: var(--panel);
@@ -116,16 +118,15 @@
       flex-shrink: 0;
       user-select: none;
     }
-    .chat-log-summary::-webkit-details-marker { display: none; }
     .chat-log-summary::after {
-      content: '▸';
-      color: var(--muted);
+      content: '▾';
+      color: var(--accent);
       font-size: 0.8rem;
       margin-left: 6px;
     }
-    .chat-log[open] .chat-log-summary::after { content: '▾'; color: var(--accent); }
-    .chat-log[open] {
-      background: var(--panel);
+    .chat-log.collapsed .chat-log-summary::after {
+      content: '▸';
+      color: var(--muted);
     }
     .chat-messages {
       flex: 1;
@@ -221,12 +222,12 @@
         <input id="chatInput" type="text" placeholder="Type a message and press Enter…" disabled />
         <button id="sendBtn" type="button" disabled>Send</button>
       </div>
-      <details class="chat-log" id="chatLog">
-        <summary class="chat-log-summary">Messages <span id="messageCountBadge" class="pill">0</span></summary>
+      <div class="chat-log collapsed" id="chatLog">
+        <div class="chat-log-summary" id="chatLogSummary">Messages <span id="messageCountBadge" class="pill">0</span></div>
         <div id="chatMessages" class="chat-messages">
           <div class="muted">Start the node to join the chat…</div>
         </div>
-      </details>
+      </div>
     </div>
   </div>
 
@@ -263,8 +264,9 @@
       userScrolledUp = !isNearBottom(chatMessages);
     }, { passive: true });
 
-    chatLog.addEventListener('toggle', () => {
-      if (chatLog.open) {
+    document.getElementById('chatLogSummary').addEventListener('click', () => {
+      chatLog.classList.toggle('collapsed');
+      if (!chatLog.classList.contains('collapsed')) {
         chatMessages.scrollTop = chatMessages.scrollHeight;
       }
     });
@@ -286,7 +288,9 @@
       messageCount.textContent = String(count);
       if (messageCountBadge) messageCountBadge.textContent = String(count);
       // Auto-open the log when a new message arrives so the user sees it.
-      if (chatLog && !chatLog.open) chatLog.open = true;
+      if (chatLog && chatLog.classList.contains('collapsed')) {
+        chatLog.classList.remove('collapsed');
+      }
     }
 
     function escapeHtml(text) {
@@ -427,7 +431,7 @@
       chatMessages.innerHTML = '<div class="muted">Start the node to join the chat…</div>';
       messageCount.textContent = '0';
       if (messageCountBadge) messageCountBadge.textContent = '0';
-      if (chatLog) chatLog.open = false;
+      if (chatLog) chatLog.classList.add('collapsed');
       peerIdDisplay.textContent = '—';
       nodeStatusDisplay.className = 'status status-idle';
       nodeStatusDisplay.querySelector('.status-label').textContent = 'off';
@@ -447,7 +451,7 @@
         chatMessages.innerHTML = '<div class="muted">Start the node to join the chat…</div>';
         messageCount.textContent = '0';
         if (messageCountBadge) messageCountBadge.textContent = '0';
-        if (chatLog) chatLog.open = false;
+        if (chatLog) chatLog.classList.add('collapsed');
         peerIdDisplay.textContent = '—';
         nodeStatusDisplay.className = 'status status-idle';
         nodeStatusDisplay.querySelector('.status-label').textContent = 'off';
