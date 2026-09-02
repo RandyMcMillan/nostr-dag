@@ -9,6 +9,8 @@ nostr-dag.db-wal
 
 demo/shared/app-version.generated.mjs
 
+test/*.test.mjs.bak
+
 .nostr-dag-mirrors/
 
 node_modules

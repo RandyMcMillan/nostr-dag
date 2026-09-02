@@ -27,6 +27,9 @@ const NIP11_ROUTE_PREFIX: &str = "/nip11";
 const NIP11_MAX_CONCURRENT: usize = 8;
 /// Route prefix for the event store REST API.
 const EVENTS_ROUTE_PREFIX: &str = "/events";
+/// Route prefix for the HTTP chat relay API.
+const CHAT_ROUTE_PREFIX: &str = "/chat";
+const CHAT_MAX_MESSAGES: usize = 500;
 /// Public GitHub Pages deployment of the bridge (WASM peer).
 const GH_PAGES_BRIDGE_URL: &str = "https://randymcmillan.github.io/nostr-dag/bridge/";
 
@@ -132,6 +135,35 @@ impl PeerStore {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct ChatMessage {
+    from: String,
+    text: String,
+    timestamp: u64,
+    id: String,
+}
+
+#[derive(Default)]
+struct ChatStore {
+    entries: Mutex<Vec<ChatMessage>>,
+}
+
+impl ChatStore {
+    fn push(&self, entry: ChatMessage) {
+        let mut entries = self.entries.lock().expect("chat store poisoned");
+        entries.push(entry);
+        if entries.len() > CHAT_MAX_MESSAGES {
+            let overflow = entries.len() - CHAT_MAX_MESSAGES;
+            entries.drain(0..overflow);
+        }
+    }
+
+    fn since(&self, timestamp: u64) -> Vec<ChatMessage> {
+        let entries = self.entries.lock().expect("chat store poisoned");
+        entries.iter().filter(|e| e.timestamp > timestamp).cloned().collect()
+    }
+}
+
 pub async fn run_server(
     host: &str,
     port: u16,
@@ -159,6 +191,7 @@ pub async fn run_server(
     });
     let logger_store = Arc::new(LoggerStore::default());
     let peer_store = Arc::new(PeerStore::default());
+    let chat_store = Arc::new(ChatStore::default());
     // Seed the peer store with the public GitHub Pages deployment so
     // db-viewer and /peers consumers always have a well-known remote peer.
     peer_store.upsert(PeerEntry {
@@ -283,12 +316,13 @@ pub async fn run_server(
                 let site_dir = site_dir.clone();
                 let logger_store = Arc::clone(&logger_store);
                 let peer_store = Arc::clone(&peer_store);
+                let chat_store = Arc::clone(&chat_store);
                 let event_store = Arc::clone(&event_store);
                 let http_client = Arc::clone(&http_client);
                 let connection_shutdown = shutdown_rx.clone();
                 let extra_path = extra_path.clone();
                 connections.spawn(async move {
-                    if let Err(err) = handle_connection(stream, &site_dir, extra_path.as_deref(), extra_recursive, extra_depth, logger_store, peer_store, event_store, http_client, connection_shutdown).await {
+                    if let Err(err) = handle_connection(stream, &site_dir, extra_path.as_deref(), extra_recursive, extra_depth, logger_store, peer_store, chat_store, event_store, http_client, connection_shutdown).await {
                         if is_disconnect_error(&err) || err.kind() == io::ErrorKind::Interrupted {
                             trace!(%peer, ?err, "client disconnected");
                         } else {
@@ -332,6 +366,7 @@ async fn handle_connection(
     extra_depth: usize,
     logger_store: Arc<LoggerStore>,
     peer_store: Arc<PeerStore>,
+    chat_store: Arc<ChatStore>,
     event_store: Arc<EventStoreState>,
     http_client: Arc<reqwest::Client>,
     mut shutdown_rx: watch::Receiver<()>,
@@ -447,6 +482,50 @@ async fn handle_connection(
                     "text/plain; charset=utf-8",
                 )
             }
+        }
+    } else if method == "POST" && (path == CHAT_ROUTE_PREFIX || path.starts_with("/chat/message")) {
+        match handle_chat_post(body, &chat_store).await {
+            Ok(()) => response_bytes(
+                204,
+                "No Content",
+                Vec::new(),
+                "text/plain; charset=utf-8",
+                true,
+            ),
+            Err(err) => {
+                trace!(?err, path = %path, "chat ingest failed");
+                response_text(
+                    400,
+                    "Bad Request",
+                    "Bad Request",
+                    "text/plain; charset=utf-8",
+                )
+            }
+        }
+    } else if method == "GET" && path.starts_with("/chat/poll") {
+        match handle_chat_poll(path, &chat_store).await {
+            Ok((body, content_type)) => response_bytes(200, "OK", body, content_type, head_only),
+            Err(RouteError::BadRequest) => response_text(
+                400,
+                "Bad Request",
+                "Bad Request",
+                "text/plain; charset=utf-8",
+            ),
+            Err(RouteError::Io(err)) => {
+                trace!(?err, path = %path, "chat poll failed");
+                response_text(
+                    500,
+                    "Internal Server Error",
+                    "Internal Server Error",
+                    "text/plain; charset=utf-8",
+                )
+            }
+            _ => response_text(
+                500,
+                "Internal Server Error",
+                "Internal Server Error",
+                "text/plain; charset=utf-8",
+            ),
         }
     } else if method != "GET" && method != "HEAD" && !path.starts_with("/proxy/") {
         info!(%method, %path, "rejecting unsupported method");
@@ -830,6 +909,30 @@ fn handle_peer_get(
     serde_json::to_vec(&payload)
         .map(|body| (body, "application/json; charset=utf-8"))
         .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))
+}
+
+async fn handle_chat_post(body: &str, chat_store: &Arc<ChatStore>) -> Result<(), RouteError> {
+    let msg: ChatMessage = serde_json::from_str(body).map_err(|_| RouteError::BadRequest)?;
+    if msg.from.is_empty() || msg.text.is_empty() {
+        return Err(RouteError::BadRequest);
+    }
+    chat_store.push(msg);
+    Ok(())
+}
+
+async fn handle_chat_poll(
+    path: &str,
+    chat_store: &Arc<ChatStore>,
+) -> Result<(Vec<u8>, &'static str), RouteError> {
+    let since = path
+        .trim_start_matches("/chat/poll")
+        .trim_start_matches('/')
+        .parse::<u64>()
+        .unwrap_or(0);
+    let messages = chat_store.since(since);
+    let body = serde_json::to_vec(&messages)
+        .map_err(|err| RouteError::Io(io::Error::new(io::ErrorKind::Other, err)))?;
+    Ok((body, "application/json; charset=utf-8"))
 }
 
 /// Generate a dynamic NIP-05 `.well-known/nostr.json` response from the

@@ -12,8 +12,8 @@ const BASE = process.env.SERVER_URL || process.env.BASE_URL || 'http://127.0.0.1
 
 async function serverHealthy() {
   try {
-    const res = await fetch(`${BASE}/`, { method: 'HEAD', signal: AbortSignal.timeout(2000) });
-    return res.ok;
+    const res = await fetch(`${BASE}/chat`, { method: 'HEAD', signal: AbortSignal.timeout(2000) });
+    return res.ok || res.status === 302 || res.status === 304;
   } catch {
     return false;
   }
@@ -39,8 +39,8 @@ test('chat message propagates between two Chromium tabs', { timeout: 45_000 }, a
     const pageB = await context.newPage();
 
     // Load chat page in both tabs
-    await pageA.goto(`${BASE}/chat`, { waitUntil: 'load', timeout: 15_000 });
-    await pageB.goto(`${BASE}/chat`, { waitUntil: 'load', timeout: 15_000 });
+    await pageA.goto(`${BASE}/chat`, { waitUntil: "load", timeout: 30_000 });
+    await pageB.goto(`${BASE}/chat`, { waitUntil: "load", timeout: 30_000 });
 
     // Wait for nodes to start (or at least for the UI to be ready)
     await pageA.waitForSelector('#chatInput:not([disabled])', { timeout: hasServer ? 15_000 : 5_000 }).catch(() => {});

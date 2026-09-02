@@ -112,7 +112,7 @@ wasm: ensure-wasm-target
 			AR="$$(command -v llvm-ar || command -v ar || echo ar)"; \
 		fi; \
 	fi; \
-	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) CC="$$CC" AR="$$AR" $(WASM_PACK) build --target web --release --out-dir site/pkg -- --no-default-features --features wasm
+	CARGO_TARGET_DIR=$(CARGO_TARGET_DIR) CC="$$CC" AR="$$AR" $(WASM_PACK) build --target web --release --out-dir site/pkg -- --no-default-features --features wasm,p2p-wasm
 
 site: wasm
 	mkdir -p site

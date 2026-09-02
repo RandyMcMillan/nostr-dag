@@ -64,7 +64,7 @@ jobs:
         run: cargo install wasm-pack --locked
 
       - name: Build wasm package
-        run: wasm-pack build --target web --release --out-dir site/pkg -- --no-default-features --features wasm
+        run: wasm-pack build --target web --release --out-dir site/pkg -- --no-default-features --features wasm,p2p-wasm
 
       - name: Copy demo into site
         run: |

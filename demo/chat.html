@@ -97,6 +97,7 @@
       margin-left: 4px;
     }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button.reset { background: var(--error); }
     .chat-panel {
       margin-top: 4px;
       display: flex;
@@ -169,6 +170,7 @@
           <span><span class="muted">Status:</span> <span id="nodeStatusDisplay" class="status">off</span></span>
           <span><span class="muted">Connected:</span> <span id="connectedDisplay">0</span></span>
           <button id="startNodeBtn" type="button">Start</button>
+          <button id="resetNodeBtn" type="button" class="reset">Reset</button>
         </div>
       </div>
 
@@ -194,7 +196,7 @@
 
   <script type="module">
     import { createSharedLibp2pStack, DEFAULT_BOOTSTRAP_PEERS } from './shared/libp2p-stack.mjs';
-    import { attachChatNode, sendChat, onMessage } from './shared/chat.mjs';
+    import { attachChatNode, sendChat, sendChatJoin, resetChat, onMessage, onPeer } from './shared/chat.mjs';
     import { multiaddr } from 'https://esm.sh/@multiformats/multiaddr';
 
     const wasmModuleUrl = new URL('./pkg/nostr_dag.js', window.location.href).href;
@@ -212,6 +214,7 @@
     const connectedPeers = new Set();
     let nodeStarted = false;
     let wasmModule = null;
+    let libp2pNode = null;
 
     function appendMessage(entry) {
       const div = document.createElement('div');
@@ -233,6 +236,14 @@
 
     onMessage((entry) => {
       appendMessage(entry);
+    });
+
+    onPeer((event) => {
+      if (event.kind === 'joined') {
+        appendMessage({ from: 'system', text: `Peer joined: ${event.peer.slice(0, 16)}${event.peer.length > 16 ? '…' : ''}`, timestamp: event.timestamp });
+      } else if (event.kind === 'left') {
+        appendMessage({ from: 'system', text: `Peer left: ${event.peer.slice(0, 16)}${event.peer.length > 16 ? '…' : ''}`, timestamp: event.timestamp });
+      }
     });
 
     async function loadWasm() {
@@ -309,6 +320,7 @@
           }
         });
 
+        libp2pNode = node;
         await attachChatNode(node);
         nodeStarted = true;
         peerIdDisplay.textContent = node.peerId.toString();
@@ -321,6 +333,13 @@
           chatMessages.innerHTML = '';
         }
         appendMessage({ from: 'system', text: 'Node started. Bootstrap peers: ' + bootstrapPeers.length, timestamp: Date.now() });
+
+        // Broadcast join event so other peers see us enter the chat
+        try {
+          await sendChatJoin();
+        } catch {
+          // best-effort
+        }
       } catch (e) {
         startNodeBtn.disabled = false;
         appendMessage({ from: 'system', text: 'Node failed: ' + e.message, timestamp: Date.now() });
@@ -329,6 +348,16 @@
 
     startNodeBtn.addEventListener('click', () => {
       void initLibp2pNode();
+    });
+
+    document.getElementById('resetNodeBtn').addEventListener('click', async () => {
+      appendMessage({ from: 'system', text: 'Resetting…', timestamp: Date.now() });
+      if (libp2pNode?.stop) {
+        try { await libp2pNode.stop(); } catch {}
+      }
+      resetChat();
+      // Force a full reload so every singleton (WASM, global state, peer id) is reborn.
+      window.location.reload();
     });
 
     async function doSend() {

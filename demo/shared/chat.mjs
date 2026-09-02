@@ -3,23 +3,31 @@
  *
  * Uses the shared libp2p gossipsub stack to send and receive chat messages
  * that interoperate with the Rust native and WASM peers.
- *
- * Wire format (matches Rust `p2p::build_chat_message`):
- *   {"protocol":"nostr-dag-chat","version":1,"type":"message",
- *    "from":"<peer_id>","text":"<content>","timestamp":<unix_ms>}
  */
 
-const CHAT_PROTOCOL = 'nostr-dag-chat';
-const CHAT_VERSION = 1;
+import {
+  buildChatMessage,
+  buildChatJoin,
+  buildChatLeave,
+  parseChatEvent,
+  parseChatMessage,
+  CHAT_PROTOCOL,
+  CHAT_VERSION,
+} from './chat-protocol.mjs';
+
 const TOPIC = 'nostr-dag-bridge';
 const BC_CHANNEL = 'nostr-dag-chat';
 const LS_KEY = 'nostr-dag-chat-msg';
+
+const TAB_ID = globalThis.__nostrDagChatTabId || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+globalThis.__nostrDagChatTabId = TAB_ID;
 
 const state = globalThis.__nostrDagChatState || {
   node: null,
   localPeerId: '',
   messages: [],
   onMessageHandler: null,
+  onPeerHandler: null,
   onStatusHandler: null,
   bc: null,
   lsSeen: new Set(),
@@ -34,21 +42,8 @@ function initBroadcastChannel() {
     bc.onmessage = (ev) => {
       if (!ev.data || typeof ev.data !== 'object') return;
       const { payload, sourceId } = ev.data;
-      if (!payload || sourceId === state.localPeerId) return;
-      const chat = parseChatMessage(payload);
-      if (!chat) return;
-      const entry = {
-        ...chat,
-        id: `${chat.from}-${chat.timestamp}-${Math.random().toString(36).slice(2, 8)}`,
-        relay: 'broadcast-channel',
-      };
-      state.messages.push(entry);
-      if (state.messages.length > 500) {
-        state.messages = state.messages.slice(-500);
-      }
-      if (typeof state.onMessageHandler === 'function') {
-        try { state.onMessageHandler(entry); } catch {}
-      }
+      if (!payload || sourceId === TAB_ID) return;
+      handleIncomingChatRaw(payload, 'broadcast-channel');
     };
     state.bc = bc;
   } catch {
@@ -59,7 +54,7 @@ function initBroadcastChannel() {
 function broadcastChannelSend(payload) {
   if (!state.bc) return;
   try {
-    state.bc.postMessage({ payload, sourceId: state.localPeerId });
+    state.bc.postMessage({ payload, sourceId: TAB_ID });
   } catch {
     // ignore
   }
@@ -75,20 +70,7 @@ function initLocalStorage() {
         if (!data || data.sourceId === state.localPeerId) return;
         if (state.lsSeen.has(data.id)) return;
         state.lsSeen.add(data.id);
-        const chat = parseChatMessage(data.payload);
-        if (!chat) return;
-        const entry = {
-          ...chat,
-          id: `${chat.from}-${chat.timestamp}-${Math.random().toString(36).slice(2, 8)}`,
-          relay: 'localStorage',
-        };
-        state.messages.push(entry);
-        if (state.messages.length > 500) {
-          state.messages = state.messages.slice(-500);
-        }
-        if (typeof state.onMessageHandler === 'function') {
-          try { state.onMessageHandler(entry); } catch {}
-        }
+        handleIncomingChatRaw(data.payload, 'localStorage');
       } catch {
         // ignore malformed storage events
       }
@@ -101,8 +83,8 @@ function initLocalStorage() {
 function localStorageSend(payload) {
   if (typeof localStorage === 'undefined') return;
   try {
-    const id = `${state.localPeerId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const data = JSON.stringify({ payload, sourceId: state.localPeerId, id });
+    const id = `${TAB_ID}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const data = JSON.stringify({ payload, sourceId: TAB_ID, id });
     localStorage.setItem(LS_KEY, data);
     setTimeout(() => {
       try {
@@ -116,37 +98,6 @@ function localStorageSend(payload) {
   }
 }
 
-export function buildChatMessage(peerId, text) {
-  return JSON.stringify({
-    protocol: CHAT_PROTOCOL,
-    version: CHAT_VERSION,
-    type: 'message',
-    from: peerId,
-    text,
-    timestamp: Date.now(),
-  });
-}
-
-export function parseChatMessage(raw) {
-  try {
-    const parsed = JSON.parse(raw);
-    if (
-      parsed?.protocol !== CHAT_PROTOCOL ||
-      Number(parsed?.version) !== CHAT_VERSION ||
-      parsed?.type !== 'message'
-    ) {
-      return null;
-    }
-    return {
-      from: String(parsed.from || 'unknown'),
-      text: String(parsed.text || ''),
-      timestamp: Number(parsed.timestamp) || 0,
-    };
-  } catch {
-    return null;
-  }
-}
-
 export function attachChatNode(node) {
   if (state.node === node) {
     return Promise.resolve();
@@ -157,6 +108,7 @@ export function attachChatNode(node) {
   }
   initBroadcastChannel();
   initLocalStorage();
+  initHttpRelay();
   if (!node?.services?.pubsub?.addEventListener) {
     return Promise.resolve();
   }
@@ -173,27 +125,43 @@ export function attachChatNode(node) {
     } else if (data instanceof ArrayBuffer) {
       raw = new TextDecoder().decode(new Uint8Array(data));
     }
-    const chat = parseChatMessage(raw);
-    if (!chat) return;
-
-    const entry = {
-      ...chat,
-      id: `${chat.from}-${chat.timestamp}-${Math.random().toString(36).slice(2, 8)}`,
-    };
-    state.messages.push(entry);
-    if (state.messages.length > 500) {
-      state.messages = state.messages.slice(-500);
-    }
-    if (typeof state.onMessageHandler === 'function') {
-      try {
-        state.onMessageHandler(entry);
-      } catch {
-        // ignore handler errors
-      }
-    }
+    handleIncomingChatRaw(raw, 'libp2p');
   });
 
   return Promise.resolve(node.services.pubsub.subscribe(TOPIC)).catch(() => {});
+}
+
+function handleIncomingChatRaw(raw, relay) {
+  const ev = parseChatEvent(raw);
+  if (!ev) return;
+
+  // Emit peer lifecycle events for join/leave
+  if (ev.type === 'join' && typeof state.onPeerHandler === 'function') {
+    try { state.onPeerHandler({ kind: 'joined', peer: ev.from, timestamp: ev.timestamp }); } catch {}
+  }
+  if (ev.type === 'leave' && typeof state.onPeerHandler === 'function') {
+    try { state.onPeerHandler({ kind: 'left', peer: ev.from, timestamp: ev.timestamp }); } catch {}
+  }
+
+  const entry = {
+    from: ev.from,
+    text: ev.text,
+    timestamp: ev.timestamp,
+    id: `${ev.from}-${ev.timestamp}-${Math.random().toString(36).slice(2, 8)}`,
+    relay,
+    system: ev.type !== 'message',
+  };
+  state.messages.push(entry);
+  if (state.messages.length > 500) {
+    state.messages = state.messages.slice(-500);
+  }
+  if (typeof state.onMessageHandler === 'function') {
+    try {
+      state.onMessageHandler(entry);
+    } catch {
+      // ignore handler errors
+    }
+  }
 }
 
 export async function sendChat(text) {
@@ -209,12 +177,16 @@ export async function sendChat(text) {
   broadcastChannelSend(payload);
   localStorageSend(payload);
 
+  // Publish over the HTTP relay so cross-browser peers on the same server
+  // receive the message even when libp2p WebSocket transport is unavailable.
+  await httpRelaySend(payload);
+
   // Also publish over libp2p gossipsub when connected.
   if (state.node?.services?.pubsub?.publish) {
     try {
       await state.node.services.pubsub.publish(TOPIC, new TextEncoder().encode(payload));
     } catch {
-      // best-effort; BC already delivered locally
+      // best-effort; other channels already delivered locally
     }
   }
 
@@ -239,12 +211,40 @@ export async function sendChat(text) {
   return entry;
 }
 
+export async function sendChatJoin() {
+  const payload = buildChatJoin(state.localPeerId);
+  broadcastChannelSend(payload);
+  localStorageSend(payload);
+  await httpRelaySend(payload);
+  if (state.node?.services?.pubsub?.publish) {
+    try {
+      await state.node.services.pubsub.publish(TOPIC, new TextEncoder().encode(payload));
+    } catch {}
+  }
+}
+
+export async function sendChatLeave() {
+  const payload = buildChatLeave(state.localPeerId);
+  broadcastChannelSend(payload);
+  localStorageSend(payload);
+  await httpRelaySend(payload);
+  if (state.node?.services?.pubsub?.publish) {
+    try {
+      await state.node.services.pubsub.publish(TOPIC, new TextEncoder().encode(payload));
+    } catch {}
+  }
+}
+
 export function getMessages() {
   return state.messages.slice();
 }
 
 export function onMessage(handler) {
   state.onMessageHandler = typeof handler === 'function' ? handler : null;
+}
+
+export function onPeer(handler) {
+  state.onPeerHandler = typeof handler === 'function' ? handler : null;
 }
 
 export function onStatus(handler) {
@@ -255,8 +255,107 @@ export function resetChat() {
   state.messages = [];
   state.node = null;
   state.localPeerId = '';
+  state.httpSeen = new Set();
+  state.lsSeen = new Set();
   if (state.bc) {
     try { state.bc.close(); } catch {}
     state.bc = null;
+  }
+  if (state.pollTimer) {
+    clearInterval(state.pollTimer);
+    state.pollTimer = null;
+  }
+  // Clear localStorage keys belonging to this chat so other tabs
+  // don't resurrect stale state after a reset.
+  if (typeof localStorage !== 'undefined') {
+    try {
+      localStorage.removeItem(LS_KEY);
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('nostr-dag')) {
+          localStorage.removeItem(key);
+        }
+      }
+    } catch {}
+  }
+  // Wipe the global singletons so a fresh import starts clean.
+  try {
+    globalThis.__nostrDagChatTabId = undefined;
+    globalThis.__nostrDagChatState = undefined;
+  } catch {}
+}
+
+// ---------------------------------------------------------------------------
+// HTTP relay fallback — used when libp2p mesh is not available (e.g. cross-
+// browser on localhost where the JS/WASM libp2p stack cannot dial the native
+// peer's WebSocket listener).  The server buffers messages and serves them via
+// simple HTTP polling so any browser can participate.
+// ---------------------------------------------------------------------------
+
+const POLL_INTERVAL_MS = 2000;
+const HTTP_RELAY_MAX_AGE_MS = 300_000; // 5 min
+
+function initHttpRelay() {
+  if (state.pollTimer) return;
+  if (typeof fetch === 'undefined') return;
+  state.pollTimer = setInterval(() => {
+    void pollHttpRelay();
+  }, POLL_INTERVAL_MS);
+  void pollHttpRelay();
+}
+
+async function pollHttpRelay() {
+  try {
+    const since = state.lastHttpPollAt || 0;
+    const res = await fetch(`/chat/poll/${since}`, { cache: 'no-store' });
+    if (!res.ok) {
+      console.error('[chat:pollHttpRelay] GET failed:', res.status, res.statusText);
+      return;
+    }
+    const messages = await res.json();
+    if (!Array.isArray(messages)) {
+      console.error('[chat:pollHttpRelay] non-array response:', messages);
+      return;
+    }
+    for (const msg of messages) {
+      if (!msg || typeof msg !== 'object') continue;
+      const id = `${msg.from}-${msg.timestamp}-${msg.id || ''}`;
+      if (state.httpSeen && state.httpSeen.has(id)) continue;
+      if (!state.httpSeen) state.httpSeen = new Set();
+      state.httpSeen.add(id);
+      const envelope = JSON.stringify({
+        protocol: CHAT_PROTOCOL,
+        version: CHAT_VERSION,
+        type: 'message',
+        from: msg.from,
+        text: msg.text,
+        timestamp: msg.timestamp,
+      });
+      handleIncomingChatRaw(envelope, 'http-relay');
+    }
+    state.lastHttpPollAt = Date.now() - HTTP_RELAY_MAX_AGE_MS;
+  } catch (err) {
+    console.error('[chat:pollHttpRelay] error:', err);
+  }
+}
+
+async function httpRelaySend(payload) {
+  try {
+    const chat = parseChatMessage(payload);
+    if (!chat) return;
+    const msg = {
+      ...chat,
+      id: `${chat.from}-${chat.timestamp}-${Math.random().toString(36).slice(2, 8)}`,
+    };
+    const res = await fetch('/chat/message', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(msg),
+    });
+    if (!res.ok) {
+      console.error('[chat:httpRelaySend] POST /chat/message failed:', res.status, res.statusText);
+    }
+  } catch (err) {
+    console.error('[chat:httpRelaySend] POST /chat/message error:', err);
   }
 }

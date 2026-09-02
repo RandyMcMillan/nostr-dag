@@ -250,7 +250,15 @@ fn maybe_build_wasm_time_response(message: &str, local_peer_id: &str) -> Option<
     .ok()
 }
 
-/// Build a canonical chat message payload.
+/// Chat message types carried over the nostr-dag-chat protocol.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChatEvent {
+    Message { from: String, text: String, timestamp: u64 },
+    Join { from: String, timestamp: u64 },
+    Leave { from: String, timestamp: u64 },
+}
+
+/// Build a regular chat text message payload.
 pub fn build_chat_message(peer_id: &str, text: &str) -> String {
     serde_json::json!({
         "protocol": CHAT_PROTOCOL,
@@ -266,8 +274,38 @@ pub fn build_chat_message(peer_id: &str, text: &str) -> String {
     .to_string()
 }
 
-/// Parse a chat message payload. Returns `(from, text, timestamp)` on success.
-pub fn parse_chat_message(message: &str) -> Option<(String, String, u64)> {
+/// Build a peer-joined event payload.
+pub fn build_chat_join(peer_id: &str) -> String {
+    serde_json::json!({
+        "protocol": CHAT_PROTOCOL,
+        "version": CHAT_VERSION,
+        "type": "join",
+        "from": peer_id,
+        "timestamp": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0),
+    })
+    .to_string()
+}
+
+/// Build a peer-left event payload.
+pub fn build_chat_leave(peer_id: &str) -> String {
+    serde_json::json!({
+        "protocol": CHAT_PROTOCOL,
+        "version": CHAT_VERSION,
+        "type": "leave",
+        "from": peer_id,
+        "timestamp": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0),
+    })
+    .to_string()
+}
+
+/// Parse a chat payload into a typed event.
+pub fn parse_chat_event(message: &str) -> Option<ChatEvent> {
     let parsed: serde_json::Value = serde_json::from_str(message).ok()?;
     if parsed.get("protocol")?.as_str()? != CHAT_PROTOCOL {
         return None;
@@ -275,13 +313,26 @@ pub fn parse_chat_message(message: &str) -> Option<(String, String, u64)> {
     if parsed.get("version")?.as_u64()? != CHAT_VERSION {
         return None;
     }
-    if parsed.get("type")?.as_str()? != "message" {
-        return None;
-    }
     let from = parsed.get("from")?.as_str()?.to_string();
-    let text = parsed.get("text")?.as_str()?.to_string();
     let timestamp = parsed.get("timestamp")?.as_u64().unwrap_or(0);
-    Some((from, text, timestamp))
+    match parsed.get("type")?.as_str()? {
+        "message" => {
+            let text = parsed.get("text")?.as_str()?.to_string();
+            Some(ChatEvent::Message { from, text, timestamp })
+        }
+        "join" => Some(ChatEvent::Join { from, timestamp }),
+        "leave" => Some(ChatEvent::Leave { from, timestamp }),
+        _ => None,
+    }
+}
+
+/// Parse a chat message payload. Returns `(from, text, timestamp)` on success.
+/// Deprecated: use `parse_chat_event` for full type support.
+pub fn parse_chat_message(message: &str) -> Option<(String, String, u64)> {
+    match parse_chat_event(message)? {
+        ChatEvent::Message { from, text, timestamp } => Some((from, text, timestamp)),
+        _ => None,
+    }
 }
 
 fn parse_payload_json(event: &nostr::Event) -> Result<serde_json::Value, TransferError> {
@@ -1708,11 +1759,23 @@ pub mod wasm_node {
 
     #[wasm_bindgen]
     impl P2pNode {
-        /// Create a new node with a deterministic Ed25519 identity.
+        /// Create a new node with an Ed25519 identity.
+        /// When `seed` is provided it is hashed with SHA-256 to produce the
+        /// 32-byte key material so each browser tab can have a unique peer id.
+        /// When `seed` is omitted the deterministic `nostr-dag-wasm` seed is used.
         #[wasm_bindgen(constructor)]
-        pub fn new() -> P2pNode {
+        pub fn new(seed: Option<String>) -> P2pNode {
+            let local_key = match seed {
+                Some(s) => {
+                    use sha2::{Digest, Sha256};
+                    let hash = Sha256::digest(s.as_bytes());
+                    libp2p::identity::Keypair::ed25519_from_bytes(hash)
+                        .expect("seed hash is valid Ed25519 seed")
+                }
+                None => deterministic_wasm_identity_keypair(),
+            };
             P2pNode {
-                local_key: deterministic_wasm_identity_keypair(),
+                local_key,
                 on_message: None,
             }
         }

@@ -285,7 +285,13 @@ export async function createSharedLibp2pStack({
       const mod = wasmModule || globalThis.__nostrDagWasm;
       if (mod && typeof mod.P2pNode === "function") {
         emitLog(onLog, "info", "using WASM P2pNode for libp2p", "checking");
-        const p2pNode = new mod.P2pNode();
+        // Use an explicit deterministic seed when requested (tests), otherwise
+        // generate a random per-tab seed so multiple browser tabs do not share
+        // the same peer identity (which breaks gossipsub meshing).
+        const wasmSeed = deterministicKeySeed
+          ? deterministicKeySeed
+          : `nostr-dag-wasm-tab-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+        const p2pNode = new mod.P2pNode(wasmSeed);
         const handlers = [];
         p2pNode.on_message((msg) => {
           for (const h of handlers) h(msg);

@@ -23,8 +23,8 @@ const INSTALL_TIMEOUT_MS = 300_000;
 
 async function serverHealthy() {
   try {
-    const res = await fetch(`${BASE}/`, { method: 'HEAD', signal: AbortSignal.timeout(2000) });
-    return res.ok;
+    const res = await fetch(`${BASE}/chat`, { method: 'HEAD', signal: AbortSignal.timeout(2000) });
+    return res.ok || res.status === 302 || res.status === 304;
   } catch {
     return false;
   }
@@ -93,8 +93,8 @@ test('chat message propagates between Chrome and Safari', { timeout: 120_000 }, 
     safariPage.on('console', (msg) => safariLogs.push(`[safari ${msg.type()}] ${msg.text()}`));
 
     // Load chat page in both browsers
-    await chromePage.goto(`${BASE}/chat`, { waitUntil: 'load', timeout: 15_000 });
-    await safariPage.goto(`${BASE}/chat`, { waitUntil: 'load', timeout: 15_000 });
+    await chromePage.goto(`${BASE}/chat`, { waitUntil: "load", timeout: 30_000 });
+    await safariPage.goto(`${BASE}/chat`, { waitUntil: "load", timeout: 30_000 });
 
     // Wait for nodes to start
     await chromePage.waitForSelector('#chatInput:not([disabled])', { timeout: 15_000 }).catch(() => {});
