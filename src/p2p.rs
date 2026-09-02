@@ -1749,6 +1749,8 @@ pub mod wasm_node {
     pub struct P2pNode {
         local_key: identity::Keypair,
         on_message: Option<Function>,
+        on_peer_connect: Option<Function>,
+        on_peer_disconnect: Option<Function>,
     }
 
     #[derive(Debug, Clone)]
@@ -1777,6 +1779,8 @@ pub mod wasm_node {
             P2pNode {
                 local_key,
                 on_message: None,
+                on_peer_connect: None,
+                on_peer_disconnect: None,
             }
         }
 
@@ -1786,14 +1790,28 @@ pub mod wasm_node {
             self.on_message = Some(cb);
         }
 
+        /// Register a JavaScript callback invoked when a peer connection is established.
+        /// `cb` receives the peer id string.
+        pub fn on_peer_connect(&mut self, cb: Function) {
+            self.on_peer_connect = Some(cb);
+        }
+
+        /// Register a JavaScript callback invoked when a peer connection is closed.
+        /// `cb` receives the peer id string.
+        pub fn on_peer_disconnect(&mut self, cb: Function) {
+            self.on_peer_disconnect = Some(cb);
+        }
+
         /// Start the swarm event loop and resolve when initialization completes.
         pub async fn start(&self) -> Result<(), JsValue> {
             let local_key = self.local_key.clone();
             let on_message = self.on_message.clone();
+            let on_peer_connect = self.on_peer_connect.clone();
+            let on_peer_disconnect = self.on_peer_disconnect.clone();
             let (ready_tx, ready_rx) = oneshot::channel::<()>();
 
             spawn_local(async move {
-                if let Err(e) = run_swarm(local_key, on_message, Some(ready_tx)).await {
+                if let Err(e) = run_swarm(local_key, on_message, on_peer_connect, on_peer_disconnect, Some(ready_tx)).await {
                     web_sys::console::error_1(&e);
                 }
             });
@@ -1844,6 +1862,8 @@ pub mod wasm_node {
     async fn run_swarm(
         local_key: identity::Keypair,
         on_message: Option<Function>,
+        on_peer_connect: Option<Function>,
+        on_peer_disconnect: Option<Function>,
         ready_tx: Option<oneshot::Sender<()>>,
     ) -> Result<(), JsValue> {
         let topic = IdentTopic::new(NOSTR_DAG_TOPIC);
@@ -1921,31 +1941,49 @@ pub mod wasm_node {
                     }
                 }
                 event = swarm.select_next_some() => {
-                    if let SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(
-                        gossipsub::Event::Message { message, .. },
-                    )) = event
-                    {
-                        if let Ok(text) = String::from_utf8(message.data) {
-                            if let Some(response) =
-                                maybe_build_wasm_time_response(&text, &local_peer_id)
-                            {
-                                let _ = swarm.behaviour_mut().gossipsub.publish(
-                                    IdentTopic::new(NOSTR_DAG_TOPIC),
-                                    response.as_bytes(),
-                                );
+                    match event {
+                        SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(
+                            gossipsub::Event::Message { message, .. },
+                        )) => {
+                            if let Ok(text) = String::from_utf8(message.data) {
+                                if let Some(response) =
+                                    maybe_build_wasm_time_response(&text, &local_peer_id)
+                                {
+                                    let _ = swarm.behaviour_mut().gossipsub.publish(
+                                        IdentTopic::new(NOSTR_DAG_TOPIC),
+                                        response.as_bytes(),
+                                    );
+                                }
+                                if let Some((from, chat_text, _)) = parse_chat_message(&text) {
+                                    web_sys::console::log_1(
+                                        &JsValue::from_str(&format!("[chat] {from}: {chat_text}")),
+                                    );
+                                }
+                                if let Some(cb) = &on_message {
+                                    let _ = cb.call1(
+                                        &JsValue::NULL,
+                                        &JsValue::from_str(&text),
+                                    );
+                                }
                             }
-                            if let Some((from, chat_text, _)) = parse_chat_message(&text) {
-                                web_sys::console::log_1(
-                                    &JsValue::from_str(&format!("[chat] {from}: {chat_text}")),
-                                );
-                            }
-                            if let Some(cb) = &on_message {
+                        }
+                        SwarmEvent::ConnectionEstablished { peer_id, .. } => {
+                            if let Some(cb) = &on_peer_connect {
                                 let _ = cb.call1(
                                     &JsValue::NULL,
-                                    &JsValue::from_str(&text),
+                                    &JsValue::from_str(&peer_id.to_string()),
                                 );
                             }
                         }
+                        SwarmEvent::ConnectionClosed { peer_id, .. } => {
+                            if let Some(cb) = &on_peer_disconnect {
+                                let _ = cb.call1(
+                                    &JsValue::NULL,
+                                    &JsValue::from_str(&peer_id.to_string()),
+                                );
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }

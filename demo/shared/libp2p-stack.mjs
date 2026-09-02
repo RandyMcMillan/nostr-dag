@@ -293,9 +293,20 @@ export async function createSharedLibp2pStack({
           : `nostr-dag-wasm-tab-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
         const p2pNode = new mod.P2pNode(wasmSeed);
         const handlers = [];
+        const peerLifecycleHandlers = { connect: [], disconnect: [] };
         p2pNode.on_message((msg) => {
           for (const h of handlers) h(msg);
         });
+        if (typeof p2pNode.on_peer_connect === 'function') {
+          p2pNode.on_peer_connect((peerId) => {
+            for (const h of peerLifecycleHandlers.connect) h({ detail: { peerId } });
+          });
+        }
+        if (typeof p2pNode.on_peer_disconnect === 'function') {
+          p2pNode.on_peer_disconnect((peerId) => {
+            for (const h of peerLifecycleHandlers.disconnect) h({ detail: { peerId } });
+          });
+        }
         await p2pNode.start();
         emitLog(onLog, "info", "WASM P2pNode started", "available");
         // Dial bootstrap peers so the WASM node can join the gossipsub mesh.
@@ -325,7 +336,6 @@ export async function createSharedLibp2pStack({
         });
         // Return a minimal adapter that matches the JS node surface used by
         // callers (publish, subscribe, peerId string, stop, dial).
-        const peerLifecycleHandlers = { connect: [], disconnect: [] };
         return {
           node: {
             _wasmNode: p2pNode,
@@ -350,9 +360,12 @@ export async function createSharedLibp2pStack({
               await p2pNode.dial(addrStr);
             },
             addEventListener: (event, cb) => {
-              if (event === "peer:connect" || event === "peer:disconnect") {
-                // WASM P2pNode does not currently forward peer lifecycle events
-                // from Rust; consumers should rely on gossipsub message delivery.
+              if (event === "peer:connect") {
+                peerLifecycleHandlers.connect.push(cb);
+              } else if (event === "peer:disconnect") {
+                peerLifecycleHandlers.disconnect.push(cb);
+              } else if (event === "message") {
+                handlers.push((msg) => cb({ detail: { data: new TextEncoder().encode(msg) } }));
               }
             },
           },
