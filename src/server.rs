@@ -1155,13 +1155,25 @@ async fn route_path(site_dir: &str, path: &str) -> Result<(Vec<u8>, &'static str
     };
 
     let content_type = content_type_for_path(&file_path);
-    let body = fs::read(&file_path).await.map_err(|err| {
-        if err.kind() == io::ErrorKind::NotFound {
-            RouteError::NotFound
-        } else {
-            RouteError::Io(err)
+    let body = match fs::read(&file_path).await {
+        Ok(data) => data,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            // Try `.html` fallback so `/chat` resolves to `chat.html`.
+            let html_fallback = file_path.with_extension("html");
+            if html_fallback != file_path {
+                fs::read(&html_fallback).await.map_err(|err| {
+                    if err.kind() == io::ErrorKind::NotFound {
+                        RouteError::NotFound
+                    } else {
+                        RouteError::Io(err)
+                    }
+                })?
+            } else {
+                return Err(RouteError::NotFound);
+            }
         }
-    })?;
+        Err(err) => return Err(RouteError::Io(err)),
+    };
 
     Ok((body, content_type))
 }
