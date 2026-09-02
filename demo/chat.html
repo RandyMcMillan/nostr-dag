@@ -277,6 +277,7 @@
     import { createSharedLibp2pStack, DEFAULT_BOOTSTRAP_PEERS } from './shared/libp2p-stack.mjs';
     import { attachChatNode, sendChat, sendChatJoin, sendChatPing, resetChat, onMessage, onPeer, onPing } from './shared/chat.mjs';
     import { gitContextToHref, gitContextToLabel, parseGitContextParam } from './shared/git-chat-link.mjs';
+    import { isSafari } from './shared/browser-detect.mjs';
     import { multiaddr } from 'https://esm.sh/@multiformats/multiaddr';
 
     const wasmModuleUrl = new URL('./pkg/nostr_dag.js', window.location.href).href;
@@ -409,10 +410,15 @@
     async function initLibp2pNode() {
       if (nodeStarted) return;
       startNodeBtn.disabled = true;
+      const safari = isSafari();
+      if (safari) {
+        appendMessage({ from: 'system', text: 'Safari detected — using JS libp2p stack for compatibility', timestamp: Date.now() });
+      }
       try {
         const { node, bootstrapPeers } = await createSharedLibp2pStack({
           bootstrapPeers: DEFAULT_BOOTSTRAP_PEERS,
           wasmModule,
+          useWasmP2p: safari ? false : true,
           onLog(level, text) {
             // Log libp2p events to chat stream for diagnostics
             if (level === 'error' || level === 'warn' || text.includes('dial') || text.includes('connected') || text.includes('started')) {
