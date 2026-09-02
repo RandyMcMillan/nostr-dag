@@ -91,6 +91,13 @@
       border-radius: 3px;
       background: var(--bg);
       color: var(--fg);
+      min-width: 0;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+    .chat-input-row input:focus {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
     }
     /* Collapsible chat log */
     .chat-log {
