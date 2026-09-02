@@ -1,6 +1,6 @@
 [package]
 name = "nostr-dag"
-version = "0.22.1"
+version = "0.22.2"
 edition = "2021"
 repository = "https://github.com/RandyMcMillan/nostr-dag"
 license = "MIT"
