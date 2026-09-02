@@ -81,8 +81,11 @@ test('chat message propagates between Chrome and Safari', { timeout: 120_000 }, 
     chromeBrowser = await chromium.launch({ headless: true });
     safariBrowser = await webkit.launch({ headless: true });
 
-    const chromePage = await chromeBrowser.newPage();
-    const safariPage = await safariBrowser.newPage();
+    const chromeContext = await chromeBrowser.newContext({ bypassCSP: true, ignoreHTTPSErrors: true });
+    const safariContext = await safariBrowser.newContext({ bypassCSP: true, ignoreHTTPSErrors: true });
+
+    const chromePage = await chromeContext.newPage();
+    const safariPage = await safariContext.newPage();
 
     const chromeLogs = [];
     const safariLogs = [];
@@ -119,8 +122,9 @@ test('chat message propagates between Chrome and Safari', { timeout: 120_000 }, 
     // Check chat contents for diagnostics
     const chromeChat = await chromePage.evaluate(() => document.getElementById('chatMessages')?.innerText || '');
     const safariChat = await safariPage.evaluate(() => document.getElementById('chatMessages')?.innerText || '');
-    console.log('--- Chrome chat ---\n', chromeChat.slice(0, 2000));
-    console.log('--- Safari chat ---\n', safariChat.slice(0, 2000));
+    const filterChat = (text) => text.split('\n').filter(l => l.includes('Node started') || l.includes('Dialed') || l.includes('Dial failed') || l.includes('Peer joined') || l.includes('Node failed')).join('\n');
+    console.log('--- Chrome chat key events ---\n', filterChat(chromeChat));
+    console.log('--- Safari chat key events ---\n', filterChat(safariChat));
 
     // Send a unique message from Chrome
     const testMessage = `cross-browser-${Date.now()}`;
@@ -145,8 +149,8 @@ test('chat message propagates between Chrome and Safari', { timeout: 120_000 }, 
     // Dump final chat contents
     const chromeChatFinal = await chromePage.evaluate(() => document.getElementById('chatMessages')?.innerText || '');
     const safariChatFinal = await safariPage.evaluate(() => document.getElementById('chatMessages')?.innerText || '');
-    console.log('--- Chrome chat final ---\n', chromeChatFinal.slice(0, 2000));
-    console.log('--- Safari chat final ---\n', safariChatFinal.slice(0, 2000));
+    console.log('--- Chrome chat final key events ---\n', filterChat(chromeChatFinal));
+    console.log('--- Safari chat final key events ---\n', filterChat(safariChatFinal));
 
     assert.ok(received, `Safari should receive the message from Chrome: "${testMessage}"`);
 

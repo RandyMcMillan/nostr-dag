@@ -195,6 +195,7 @@
   <script type="module">
     import { createSharedLibp2pStack, DEFAULT_BOOTSTRAP_PEERS } from './shared/libp2p-stack.mjs';
     import { attachChatNode, sendChat, onMessage } from './shared/chat.mjs';
+    import { multiaddr } from 'https://esm.sh/@multiformats/multiaddr';
 
     const peerIdDisplay = document.getElementById('peerIdDisplay');
     const nodeStatusDisplay = document.getElementById('nodeStatusDisplay');
@@ -237,9 +238,38 @@
         const { node, bootstrapPeers } = await createSharedLibp2pStack({
           bootstrapPeers: DEFAULT_BOOTSTRAP_PEERS,
           onLog(level, text) {
-            // best-effort only
+            // Log libp2p events to chat stream for diagnostics
+            if (level === 'error' || level === 'warn' || text.includes('dial') || text.includes('connected') || text.includes('started')) {
+              appendMessage({ from: 'system', text: `[p2p ${level}] ${text}`, timestamp: Date.now() });
+            }
           },
         });
+
+        // Explicitly dial local native peers so the browser joins the gossipsub mesh
+        // immediately instead of waiting for bootstrap interval (60s).
+        try {
+          const res = await fetch('/peers', { cache: 'no-store' });
+          if (res.ok) {
+            const peers = await res.json();
+            for (const peer of peers) {
+              if (peer.kind !== 'native' || peer.source !== 'localhost') continue;
+              const m = (peer.detail || '').match(/addrs=([^\n]+)/);
+              const addrs = m ? m[1].split(',').map(s => s.trim()).filter(Boolean) : [];
+              for (const addr of addrs) {
+                if (!addr.includes('/ws') && !addr.includes('/wss')) continue;
+                const full = addr.includes(`/p2p/${peer.peer_id}`) ? addr : `${addr}/p2p/${peer.peer_id}`;
+                try {
+                  await node.dial(multiaddr(full));
+                  appendMessage({ from: 'system', text: `Dialed native peer ${full.slice(0, 50)}…`, timestamp: Date.now() });
+                } catch (dialErr) {
+                  appendMessage({ from: 'system', text: `Dial failed: ${dialErr.message || dialErr}`, timestamp: Date.now() });
+                }
+              }
+            }
+          }
+        } catch (fetchErr) {
+          appendMessage({ from: 'system', text: `Fetch peers failed: ${fetchErr.message}`, timestamp: Date.now() });
+        }
 
         node.addEventListener('peer:connect', (event) => {
           const peerId = event?.detail?.peerId?.toString?.() || event?.detail?.remotePeer?.toString?.() || 'unknown';
@@ -268,7 +298,10 @@
         nodeStatusDisplay.className = 'status ok';
         chatInput.disabled = false;
         sendBtn.disabled = false;
-        chatMessages.innerHTML = '';
+        // Replace placeholder instead of wiping history (dial logs already appended)
+        if (chatMessages.children.length === 1 && chatMessages.children[0].classList.contains('muted')) {
+          chatMessages.innerHTML = '';
+        }
         appendMessage({ from: 'system', text: 'Node started. Bootstrap peers: ' + bootstrapPeers.length, timestamp: Date.now() });
       } catch (e) {
         startNodeBtn.disabled = false;
