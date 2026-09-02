@@ -118,8 +118,34 @@
       background: var(--bg);
       color: var(--fg);
     }
-    @media (max-width: 600px) {
-      .panels { grid-template-columns: 1fr; }
+    @media (max-width: 640px) {
+      body { padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); }
+      h1 { font-size: 1.1rem; }
+      .panels { grid-template-columns: 1fr; gap: 6px; }
+      .chat-page .panel { padding: 10px 12px; }
+      .panel h2 { font-size: 0.9rem; }
+      .stats { font-size: 0.85rem; }
+      /* Larger touch targets for buttons */
+      .chat-page button {
+        padding: 8px 14px;
+        font-size: 0.9rem;
+        min-height: 40px;
+      }
+      .chat-messages {
+        padding: 8px 10px;
+        font-size: 0.9rem;
+      }
+      .chat-message { margin-bottom: 4px; }
+      .chat-message .time { font-size: 0.72rem; }
+      .chat-input-row {
+        gap: 8px;
+        margin-top: 8px;
+      }
+      .chat-input-row input {
+        padding: 8px 10px;
+        font-size: 1rem; /* prevent iOS zoom on focus */
+        min-height: 40px;
+      }
     }
   </style>
 </head>
