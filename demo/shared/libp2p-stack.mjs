@@ -318,7 +318,8 @@ export async function createSharedLibp2pStack({
           updated_at: Date.now(),
         });
         // Return a minimal adapter that matches the JS node surface used by
-        // callers (publish, subscribe, peerId string, stop).
+        // callers (publish, subscribe, peerId string, stop, dial).
+        const peerLifecycleHandlers = { connect: [], disconnect: [] };
         return {
           node: {
             _wasmNode: p2pNode,
@@ -337,6 +338,17 @@ export async function createSharedLibp2pStack({
             },
             getMultiaddrs: () => [],
             stop: async () => {},
+            dial: async (addr) => {
+              const addrStr = typeof addr === "string" ? addr : addr?.toString?.();
+              if (!addrStr) throw new TypeError("dial requires a multiaddr string");
+              await p2pNode.dial(addrStr);
+            },
+            addEventListener: (event, cb) => {
+              if (event === "peer:connect" || event === "peer:disconnect") {
+                // WASM P2pNode does not currently forward peer lifecycle events
+                // from Rust; consumers should rely on gossipsub message delivery.
+              }
+            },
           },
           bootstrapPeers: peers,
         };
