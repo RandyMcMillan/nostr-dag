@@ -138,6 +138,10 @@ export function attachChatNode(node) {
 function handleIncomingChatRaw(raw, relay) {
   const ev = parseChatEvent(raw);
   if (!ev) return;
+  // Ignore echoes of our own messages — we already displayed them locally
+  // when sendChat() / sendChatPing() / sendChatJoin() / sendChatLeave()
+  // appended the self entry.
+  if (ev.from === state.localPeerId) return;
 
   // Emit peer lifecycle events for join/leave/ping
   if (ev.type === 'join' && typeof state.onPeerHandler === 'function') {
