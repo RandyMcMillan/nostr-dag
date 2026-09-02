@@ -1515,11 +1515,16 @@ pub mod native {
                     noise::Config::new,
                     yamux::Config::default,
                 )?
+                .with_websocket(
+                    noise::Config::new,
+                    yamux::Config::default,
+                ).await?
                 .with_behaviour(|_| behaviour)?
                 .with_swarm_config(|cfg| cfg.with_idle_connection_timeout(Duration::from_secs(60)))
                 .build();
 
             swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse::<Multiaddr>()?)?;
+            swarm.listen_on("/ip4/0.0.0.0/tcp/0/ws".parse::<Multiaddr>()?)?;
 
             let (tx, mut cmd_rx) = mpsc::channel::<String>(64);
             let (event_tx, event_rx) = mpsc::channel::<String>(256);

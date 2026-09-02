@@ -143,15 +143,25 @@ export function attachChatNode(node) {
 }
 
 export async function sendChat(text) {
-  if (!state.node?.services?.pubsub?.publish) {
-    throw new Error('Chat node not connected');
-  }
   const trimmed = String(text).trim();
   if (!trimmed) {
     throw new Error('Empty message');
   }
   const payload = buildChatMessage(state.localPeerId, trimmed);
-  await state.node.services.pubsub.publish(TOPIC, new TextEncoder().encode(payload));
+
+  // Always broadcast via BroadcastChannel so same-origin tabs see the message
+  // immediately even before libp2p mesh forms.
+  broadcastChannelSend(payload);
+
+  // Also publish over libp2p gossipsub when connected.
+  if (state.node?.services?.pubsub?.publish) {
+    try {
+      await state.node.services.pubsub.publish(TOPIC, new TextEncoder().encode(payload));
+    } catch {
+      // best-effort; BC already delivered locally
+    }
+  }
+
   const entry = {
     from: state.localPeerId || 'me',
     text: trimmed,
@@ -189,4 +199,8 @@ export function resetChat() {
   state.messages = [];
   state.node = null;
   state.localPeerId = '';
+  if (state.bc) {
+    try { state.bc.close(); } catch {}
+    state.bc = null;
+  }
 }
