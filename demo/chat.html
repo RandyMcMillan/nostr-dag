@@ -7,26 +7,6 @@
   <link rel="icon" href="./shared/favicon.ico" />
   <link rel="stylesheet" href="./shared/page.css" />
   <style>
-    :root {
-      --ok: #2e7d32;
-      --warn: #f9a825;
-      --error: #c62828;
-      --info: #1565c0;
-      --bg: #ffffff;
-      --fg: #111111;
-      --muted: #666666;
-      --border: #e0e0e0;
-      --panel: #f5f5f5;
-    }
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --bg: #0d0d0d;
-        --fg: #e0e0e0;
-        --muted: #999999;
-        --border: #333333;
-        --panel: #1a1a1a;
-      }
-    }
     html, body {
       height: 100vh;
       margin: 0;
@@ -34,8 +14,6 @@
     }
     body {
       font-family: system-ui, -apple-system, sans-serif;
-      background: var(--bg);
-      color: var(--fg);
       padding: 6px 8px;
       line-height: 1.2;
       font-size: 0.8rem;
@@ -67,11 +45,11 @@
       gap: 4px;
       flex-shrink: 0;
     }
-    .panel {
-      background: var(--panel);
-      border: 1px solid var(--border);
+    /* Override shared .panel for compact chat layout */
+    .chat-page .panel {
       border-radius: 4px;
       padding: 6px 8px;
+      margin: 0;
     }
     .panel h2 { font-size: 0.8rem; margin: 0 0 3px; }
     .stats {
@@ -82,22 +60,15 @@
       gap: 1px;
     }
     .stats > span { white-space: nowrap; }
-    .mono { font-family: ui-monospace, SFMono-Regular, monospace; }
-    .muted { color: var(--muted); }
     .status { font-weight: 600; }
-    .status.ok { color: var(--ok); }
-    button {
-      background: var(--info);
-      color: #fff;
-      border: none;
-      border-radius: 3px;
+    .status.ok { color: var(--status-available); }
+    /* Override shared button for compact chat layout */
+    .chat-page button {
       padding: 2px 6px;
       font-size: 0.75rem;
-      cursor: pointer;
       margin-left: 4px;
     }
-    button:disabled { opacity: 0.5; cursor: not-allowed; }
-    button.reset { background: var(--error); }
+    button.reset { background: var(--status-unavailable); border-color: var(--status-unavailable); }
     .chat-panel {
       margin-top: 4px;
       display: flex;
@@ -122,10 +93,10 @@
     }
     .chat-message .from {
       font-weight: 600;
-      color: var(--info);
+      color: var(--accent);
     }
     .chat-message .from.self {
-      color: var(--ok);
+      color: var(--status-available);
     }
     .chat-message .time {
       color: var(--muted);
@@ -152,7 +123,7 @@
     }
   </style>
 </head>
-<body>
+<body class="chat-page">
   <div class="wrap">
     <div class="header-row">
       <div>
@@ -167,7 +138,7 @@
         <h2>Node</h2>
         <div class="stats">
           <span><span class="muted">Peer ID:</span> <span id="peerIdDisplay" class="mono">—</span></span>
-          <span><span class="muted">Status:</span> <span id="nodeStatusDisplay" class="status">off</span></span>
+          <span><span class="muted">Status:</span> <span id="nodeStatusDisplay" class="status status-idle"><span class="status-dot"></span><span class="status-label">off</span></span></span>
           <span><span class="muted">Connected:</span> <span id="connectedDisplay">0</span></span>
           <button id="startNodeBtn" type="button">Start</button>
           <button id="resetNodeBtn" type="button" class="reset">Reset</button>
@@ -330,8 +301,8 @@
         await attachChatNode(node);
         nodeStarted = true;
         peerIdDisplay.textContent = node.peerId.toString();
-        nodeStatusDisplay.textContent = 'started';
-        nodeStatusDisplay.className = 'status ok';
+        nodeStatusDisplay.className = 'status status-available';
+        nodeStatusDisplay.querySelector('.status-label').textContent = 'started';
         chatInput.disabled = false;
         sendBtn.disabled = false;
         // Replace placeholder instead of wiping history (dial logs already appended)
@@ -366,8 +337,8 @@
       chatMessages.innerHTML = '<div class="muted">Start the node to join the chat…</div>';
       messageCount.textContent = '0';
       peerIdDisplay.textContent = '—';
-      nodeStatusDisplay.textContent = 'off';
-      nodeStatusDisplay.className = 'status';
+      nodeStatusDisplay.className = 'status status-idle';
+      nodeStatusDisplay.querySelector('.status-label').textContent = 'off';
       connectedDisplay.textContent = '0';
       chatInput.disabled = true;
       sendBtn.disabled = true;
@@ -384,8 +355,8 @@
         chatMessages.innerHTML = '<div class="muted">Start the node to join the chat…</div>';
         messageCount.textContent = '0';
         peerIdDisplay.textContent = '—';
-        nodeStatusDisplay.textContent = 'off';
-        nodeStatusDisplay.className = 'status';
+        nodeStatusDisplay.className = 'status status-idle';
+        nodeStatusDisplay.querySelector('.status-label').textContent = 'off';
         connectedDisplay.textContent = '0';
         chatInput.disabled = true;
         sendBtn.disabled = true;
